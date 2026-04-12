@@ -30,6 +30,12 @@
   </a>
 </p>
 
+<p align="center">
+  <video src="docs/demo.mp4" width="720" controls muted autoplay loop></video>
+</p>
+
+> If the video doesn't play, [download it here](docs/demo.mp4).
+
 
 ---
 
