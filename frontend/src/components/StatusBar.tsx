@@ -76,7 +76,9 @@ const StatusBar: React.FC<StatusBarProps> = ({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 16,
+        flexWrap: 'wrap',
+        rowGap: 4,
+        columnGap: 16,
         padding: '6px 16px',
         fontSize: 12,
         color: '#c0c0c0',
@@ -180,8 +182,10 @@ const StatusBar: React.FC<StatusBarProps> = ({
         <span style={{ opacity: 0.7 }}>{t(modeLabelKeys[mode])}</span>
       </div>
 
+      {/* Force wrap to a second row here */}
+      <div style={{ flexBasis: '100%', height: 0 }} />
+
       {/* Cooldown enable toggle */}
-      <div style={{ width: 1, height: 14, background: '#333' }} />
       <label
         title={t('status.cooldown_tooltip')}
         style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}
