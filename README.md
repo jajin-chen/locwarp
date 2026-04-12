@@ -30,11 +30,7 @@
   </a>
 </p>
 
-<p align="center">
-  <video src="docs/demo.mp4" width="720" controls muted autoplay loop></video>
-</p>
-
-> 若影片無法播放,請點 [docs/demo.mp4](docs/demo.mp4) 直接下載觀看。
+https://github.com/user-attachments/assets/6e06df87-1be1-4635-a9fd-6d5448dc8361
 
 ---
 
