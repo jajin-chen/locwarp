@@ -14,9 +14,28 @@ logger = logging.getLogger(__name__)
 
 
 def _open_native(path: Path) -> None:
-    """Open a file or folder with the OS default application."""
+    """Open a file or folder with the OS default application.
+
+    On Windows, when the calling process owns the foreground, a freshly
+    spawned Explorer window opens *behind* it (Windows foreground lock).
+    Call AllowSetForegroundWindow(ASFW_ANY) so the new Explorer process
+    can claim foreground itself, then launch via Explorer directly so the
+    window genuinely comes to front instead of just blinking in the
+    taskbar.
+    """
     if sys.platform == "win32":
-        os.startfile(str(path))  # type: ignore[attr-defined]
+        try:
+            import ctypes
+            ASFW_ANY = -1
+            ctypes.windll.user32.AllowSetForegroundWindow(ASFW_ANY)
+        except Exception:
+            logger.debug("AllowSetForegroundWindow failed; explorer may open behind", exc_info=True)
+        if path.is_dir():
+            # explorer.exe with a folder path foregrounds the window reliably,
+            # whereas os.startfile sometimes does not.
+            subprocess.Popen(["explorer.exe", str(path)])
+        else:
+            os.startfile(str(path))  # type: ignore[attr-defined]
     elif sys.platform == "darwin":
         subprocess.Popen(["open", str(path)])
     else:
