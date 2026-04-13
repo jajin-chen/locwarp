@@ -306,6 +306,13 @@ const MapView: React.FC<MapViewProps> = ({
     waypointMarkersRef.current = [];
 
     waypoints.forEach((wp) => {
+      // index 0 is the implicit start point; show it as "S" in green so the
+      // map matches the side panel ("起點 / Start"), and number the rest 1..N.
+      const isStart = wp.index === 0;
+      const label = isStart ? 'S' : String(wp.index);
+      const fillTop = isStart ? '#66bb6a' : '#ffb74d';
+      const fillBot = isStart ? '#43a047' : '#ff9800';
+      const textFill = isStart ? '#1b5e20' : '#e65100';
       const wpIcon = L.divIcon({
         className: 'waypoint-marker',
         html: `<svg width="32" height="44" viewBox="0 0 32 44">
@@ -314,25 +321,25 @@ const MapView: React.FC<MapViewProps> = ({
               <feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#000" flood-opacity="0.35"/>
             </filter>
             <linearGradient id="wpGrad${wp.index}" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#ffb74d"/>
-              <stop offset="100%" stop-color="#ff9800"/>
+              <stop offset="0%" stop-color="${fillTop}"/>
+              <stop offset="100%" stop-color="${fillBot}"/>
             </linearGradient>
           </defs>
           <ellipse cx="16" cy="41" rx="5" ry="1.8" fill="#000" opacity="0.15"/>
           <path d="M16 2C8.8 2 3 7.8 3 15c0 10 13 26 13 26s13-16 13-26C29 7.8 23.2 2 16 2z"
                 fill="url(#wpGrad${wp.index})" filter="url(#wpShadow${wp.index})"/>
           <circle cx="16" cy="15" r="8" fill="#ffffff" opacity="0.95"/>
-          <text x="16" y="19" text-anchor="middle" fill="#e65100" font-size="12" font-weight="700" font-family="system-ui">${wp.index + 1}</text>
+          <text x="16" y="19" text-anchor="middle" fill="${textFill}" font-size="12" font-weight="700" font-family="system-ui">${label}</text>
         </svg>`,
         iconSize: [32, 44],
         iconAnchor: [16, 41],
       });
 
       const marker = L.marker([wp.lat, wp.lng], { icon: wpIcon }).addTo(map);
-      marker.bindTooltip(t('panel.waypoint_num', { n: wp.index + 1 }), {
-        direction: 'top',
-        offset: [0, -14],
-      });
+      marker.bindTooltip(
+        isStart ? tRef.current('panel.waypoint_start') : tRef.current('panel.waypoint_num', { n: wp.index }),
+        { direction: 'top', offset: [0, -14] },
+      );
       waypointMarkersRef.current.push(marker);
     });
   }, [waypoints]);

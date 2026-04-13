@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from services.location_service import DeviceLostError
 
 from models.schemas import (
+    MovementMode,
     TeleportRequest,
     NavigateRequest,
     LoopRequest,
@@ -144,6 +146,36 @@ def _coord_fmt():
 
 # ── Simulation modes ─────────────────────────────────────
 
+class ApplySpeedRequest(BaseModel):
+    mode: MovementMode = MovementMode.WALKING
+    speed_kmh: float | None = None
+    speed_min_kmh: float | None = None
+    speed_max_kmh: float | None = None
+
+
+@router.post("/apply-speed")
+async def apply_speed(req: ApplySpeedRequest):
+    """Hot-swap the active navigation's speed profile. The current
+    _move_along_route loop re-interpolates from the current position
+    with the new speed; already-completed progress is kept."""
+    from config import resolve_speed_profile
+    engine = await _engine()
+    profile = resolve_speed_profile(
+        req.mode.value,
+        speed_kmh=req.speed_kmh,
+        speed_min_kmh=req.speed_min_kmh,
+        speed_max_kmh=req.speed_max_kmh,
+    )
+    swapped = engine.apply_speed(profile)
+    if not swapped:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "no_active_route",
+                    "message": "目前沒有進行中的路線,無法套用新速度"},
+        )
+    return {"status": "applied", "speed_mps": profile["speed_mps"]}
+
+
 @router.post("/teleport")
 async def teleport(req: TeleportRequest):
     engine = await _engine()
@@ -276,8 +308,20 @@ async def restore():
     return {"status": "restored"}
 
 
+@router.post("/stop")
+async def stop_movement():
+    """Stop active movement without clearing the simulated location.
+    Keeps the device at its last reported position instead of restoring
+    real GPS — restore() is a separate endpoint for that."""
+    engine = await _engine()
+    await engine.stop()
+    return {"status": "stopped"}
+
+
 @router.delete("/simulation")
 async def stop_simulation():
+    """Legacy endpoint: stop + restore. Kept for backwards compatibility,
+    prefer /stop (movement only) or /restore (clear location)."""
     engine = await _engine()
     await engine.restore()
     return {"status": "stopped"}

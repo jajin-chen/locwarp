@@ -17,29 +17,7 @@ async def list_devices():
     return await dm.discover_devices()
 
 
-# ── WiFi connection ─────────────────────────────────────
-
-class WifiConnectRequest(BaseModel):
-    ip: str
-
-
-@router.post("/wifi/connect")
-async def wifi_connect(req: WifiConnectRequest):
-    """Connect to an iOS device over WiFi by IP address."""
-    from main import app_state
-    dm = _dm()
-    try:
-        info = await dm.connect_wifi(req.ip)
-        await app_state.create_engine_for_device(info.udid)
-        return {
-            "status": "connected",
-            "udid": info.udid,
-            "name": info.name,
-            "ios_version": info.ios_version,
-            "connection_type": "Network",
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# /wifi/connect (legacy direct-IP WiFi for iOS <17) removed in v0.1.49.
 
 
 @router.get("/wifi/scan")
@@ -62,6 +40,7 @@ class WifiTunnelConnectRequest(BaseModel):
 async def wifi_tunnel_connect(req: WifiTunnelConnectRequest):
     """Connect to a device via an existing WiFi tunnel (RSD address/port)."""
     from main import app_state
+    from core.device_manager import UnsupportedIosVersionError
     dm = _dm()
     try:
         info = await dm.connect_wifi_tunnel(req.rsd_address, req.rsd_port)
@@ -73,6 +52,20 @@ async def wifi_tunnel_connect(req: WifiTunnelConnectRequest):
             "ios_version": info.ios_version,
             "connection_type": "Network",
         }
+    except UnsupportedIosVersionError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "ios_unsupported",
+                "message": (
+                    f"偵測到 iOS {e.version},LocWarp 自 v0.1.49 起僅支援 "
+                    f"iOS {UnsupportedIosVersionError.MIN_VERSION} 以上。"
+                    f"請將裝置升級至 iOS {UnsupportedIosVersionError.MIN_VERSION} 或更新版本後再連線。"
+                ),
+                "ios_version": e.version,
+                "min_version": UnsupportedIosVersionError.MIN_VERSION,
+            },
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -754,11 +747,26 @@ async def wifi_tunnel_start_and_connect(req: WifiTunnelStartRequest):
 @router.post("/{udid}/connect")
 async def connect_device(udid: str):
     from main import app_state
+    from core.device_manager import UnsupportedIosVersionError
     dm = _dm()
     try:
         await dm.connect(udid)
         await app_state.create_engine_for_device(udid)
         return {"status": "connected", "udid": udid}
+    except UnsupportedIosVersionError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "ios_unsupported",
+                "message": (
+                    f"偵測到 iOS {e.version},LocWarp 自 v0.1.49 起僅支援 "
+                    f"iOS {UnsupportedIosVersionError.MIN_VERSION} 以上。"
+                    f"請將裝置升級至 iOS {UnsupportedIosVersionError.MIN_VERSION} 或更新版本後再連線。"
+                ),
+                "ios_version": e.version,
+                "min_version": UnsupportedIosVersionError.MIN_VERSION,
+            },
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

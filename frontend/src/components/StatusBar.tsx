@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { SimMode } from '../hooks/useSimulation';
 import { useT } from '../i18n';
 import LangToggle from './LangToggle';
+import pkg from '../../package.json';
+
+const APP_VERSION = (pkg as { version: string }).version;
 
 interface Position {
   lat: number;
@@ -281,14 +284,19 @@ const StatusBar: React.FC<StatusBarProps> = ({
       {/* Spacer to push right-aligned items */}
       <div style={{ flex: 1 }} />
 
-      {/* Language toggle */}
-      <LangToggle />
-      <div style={{ width: 1, height: 14, background: '#333' }} />
-
-      {/* Timestamp */}
-      <span style={{ opacity: 0.4, fontSize: 10 }}>
-        {new Date().toLocaleTimeString(undefined, { hour12: false })}
-      </span>
+      {/* Right cluster: app version on top, lang/time below */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, lineHeight: 1.1 }}>
+        <span style={{ fontSize: 9, opacity: 0.45, fontFamily: 'monospace' }}>
+          v{APP_VERSION}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <LangToggle />
+          <div style={{ width: 1, height: 12, background: '#333' }} />
+          <span style={{ opacity: 0.4, fontSize: 10 }}>
+            {new Date().toLocaleTimeString(undefined, { hour12: false })}
+          </span>
+        </div>
+      </div>
     </div>
   );
 };

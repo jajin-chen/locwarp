@@ -31,6 +31,8 @@ export const STRINGS = {
   'status.restore_tooltip': { zh: '清除 iPhone 上的虛擬定位,恢復真實 GPS', en: 'Clear the virtual location and restore real GPS' },
   'status.restore_success': { zh: '已清除虛擬定位', en: 'Virtual location cleared' },
   'status.restore_failed': { zh: '清除失敗', en: 'Clear failed' },
+  'status.restore_in_progress': { zh: '正在清除虛擬定位,請稍候...', en: 'Clearing virtual location, please wait...' },
+  'status.restore_success_wait': { zh: '已清除虛擬定位,請等待生效', en: 'Virtual location cleared, please wait for it to take effect' },
   'status.open_log': { zh: 'Log 資料夾', en: 'Log Folder' },
   'status.open_log_tooltip': { zh: '開啟 log 資料夾,方便將 backend.log 附到 Issue', en: 'Open the log folder so you can attach backend.log to an Issue' },
   'status.open_log_failed': { zh: '無法開啟 log', en: 'Failed to open log' },
@@ -53,6 +55,10 @@ export const STRINGS = {
   'panel.speed': { zh: '速度', en: 'Speed' },
   'panel.custom_speed': { zh: '自訂', en: 'Custom' },
   'panel.custom_speed_active': { zh: '使用自訂速度', en: 'Using custom speed' },
+  'panel.apply_speed': { zh: '套用新速度', en: 'Apply new speed' },
+  'panel.apply_speed_tooltip': { zh: '套用目前輸入框中的速度到進行中的路線', en: 'Apply the speed in the inputs to the running route' },
+  'panel.apply_speed_success': { zh: '已套用新速度', en: 'New speed applied' },
+  'panel.apply_speed_failed': { zh: '套用失敗', en: 'Apply failed' },
   'panel.speed_range': { zh: '隨機速度範圍 (km/h)', en: 'Random speed range (km/h)' },
   'panel.speed_range_min': { zh: '最小', en: 'Min' },
   'panel.speed_range_max': { zh: '最大', en: 'Max' },
@@ -92,17 +98,18 @@ export const STRINGS = {
   'device.scan_tooltip': { zh: '掃描 USB 裝置', en: 'Scan USB devices' },
   'wifi.section_title': { zh: 'WiFi 無線連線', en: 'Wi-Fi Connection' },
   'wifi.section_hint': { zh: '(USB 模式不用連線)', en: '(USB mode: no connection needed)' },
+  'device.ios_unsupported_label': { zh: 'iOS {version} 不支援(需 iOS 17+)', en: 'iOS {version} not supported (requires iOS 17+)' },
   'wifi.warning_label': { zh: '注意事項', en: 'Notice' },
   'wifi.warning_title': { zh: '慎用:USB 拔除模式相容性說明', en: 'Caution: USB-free mode compatibility' },
   'wifi.warning_body': {
     zh: '本 WiFi Tunnel(USB 拔除)模式透過 pymobiledevice3 的 RemotePairing 協議與 iOS 裝置建立 TLS-PSK 加密通道,再於其上封裝 TCP tunnel 以存取 RemoteXPC / RSD 服務。需 Python 3.13+ 的原生 TLS-PSK 支援,且必須先經 USB 配對、取得 remote pair record 方可使用。\n\n由於各家網路卡驅動、VPN 客戶端、第三方防火牆、路由器 mDNS/Bonjour 支援與作業系統修補等級差異,此模式並非在所有 Windows 主機上皆能穩定建立 Tunnel,部分環境可能出現以下情況:\n\n• RemotePairing 握手失敗或 RSD 連線逾時\n• 裝置 IP/Port 無法被自動探索\n• 必須以系統管理員身分執行\n• iPhone 螢幕鎖定或 WiFi 瞬斷時 tunnel 斷線須重連\n\n若您的環境無法成功建立 Tunnel,建議改用 USB 連線;USB 模式透過 usbmuxd 相容性最佳且不需此側欄。',
-    en: 'WiFi Tunnel (USB-free) mode uses pymobiledevice3\'s RemotePairing protocol to open a TLS-PSK encrypted channel with the iOS device, then layers a TCP tunnel on top for access to RemoteXPC / RSD services. Python 3.13+ is required (for native TLS-PSK) and the device must have been paired over USB first so that a remote pair record exists.\n\nBecause NIC drivers, VPN clients, third-party firewalls, router mDNS/Bonjour behavior and OS patch levels vary widely, this mode does not work reliably on every Windows host. In some environments you may see:\n\n• RemotePairing handshake failure or RSD connection timeout\n• Device IP/port cannot be auto-discovered\n• Requirement to run as Administrator\n• Tunnel drops and needs reconnection when the iPhone screen locks or Wi-Fi briefly fluctuates\n\nIf the tunnel cannot be established in your environment, please use a USB connection instead — USB mode goes through usbmuxd, has the best compatibility, and does not require this panel.',
+    en: 'WiFi Tunnel (USB-free) mode uses pymobiledevice3\'s RemotePairing protocol to open a TLS-PSK encrypted channel with the iOS device, then layers a TCP tunnel on top for access to RemoteXPC / RSD services. Python 3.13+ is required (for native TLS-PSK) and the device must have been paired over USB first so that a remote pair record exists.\n\nBecause NIC drivers, VPN clients, third-party firewalls, router mDNS/Bonjour behavior and OS patch levels vary widely, this mode does not work reliably on every Windows host. In some environments you may see:\n\n• RemotePairing handshake failure or RSD connection timeout\n• Device IP/port cannot be auto-discovered\n• Requirement to run as Administrator\n• Tunnel drops and needs reconnection when the iPhone screen locks or Wi-Fi briefly fluctuates\n\nIf the tunnel cannot be established in your environment, please use a USB connection instead, USB mode goes through usbmuxd, has the best compatibility, and does not require this panel.',
   },
   'wifi.warning_ok': { zh: '我已了解', en: 'Got it' },
   'wifi.repair_button': { zh: '重新配對', en: 'Re-pair' },
   'wifi.repair_tooltip': { zh: '用 USB 重建 RemotePairing 記錄,修復 WiFi Tunnel 無法啟動的問題', en: 'Rebuild the RemotePairing record via USB to fix WiFi Tunnel startup failures' },
   'wifi.repair_confirm_title': { zh: '重新配對 iPhone', en: 'Re-pair iPhone' },
-  'wifi.repair_confirm_body': { zh: '此動作會用 USB 重建 RemotePairing 記錄。過程中 iPhone 可能會跳「信任這台電腦」,請解鎖並按信任。LocWarp 必須以系統管理員身分執行。\n\n確定要繼續嗎?', en: 'This rebuilds the RemotePairing record via USB. Your iPhone may show "Trust This Computer" — unlock it and tap Trust. LocWarp must be running as Administrator.\n\nContinue?' },
+  'wifi.repair_confirm_body': { zh: '此動作會用 USB 重建 RemotePairing 記錄。過程中 iPhone 可能會跳「信任這台電腦」,請解鎖並按信任。LocWarp 必須以系統管理員身分執行。\n\n確定要繼續嗎?', en: 'This rebuilds the RemotePairing record via USB. Your iPhone may show "Trust This Computer", unlock it and tap Trust. LocWarp must be running as Administrator.\n\nContinue?' },
   'wifi.repair_running': { zh: '配對中...請在 iPhone 上按「信任」', en: 'Pairing... tap Trust on the iPhone' },
   'wifi.repair_success': { zh: '配對成功!現在可以試 WiFi Tunnel 了', en: 'Paired! You can try WiFi Tunnel now' },
   'wifi.repair_failed': { zh: '配對失敗', en: 'Pairing failed' },
@@ -128,15 +135,15 @@ export const STRINGS = {
   'wifi.tunnel_admin_hint': { zh: '請使用身分管理員開啟 LocWarp,必須先通過 USB 信任。', en: 'Run LocWarp as Administrator. Device must be paired via USB first.' },
   'wifi.legacy_connect': { zh: 'Connect', en: 'Connect' },
   'wifi.legacy_connecting': { zh: '連線中...', en: 'Connecting...' },
-  'wifi.legacy_hint': { zh: 'iPhone 解鎖並已配對即可直接連線。', en: 'iPhone unlocked and paired — connect directly.' },
-  'wifi.device_not_detected': { zh: '未偵測到裝置,請確認 iPhone 與電腦在同一 WiFi', en: 'Device not detected — ensure iPhone and computer are on the same Wi-Fi' },
+  'wifi.legacy_hint': { zh: 'iPhone 解鎖並已配對即可直接連線。', en: 'iPhone unlocked and paired, connect directly.' },
+  'wifi.device_not_detected': { zh: '未偵測到裝置,請確認 iPhone 與電腦在同一 WiFi', en: 'Device not detected, ensure iPhone and computer are on the same Wi-Fi' },
   'wifi.detect_failed': { zh: '偵測失敗', en: 'Detection failed' },
 
   // ── Map ──────────────────────────────────────
   'map.recenter': { zh: '定位到目前位置', en: 'Recenter on current position' },
   'map.click_not_locate': { zh: '此功能非定位', en: 'This is NOT teleport' },
   'map.click_use_right': { zh: '請用右鍵「瞬移到這裡」', en: 'Right-click to "Teleport here"' },
-  'map.device_disconnected': { zh: 'USB 已斷開,請重新插入', en: 'USB disconnected — please reconnect' },
+  'map.device_disconnected': { zh: 'USB 已斷開,請重新插入', en: 'USB disconnected, please reconnect' },
   'map.teleport_here': { zh: '瞬移到這裡', en: 'Teleport here' },
   'map.navigate_here': { zh: '導航到這裡', en: 'Navigate here' },
   'map.add_waypoint': { zh: '添加路徑點', en: 'Add waypoint' },
@@ -174,11 +181,11 @@ export const STRINGS = {
   'err.tunnel_script_missing': { zh: '找不到 wifi_tunnel.py 腳本', en: 'wifi_tunnel.py script not found' },
   'err.tunnel_spawn_failed': { zh: '無法啟動 Tunnel 進程', en: 'Failed to spawn tunnel process' },
   'err.tunnel_exited': { zh: 'Tunnel 進程異常結束', en: 'Tunnel process exited unexpectedly' },
-  'err.tunnel_timeout': { zh: 'Tunnel 啟動逾時,請確認 iPhone 解鎖且與電腦同網段', en: 'Tunnel startup timed out — ensure iPhone is unlocked and on the same subnet' },
-  'err.no_device': { zh: '尚未連接任何 iOS 裝置,請先透過 USB 連線', en: 'No iOS device connected — connect via USB first' },
-  'err.no_position': { zh: '尚未取得目前位置,請先跳點到一個座標', en: 'No current position — teleport to a coordinate first' },
-  'err.tunnel_lost': { zh: 'WiFi Tunnel 連線中斷,請重新建立', en: 'Wi-Fi tunnel dropped — please reconnect' },
-  'err.cooldown_active': { zh: '冷卻中,請等待後再跳點', en: 'Cooldown active — wait before teleporting' },
+  'err.tunnel_timeout': { zh: 'Tunnel 啟動逾時,請確認 iPhone 解鎖且與電腦同網段', en: 'Tunnel startup timed out, ensure iPhone is unlocked and on the same subnet' },
+  'err.no_device': { zh: '尚未連接任何 iOS 裝置,請先透過 USB 連線', en: 'No iOS device connected, connect via USB first' },
+  'err.no_position': { zh: '尚未取得目前位置,請先跳點到一個座標', en: 'No current position, teleport to a coordinate first' },
+  'err.tunnel_lost': { zh: 'WiFi Tunnel 連線中斷,請重新建立', en: 'Wi-Fi tunnel dropped, please reconnect' },
+  'err.cooldown_active': { zh: '冷卻中,請等待後再跳點', en: 'Cooldown active, wait before teleporting' },
 
   // ── Panel extras ────────────────────────────
   'panel.mode': { zh: '模式', en: 'Mode' },
@@ -195,6 +202,8 @@ export const STRINGS = {
   'panel.waypoints_pts': { zh: '個', en: '' },
   'panel.waypoints_remove': { zh: '移除', en: 'Remove' },
   'panel.waypoint_num': { zh: '路徑點 {n}', en: 'Waypoint {n}' },
+  'panel.waypoint_start': { zh: '起點', en: 'Start' },
+  'panel.waypoints_running_hint': { zh: '進行中無法重新開始,請先按下方停止', en: 'In progress, press Stop below to restart' },
   'panel.waypoints_gen_tooltip': { zh: '在當前位置周圍隨機產生路徑點', en: 'Random waypoints around current position' },
   'panel.waypoints_gen_all_tooltip': { zh: '半徑與數量全隨機', en: 'Fully randomize radius and count' },
   'panel.points': { zh: '點', en: 'pts' },
@@ -202,8 +211,8 @@ export const STRINGS = {
   'panel.pts_short': { zh: 'pts', en: 'pts' },
 
   // ── Toasts extra ─────────────────────────────
-  'toast.no_position_random': { zh: '尚未取得目前位置,無法產生隨機路徑點', en: 'No current position — cannot generate random waypoints' },
-  'toast.no_waypoints': { zh: '尚未設定路徑點,請在地圖上右鍵添加或使用隨機產生', en: 'No waypoints set — right-click the map to add, or use Random generate' },
+  'toast.no_position_random': { zh: '尚未取得目前位置,無法產生隨機路徑點', en: 'No current position, cannot generate random waypoints' },
+  'toast.no_waypoints': { zh: '尚未設定路徑點,請在地圖上右鍵添加或使用隨機產生', en: 'No waypoints set, right-click the map to add, or use Random generate' },
   'toast.pause_countdown': { zh: '到點暫停中 · 剩餘 {n}s', en: 'Paused at waypoint · {n}s left' },
 
   // ── Bookmarks ────────────────────────────────
@@ -238,7 +247,7 @@ export const STRINGS = {
 
   // ── Device status extra ──────────────────────
   'device.connect_failed': { zh: '連線失敗', en: 'Connection failed' },
-  'wifi.tunnel_lost_banner': { zh: 'WiFi Tunnel 連線中斷,請重新建立', en: 'Wi-Fi tunnel dropped — please reconnect' },
+  'wifi.tunnel_lost_banner': { zh: 'WiFi Tunnel 連線中斷,請重新建立', en: 'Wi-Fi tunnel dropped, please reconnect' },
   'wifi.legacy_unavailable': { zh: 'iOS 17 以下連線方式目前不可用。', en: 'iOS 17 and below connection mode is not available.' },
 
   // ── Map extras ──────────────────────────────

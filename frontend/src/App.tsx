@@ -44,9 +44,16 @@ const App: React.FC = () => {
   }, [])
 
   const handleRestore = useCallback(async () => {
+    // The backend stop + DVT clear can take a few seconds, especially if
+    // movement was active or the channel is flaky. Give the user a visible
+    // "working on it" toast up front so the UI doesn't feel frozen.
+    showToast(t('status.restore_in_progress'), 10000)
     try {
       await sim.restore()
-      showToast(t('status.restore_success'))
+      // The clear command has been sent; iOS may take a short moment to
+      // actually drop the simulated location and resume real GPS, so tell
+      // the user that explicitly instead of pretending it's instant.
+      showToast(t('status.restore_success_wait'))
     } catch {
       showToast(t('status.restore_failed'))
     }
@@ -92,8 +99,13 @@ const App: React.FC = () => {
       cx = next.lat; cy = next.lng
     }
 
-    sim.setWaypoints(ordered.map(({ lat, lng }) => ({ lat, lng })))
-  }, [sim])
+    // Seed the list with the current position as index 0 so the start button
+    // doesn't need to inject it later (and can't double-inject on re-click).
+    sim.setWaypoints([
+      { lat, lng },
+      ...ordered.map(({ lat, lng }) => ({ lat, lng })),
+    ])
+  }, [sim, t])
 
   const handleGenerateRandomWaypoints = useCallback(() => {
     generateWaypoints(wpGenRadius, wpGenCount)
@@ -173,7 +185,19 @@ const App: React.FC = () => {
   }, [addBmDialog, bm])
 
   const handleAddWaypoint = useCallback((lat: number, lng: number) => {
-    sim.setWaypoints((prev: any[]) => [...prev, { lat, lng }])
+    // Seed the list with the current device position as the implicit start
+    // point on the first add. This keeps backend route and UI list aligned
+    // so waypoint-progress highlighting indexes correctly, and removes the
+    // "start button injects current pos every click" footgun.
+    sim.setWaypoints((prev: any[]) => {
+      if (prev.length === 0 && sim.currentPosition) {
+        return [
+          { lat: sim.currentPosition.lat, lng: sim.currentPosition.lng },
+          { lat, lng },
+        ]
+      }
+      return [...prev, { lat, lng }]
+    })
   }, [sim])
 
   const handleClearWaypoints = useCallback(() => {
@@ -185,13 +209,11 @@ const App: React.FC = () => {
   }, [sim])
 
   const handleStartWaypointRoute = useCallback(() => {
-    if (sim.waypoints.length < 1) {
-      showToast(t('toast.no_waypoints'))
-      return
-    }
-    const route = sim.currentPosition
-      ? [{ lat: sim.currentPosition.lat, lng: sim.currentPosition.lng }, ...sim.waypoints]
-      : sim.waypoints
+    // UI waypoint list already includes the current position as index 0
+    // (see handleAddWaypoint / generateWaypoints), so just hand it straight
+    // to the backend. No more prepend-on-start, no more accidental re-inject
+    // on repeated clicks.
+    const route = sim.waypoints
     if (route.length < 2) {
       showToast(t('toast.no_waypoints'))
       return
@@ -219,7 +241,10 @@ const App: React.FC = () => {
   }, [sim, randomWalkRadius, handleStartWaypointRoute, showToast, t])
 
   const handleStop = useCallback(() => {
-    sim.restore()
+    // Stop the active movement only — keep the simulated location in place
+    // so the device stays where the user paused it. Use the 一鍵還原 button
+    // separately to clear the simulated location and restore real GPS.
+    sim.stop()
   }, [sim])
 
   const handleRouteLoad = useCallback((id: string) => {
@@ -258,6 +283,15 @@ const App: React.FC = () => {
     const url = api.exportGpxUrl(id)
     window.open(url, '_blank')
   }, [])
+
+  const handleApplySpeed = useCallback(async () => {
+    try {
+      await sim.applySpeed()
+      showToast(t('panel.apply_speed_success'))
+    } catch (err: any) {
+      showToast(t('panel.apply_speed_failed') + (err?.message ? `: ${err.message}` : ''))
+    }
+  }, [sim, showToast, t])
 
   const handleOpenLog = useCallback(async () => {
     try {
@@ -313,11 +347,17 @@ const App: React.FC = () => {
     : null
 
   const speed = SPEED_MAP[sim.moveMode] || 5
-  // Status-bar display: range > custom > mode default. Backend re-picks per
-  // leg when a range is set, so show "min~max" as an indicator.
-  const displaySpeed: number | string = (sim.speedMinKmh != null && sim.speedMaxKmh != null)
-    ? `${Math.min(sim.speedMinKmh, sim.speedMaxKmh)}~${Math.max(sim.speedMinKmh, sim.speedMaxKmh)}`
-    : (sim.customSpeedKmh ?? speed)
+  // Status-bar display: when a route is running, show what the backend is
+  // *actually* executing (set when the route starts or applySpeed succeeds);
+  // otherwise show the typed inputs as a preview.
+  const fmtSpeedFromInputs = (kmh: number | null, lo: number | null, hi: number | null): number | string => {
+    if (lo != null && hi != null) return `${Math.min(lo, hi)}~${Math.max(lo, hi)}`
+    if (kmh != null) return kmh
+    return speed
+  }
+  const displaySpeed: number | string = sim.status.running && sim.effectiveSpeed
+    ? fmtSpeedFromInputs(sim.effectiveSpeed.kmh, sim.effectiveSpeed.min, sim.effectiveSpeed.max)
+    : fmtSpeedFromInputs(sim.customSpeedKmh, sim.speedMinKmh, sim.speedMaxKmh)
 
   // Determine running/paused state from status
   const isRunning = sim.status.running
@@ -344,7 +384,6 @@ const App: React.FC = () => {
           onScan={() => { device.scan() }}
           onSelect={(id: string) => { device.connect(id) }}
           onStartWifiTunnel={device.startWifiTunnel}
-          onWifiConnect={device.connectWifi}
           onStopTunnel={device.stopTunnel}
           tunnelStatus={device.tunnelStatus}
         />
@@ -373,6 +412,8 @@ const App: React.FC = () => {
           onPause={sim.pause}
           onResume={sim.resume}
           onRestore={handleRestore}
+          onApplySpeed={handleApplySpeed}
+          waypointProgress={sim.waypointProgress}
           onTeleport={handleTeleport}
           onNavigate={handleNavigate}
           bookmarks={bm.bookmarks.map(b => ({
@@ -470,29 +511,49 @@ const App: React.FC = () => {
                   {t('panel.waypoints_empty')}
                 </div>
               )}
-              {sim.waypoints.map((wp: any, i: number) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0', fontSize: 12 }}>
-                  <span style={{ color: '#ff9800', fontWeight: 600, width: 20 }}>#{i + 1}</span>
-                  <span style={{ flex: 1, opacity: 0.8 }}>{wp.lat.toFixed(5)}, {wp.lng.toFixed(5)}</span>
-                  <button
-                    className="action-btn"
-                    style={{ padding: '2px 6px', fontSize: 10 }}
-                    onClick={() => handleRemoveWaypoint(i)}
-                    title={t('panel.waypoints_remove')}
-                  >✕</button>
-                </div>
-              ))}
+              {sim.waypoints.map((wp: any, i: number) => {
+                // UI waypoints[0] = the implicit start position (current
+                // device location at add-time). Backend seg_idx N = traveling
+                // from waypoints[N] toward waypoints[N+1]; the *target* of
+                // that segment is waypoints[N+1], so highlight i == seg+1.
+                const seg = sim.waypointProgress?.current
+                const approaching = seg != null && i === seg + 1
+                const passed = seg != null && i <= seg
+                const isStart = i === 0;
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', fontSize: 12,
+                      borderRadius: 4, marginBottom: 2,
+                      background: approaching ? 'rgba(255, 152, 0, 0.18)' : 'transparent',
+                      border: approaching ? '1px solid rgba(255, 152, 0, 0.6)' : '1px solid transparent',
+                      opacity: passed ? 0.4 : 1,
+                      transition: 'background 0.25s, border-color 0.25s',
+                      animation: approaching ? 'wp-pulse 1.4s ease-in-out infinite' : undefined,
+                    }}
+                  >
+                    <span style={{ color: approaching ? '#ff9800' : passed ? '#666' : isStart ? '#4caf50' : '#ff9800', fontWeight: 600, width: 24, fontSize: isStart ? 10 : undefined }}>
+                      {approaching ? '▶' : passed ? '✓' : isStart ? t('panel.waypoint_start') : `#${i}`}
+                    </span>
+                    <span style={{ flex: 1, opacity: 0.85 }}>{wp.lat.toFixed(5)}, {wp.lng.toFixed(5)}</span>
+                    <button
+                      className="action-btn"
+                      style={{ padding: '2px 6px', fontSize: 10 }}
+                      onClick={() => handleRemoveWaypoint(i)}
+                      title={t('panel.waypoints_remove')}
+                    >✕</button>
+                  </div>
+                );
+              })}
               {sim.waypoints.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   <button
-                    className="action-btn primary"
+                    className="action-btn"
                     style={{ flex: 1 }}
-                    onClick={handleStartWaypointRoute}
-                    disabled={sim.waypoints.length < 1 || !sim.currentPosition}
-                  >
-                    {sim.mode === SimMode.Loop ? t('panel.waypoints_start_loop') : sim.mode === SimMode.MultiStop ? t('panel.waypoints_start_multi') : t('panel.waypoints_start_navigate')}
-                  </button>
-                  <button className="action-btn" onClick={handleClearWaypoints}>{t('generic.clear')}</button>
+                    onClick={handleClearWaypoints}
+                    disabled={sim.status?.running}
+                  >{t('generic.clear')}</button>
                 </div>
               )}
             </div>

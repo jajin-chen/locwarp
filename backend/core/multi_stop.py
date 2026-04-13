@@ -60,6 +60,10 @@ class MultiStopNavigator:
         osrm_profile = "foot" if mode in (MovementMode.WALKING, MovementMode.RUNNING) else "car"
 
         def _pick_profile() -> dict:
+            # Honor mid-flight apply_speed across legs / laps; otherwise
+            # re-pick from the original args (so range mode varies).
+            if engine._speed_was_applied and engine._active_speed_profile is not None:
+                return dict(engine._active_speed_profile)
             return resolve_speed_profile(
                 profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
             )
@@ -111,8 +115,17 @@ class MultiStopNavigator:
                 if engine._stop_event.is_set():
                     return
 
+        # Track the named user waypoints so highlight events refer to them
+        # (otherwise OSRM densification would emit indices over road points).
+        engine._user_waypoints = list(waypoints)
+        engine._user_waypoint_next = 1  # we already start at waypoints[0]
+
         running = True
         while running and not engine._stop_event.is_set():
+            # On each loop pass (only > 1 if loop=True) restart the highlight
+            # at waypoint[1] so the UI re-highlights from the top.
+            if loop and engine._user_waypoint_next >= len(waypoints):
+                engine._user_waypoint_next = 1
             for i in range(len(waypoints) - 1):
                 if engine._stop_event.is_set():
                     break

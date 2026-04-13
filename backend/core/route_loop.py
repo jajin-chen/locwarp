@@ -84,10 +84,22 @@ class RouteLooper:
             engine.distance_remaining = route_data["distance"]
             engine.segment_index = 0
 
-            # Re-pick speed each lap when a range is set, for realism.
-            speed_profile = resolve_speed_profile(
-                profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
-            )
+            # Tell _move_along_route which user-facing waypoints to track for
+            # waypoint_progress emission (we close the loop on the road but
+            # the UI only shows the named waypoints the user entered).
+            engine._user_waypoints = list(waypoints)
+            # Restart highlight from waypoint[1] each lap so UI re-pulses.
+            engine._user_waypoint_next = 1 if len(waypoints) > 1 else 0
+
+            # If the user has applied a speed mid-flight, honor it on
+            # subsequent laps; otherwise re-pick speed each lap so a range
+            # produces realistic per-lap variation.
+            if engine._speed_was_applied and engine._active_speed_profile is not None:
+                speed_profile = dict(engine._active_speed_profile)
+            else:
+                speed_profile = resolve_speed_profile(
+                    profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
+                )
             await engine._move_along_route(coords, speed_profile)
 
             # Check if we were stopped during the route

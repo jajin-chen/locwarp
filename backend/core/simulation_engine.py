@@ -129,6 +129,20 @@ class SimulationEngine:
         self.segment_index: int = 0
         self.total_segments: int = 0
         self._current_speed_mps: float = 0.0
+        # Hot-swap speed support (see apply_speed + _move_along_route).
+        self._active_route_coords: list[Coordinate] = []
+        self._active_speed_profile: "SpeedProfile | None" = None
+        self._pending_speed_profile: "SpeedProfile | None" = None
+        # User-facing waypoints used for waypoint_progress emission.
+        # Set by route_loop / multi_stop / navigator before each call to
+        # _move_along_route, so highlight events refer to the named
+        # waypoints rather than OSRM-densified polyline points.
+        self._user_waypoints: list[Coordinate] = []
+        self._user_waypoint_next: int = 0
+        # Set by apply_speed so route_loop / multi_stop know to reuse the
+        # applied profile on the next lap instead of re-resolving from the
+        # original request (which would revert speed every lap).
+        self._speed_was_applied: bool = False
 
     # ── Public API ───────────────────────────────────────────
 
@@ -365,6 +379,34 @@ class SimulationEngine:
         await self.location_service.set(lat, lng)
         self.current_position = Coordinate(lat=lat, lng=lng)
 
+    def apply_speed(
+        self,
+        speed_profile: "SpeedProfile",
+    ) -> bool:
+        """Hot-swap the active speed profile. Works in two modes:
+
+        * Route-based handlers (navigate / loop / multi-stop / random-walk):
+          queue the profile; the running ``_move_along_route`` loop notices
+          and re-interpolates the remaining coords from the current position.
+        * Joystick mode: swap the joystick handler's own speed_profile so
+          the next tick computes distance with the new value.
+
+        Returns True if the change was queued/applied, False if nothing is
+        running to apply it to.
+        """
+        if self.state in (SimulationState.IDLE, SimulationState.DISCONNECTED):
+            return False
+        # Joystick uses its own independent speed profile attribute.
+        if self.state == SimulationState.JOYSTICK and self._joystick.is_active:
+            self._joystick.speed_profile = dict(speed_profile)
+            self._speed_was_applied = True
+            return True
+        if not self._active_route_coords:
+            return False
+        self._pending_speed_profile = dict(speed_profile)
+        self._speed_was_applied = True
+        return True
+
     async def _move_along_route(
         self,
         coords: list[Coordinate],
@@ -385,124 +427,224 @@ class SimulationEngine:
         speed_profile
             Dict with keys ``speed_mps``, ``jitter``, ``update_interval``.
         """
-        speed_mps = speed_profile["speed_mps"]
-        jitter = speed_profile.get("jitter", 0.3)
-        update_interval = speed_profile.get("update_interval", 1.0)
+        # Expose these as instance state so apply_speed can read/swap them
+        # mid-flight without racing the handler's local variables.
+        self._active_route_coords = list(coords)
+        self._active_speed_profile = dict(speed_profile)
+        self._pending_speed_profile = None
+        self.total_segments = max(len(coords) - 1, 0)
 
-        self._current_speed_mps = speed_mps
+        # Outer loop: each iteration plans a fresh interpolation of the
+        # remaining route. Re-entered on apply_speed to absorb a new speed.
+        planned_coords = self._active_route_coords
 
-        # Calculate total route distance
-        total_distance = RouteInterpolator.haversine(
-            coords[0].lat, coords[0].lng,
-            coords[0].lat, coords[0].lng,
-        )  # will be recalculated below
-        total_distance = 0.0
-        for i in range(len(coords) - 1):
-            total_distance += RouteInterpolator.haversine(
-                coords[i].lat, coords[i].lng,
-                coords[i + 1].lat, coords[i + 1].lng,
-            )
-
-        self.eta_tracker.start(total_distance, speed_mps)
-        self.distance_remaining = total_distance
-
-        # Interpolate the route into dense timed points
-        timed_points = RouteInterpolator.interpolate(
-            coords, speed_mps, update_interval,
-        )
-
-        if not timed_points:
-            return
-
-        accumulated_distance = 0.0
-        prev_lat = timed_points[0]["lat"]
-        prev_lng = timed_points[0]["lng"]
-
-        for idx, point in enumerate(timed_points):
-            # ── Check stop ──
-            if self._stop_event.is_set():
-                logger.debug("Stop event detected at point %d/%d", idx, len(timed_points))
-                break
-
-            # ── Check pause ──
-            if not self._pause_event.is_set():
-                logger.debug("Paused at point %d/%d", idx, len(timed_points))
-                await self._pause_event.wait()
-                # After resume, re-check stop
-                if self._stop_event.is_set():
-                    break
-
-            lat = point["lat"]
-            lng = point["lng"]
-            bearing = point.get("bearing", 0.0)
-
-            # Calculate distance from previous point
-            step_dist = RouteInterpolator.haversine(prev_lat, prev_lng, lat, lng)
-            accumulated_distance += step_dist
-
-            # Add GPS jitter for realism
-            jittered_lat, jittered_lng = RouteInterpolator.add_jitter(lat, lng, jitter)
-
-            # Push position to device, with limited retry on transient
-            # connection errors (USB jiggle, WiFi blip, screen-lock dip).
-            # After max retries on the same point, give up cleanly so the
-            # handler can run its finally-cleanup.
-            pushed = False
-            for attempt in range(3):
-                try:
-                    await self._set_position(jittered_lat, jittered_lng)
-                    pushed = True
-                    break
-                except (ConnectionError, OSError) as exc:
-                    logger.warning(
-                        "position push failed (attempt %d/3): %s", attempt + 1, exc,
-                    )
-                    await asyncio.sleep(0.5 * (attempt + 1))
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.exception("Unexpected error pushing position")
-                    break
-            if not pushed:
-                logger.error("Giving up on this route after repeated push failures")
-                break
-
-            # Update tracking
-            self.distance_traveled += step_dist
-            self.distance_remaining = max(total_distance - accumulated_distance, 0.0)
-            self.eta_tracker.update(accumulated_distance)
-            self.segment_index = min(idx, self.total_segments)
-
-            # Emit position update
-            await self._emit("position_update", {
-                "lat": jittered_lat,
-                "lng": jittered_lng,
-                "bearing": bearing,
-                "speed_mps": speed_mps,
-                "progress": self.eta_tracker.progress,
-                "distance_remaining": self.distance_remaining,
-                "distance_traveled": self.distance_traveled,
-                "eta_seconds": self.eta_tracker.eta_seconds,
+        # Waypoint-progress detection runs against the user's named
+        # waypoints (set by the calling handler), not the OSRM-densified
+        # polyline points. The next-target index lives on the engine so
+        # multi-leg handlers (multi_stop, loop) can persist progress
+        # across consecutive _move_along_route calls.
+        #
+        # OSRM snaps off-road taps to the nearest road, so the routed path
+        # rarely passes within a strict radius of the user's literal click.
+        # We therefore track the minimum distance seen toward the next
+        # target and consider it "passed" when either we got *close enough*
+        # OR we got reasonably close and have started moving away.
+        user_wps = list(self._user_waypoints)
+        WP_HARD_HIT_M = 15.0      # straight-up "we're at it"
+        WP_NEAR_M = 60.0          # got close enough to count as visiting
+        WP_RECEDE_M = 12.0        # how far past min before declaring passed
+        wp_min_dist = float("inf")
+        if user_wps:
+            await self._emit("waypoint_progress", {
+                "current_index": max(self._user_waypoint_next - 1, 0),
+                "next_index": min(self._user_waypoint_next, len(user_wps) - 1),
+                "total": len(user_wps),
             })
 
-            prev_lat, prev_lng = lat, lng
+        while True:
+            speed_mps = self._active_speed_profile["speed_mps"]
+            jitter = self._active_speed_profile.get("jitter", 0.3)
+            update_interval = self._active_speed_profile.get("update_interval", 1.0)
 
-            # Wait for the next tick (unless this is the last point)
-            if idx < len(timed_points) - 1:
-                next_point = timed_points[idx + 1]
-                wait_time = next_point["timestamp_offset"] - point["timestamp_offset"]
-                if wait_time > 0:
-                    try:
-                        await asyncio.wait_for(
-                            self._stop_event.wait(),
-                            timeout=wait_time,
-                        )
-                        # Stop event was set during the wait
+            self._current_speed_mps = speed_mps
+
+            # Total distance of the planned coord list
+            total_distance = 0.0
+            for i in range(len(planned_coords) - 1):
+                total_distance += RouteInterpolator.haversine(
+                    planned_coords[i].lat, planned_coords[i].lng,
+                    planned_coords[i + 1].lat, planned_coords[i + 1].lng,
+                )
+
+            self.eta_tracker.start(total_distance, speed_mps)
+            self.distance_remaining = total_distance
+
+            timed_points = RouteInterpolator.interpolate(
+                planned_coords, speed_mps, update_interval,
+            )
+
+            if not timed_points:
+                return
+
+            accumulated_distance = 0.0
+            prev_lat = timed_points[0]["lat"]
+            prev_lng = timed_points[0]["lng"]
+
+            reinterpolate_from_point: int | None = None
+
+            for idx, point in enumerate(timed_points):
+                # ── Check stop ──
+                if self._stop_event.is_set():
+                    logger.debug("Stop event detected at point %d/%d", idx, len(timed_points))
+                    break
+
+                # ── Check pause ──
+                if not self._pause_event.is_set():
+                    logger.debug("Paused at point %d/%d", idx, len(timed_points))
+                    await self._pause_event.wait()
+                    if self._stop_event.is_set():
                         break
-                    except asyncio.TimeoutError:
-                        # Normal -- time to move to the next point
-                        pass
 
+                # ── Check hot-swap speed ──
+                if self._pending_speed_profile is not None:
+                    reinterpolate_from_point = idx
+                    break
+
+                lat = point["lat"]
+                lng = point["lng"]
+                bearing = point.get("bearing", 0.0)
+
+                # Calculate distance from previous point
+                step_dist = RouteInterpolator.haversine(prev_lat, prev_lng, lat, lng)
+                accumulated_distance += step_dist
+
+                # Add GPS jitter for realism
+                jittered_lat, jittered_lng = RouteInterpolator.add_jitter(lat, lng, jitter)
+
+                pushed = False
+                for attempt in range(3):
+                    try:
+                        await self._set_position(jittered_lat, jittered_lng)
+                        pushed = True
+                        break
+                    except (ConnectionError, OSError) as exc:
+                        logger.warning(
+                            "position push failed (attempt %d/3): %s", attempt + 1, exc,
+                        )
+                        await asyncio.sleep(0.5 * (attempt + 1))
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.exception("Unexpected error pushing position")
+                        break
+                if not pushed:
+                    logger.error("Giving up on this route after repeated push failures")
+                    break
+
+                # Update tracking
+                self.distance_traveled += step_dist
+                self.distance_remaining = max(total_distance - accumulated_distance, 0.0)
+                self.eta_tracker.update(accumulated_distance)
+                self.segment_index = min(idx, self.total_segments)
+
+                await self._emit("position_update", {
+                    "lat": jittered_lat,
+                    "lng": jittered_lng,
+                    "bearing": bearing,
+                    "speed_mps": speed_mps,
+                    "progress": self.eta_tracker.progress,
+                    "distance_remaining": self.distance_remaining,
+                    "distance_traveled": self.distance_traveled,
+                    "eta_seconds": self.eta_tracker.eta_seconds,
+                })
+
+                prev_lat, prev_lng = lat, lng
+
+                # Waypoint hit detection (see WP_* constants above).
+                if user_wps and self._user_waypoint_next < len(user_wps):
+                    target = user_wps[self._user_waypoint_next]
+                    d = RouteInterpolator.haversine(jittered_lat, jittered_lng, target.lat, target.lng)
+                    if d < wp_min_dist:
+                        wp_min_dist = d
+                    hit_close = d <= WP_HARD_HIT_M
+                    hit_passed = (
+                        wp_min_dist <= WP_NEAR_M
+                        and d > wp_min_dist + WP_RECEDE_M
+                    )
+                    if hit_close or hit_passed:
+                        self._user_waypoint_next += 1
+                        wp_min_dist = float("inf")
+                        await self._emit("waypoint_progress", {
+                            "current_index": self._user_waypoint_next - 1,
+                            "next_index": min(self._user_waypoint_next, len(user_wps) - 1),
+                            "total": len(user_wps),
+                        })
+
+                # Wait for the next tick (unless this is the last point)
+                if idx < len(timed_points) - 1:
+                    next_point = timed_points[idx + 1]
+                    wait_time = next_point["timestamp_offset"] - point["timestamp_offset"]
+                    if wait_time > 0:
+                        try:
+                            await asyncio.wait_for(
+                                self._stop_event.wait(),
+                                timeout=wait_time,
+                            )
+                            break
+                        except asyncio.TimeoutError:
+                            pass
+
+            # Did we break out to re-interpolate with a new speed?
+            if reinterpolate_from_point is not None and self._pending_speed_profile is not None:
+                # New plan: current position + the remaining original waypoints
+                # starting *after* the segment we were just traversing.
+                cutoff_seg = timed_points[reinterpolate_from_point].get("seg_idx", 0)
+                tail_waypoints = self._active_route_coords[cutoff_seg + 1:]
+                cur_pos = self.current_position
+                if cur_pos is not None and tail_waypoints:
+                    planned_coords = [Coordinate(lat=cur_pos.lat, lng=cur_pos.lng)] + list(tail_waypoints)
+                else:
+                    # Nothing ahead — just let the loop exit naturally.
+                    planned_coords = []
+
+                self._active_speed_profile = self._pending_speed_profile
+                self._pending_speed_profile = None
+                # Critical: also sync _active_route_coords to the new plan so
+                # a *subsequent* apply_speed slices against the right list.
+                # Otherwise the next cutoff_seg (relative to the now-shorter
+                # planned_coords) would index back into the original full leg
+                # and the device would jump back toward the leg's start.
+                self._active_route_coords = list(planned_coords)
+                logger.info(
+                    "Hot-swapped speed to %.2f m/s; replanning %d remaining waypoints (cur=%s, cutoff_seg=%d)",
+                    self._active_speed_profile["speed_mps"],
+                    len(planned_coords),
+                    f"{cur_pos.lat:.6f},{cur_pos.lng:.6f}" if cur_pos else "None",
+                    cutoff_seg,
+                )
+                if planned_coords:
+                    continue  # outer while — build a fresh plan
+            break  # outer while: done (stopped, completed, or push-failure)
+
+        # If we exited the route normally without stopping but didn't quite
+        # touch the final user waypoint (OSRM routing can end metres away
+        # from a user-clicked point that's off-road), force-advance once so
+        # the UI marks the leg's destination as reached instead of leaving
+        # it stuck in "approaching" forever.
+        if (
+            user_wps
+            and not self._stop_event.is_set()
+            and self._user_waypoint_next < len(user_wps)
+        ):
+            self._user_waypoint_next += 1
+            await self._emit("waypoint_progress", {
+                "current_index": self._user_waypoint_next - 1,
+                "next_index": min(self._user_waypoint_next, len(user_wps) - 1),
+                "total": len(user_wps),
+            })
+
+        self._pending_speed_profile = None
+        self._active_route_coords = []
         self._current_speed_mps = 0.0
 
     async def _ensure_stopped(self) -> None:
@@ -510,3 +652,7 @@ class SimulationEngine:
         if self.state not in (SimulationState.IDLE, SimulationState.DISCONNECTED):
             await self.stop()
         self._stop_event.clear()
+        # Fresh session — let the next handler resolve speed from its own
+        # request, not from a stale apply_speed from a previous session.
+        self._speed_was_applied = False
+        self._active_speed_profile = None

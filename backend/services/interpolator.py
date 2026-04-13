@@ -94,6 +94,7 @@ class RouteInterpolator:
                     if len(coords) > 1
                     else 0.0
                 ),
+                "seg_idx": 0,
             }
         )
 
@@ -125,6 +126,7 @@ class RouteInterpolator:
                         "lng": lng,
                         "timestamp_offset": time_offset,
                         "bearing": seg_bearing,
+                        "seg_idx": seg_idx,
                     }
                 )
 
@@ -148,6 +150,7 @@ class RouteInterpolator:
                         "lng": last.lng,
                         "timestamp_offset": time_offset,
                         "bearing": results[-1]["bearing"],
+                        "seg_idx": max(len(coords) - 2, 0),
                     }
                 )
 

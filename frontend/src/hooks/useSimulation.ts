@@ -80,6 +80,13 @@ export function useSimulation(wsMessage: WsMessage | null) {
   const [pauseEndAt, setPauseEndAt] = useState<number | null>(null)
   const [pauseRemaining, setPauseRemaining] = useState<number | null>(null)
   const [ddiMounting, setDdiMounting] = useState(false)
+  const [waypointProgress, setWaypointProgress] = useState<{ current: number; next: number; total: number } | null>(null)
+  // What's *actually* running on the device — set when a route handler
+  // starts or when applySpeed succeeds. Used by the status bar so the user
+  // doesn't see the typed-but-unapplied speed before pressing Apply.
+  const [effectiveSpeed, setEffectiveSpeed] = useState<
+    { kmh: number | null; min: number | null; max: number | null } | null
+  >(null)
 
   // Tick the pause countdown at 1 Hz
   useEffect(() => {
@@ -149,6 +156,18 @@ export function useSimulation(wsMessage: WsMessage | null) {
         setProgress(1)
         setEta(null)
         setPauseEndAt(null)
+        setWaypointProgress(null)
+        break
+      }
+      case 'waypoint_progress': {
+        const d = wsMessage.data
+        if (d && typeof d.current_index === 'number') {
+          setWaypointProgress({
+            current: d.current_index,
+            next: d.next_index ?? d.current_index + 1,
+            total: d.total ?? 0,
+          })
+        }
         break
       }
       case 'ddi_mounting': {
@@ -163,7 +182,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
       case 'tunnel_lost': {
         // Uses localStorage to get current language (hooks don't have i18n context easily here)
         setError((typeof localStorage !== 'undefined' && localStorage.getItem('locwarp.lang') === 'en')
-          ? 'Wi-Fi tunnel dropped — please reconnect'
+          ? 'Wi-Fi tunnel dropped, please reconnect'
           : 'WiFi Tunnel 連線中斷,請重新建立')
         break
       }
@@ -176,7 +195,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
         break
       }
       case 'device_reconnected': {
-        // Auto-reconnected by the usbmux watchdog after a re-plug — clear
+        // Auto-reconnected by the usbmux watchdog after a re-plug, clear
         // the banner; the success is already visible via DeviceStatus.
         setError(null)
         break
@@ -247,6 +266,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
         setProgress(0)
         const res = await api.navigate(lat, lng, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh })
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
+        setEffectiveSpeed({ kmh: customSpeedKmh, min: speedMinKmh, max: speedMaxKmh })
         return res
       } catch (err: any) {
         setError(err.message)
@@ -261,10 +281,14 @@ export function useSimulation(wsMessage: WsMessage | null) {
       setError(null)
       try {
         setMode(SimMode.Loop)
-        setWaypoints(wps)
+        // Don't setWaypoints(wps) — wps is the route as sent to the backend
+        // (already includes the start position from caller). Overwriting UI
+        // waypoints here would prepend the start point on every restart,
+        // and break the backend↔UI seg_idx mapping for highlighting.
         setProgress(0)
         const res = await api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseLoop.enabled, pause_min: pauseLoop.min, pause_max: pauseLoop.max })
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
+        setEffectiveSpeed({ kmh: customSpeedKmh, min: speedMinKmh, max: speedMaxKmh })
         return res
       } catch (err: any) {
         setError(err.message)
@@ -279,10 +303,11 @@ export function useSimulation(wsMessage: WsMessage | null) {
       setError(null)
       try {
         setMode(SimMode.MultiStop)
-        setWaypoints(wps)
+        // See startLoop — do not overwrite UI waypoints with the backend route.
         setProgress(0)
         const res = await api.multiStop(wps, moveMode, stopDuration, loop, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseMultiStop.enabled, pause_min: pauseMultiStop.min, pause_max: pauseMultiStop.max })
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
+        setEffectiveSpeed({ kmh: customSpeedKmh, min: speedMinKmh, max: speedMaxKmh })
         return res
       } catch (err: any) {
         setError(err.message)
@@ -300,6 +325,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
         setProgress(0)
         const res = await api.randomWalk(center, radiusM, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseRandomWalk.enabled, pause_min: pauseRandomWalk.min, pause_max: pauseRandomWalk.max })
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
+        setEffectiveSpeed({ kmh: customSpeedKmh, min: speedMinKmh, max: speedMaxKmh })
         return res
       } catch (err: any) {
         setError(err.message)
@@ -359,6 +385,23 @@ export function useSimulation(wsMessage: WsMessage | null) {
     }
   }, [])
 
+  const stop = useCallback(async () => {
+    setError(null)
+    try {
+      const res = await api.stopSim()
+      setStatus((prev) => ({ ...prev, running: false, paused: false }))
+      setProgress(0)
+      setEta(null)
+      setRoutePath([])
+      setWaypointProgress(null)
+      setEffectiveSpeed(null)
+      return res
+    } catch (err: any) {
+      setError(err.message)
+      throw err
+    }
+  }, [])
+
   const restore = useCallback(async () => {
     setError(null)
     try {
@@ -371,12 +414,32 @@ export function useSimulation(wsMessage: WsMessage | null) {
       setEta(null)
       setWaypoints([])
       setRoutePath([])
+      setWaypointProgress(null)
+      setEffectiveSpeed(null)
       return res
     } catch (err: any) {
       setError(err.message)
       throw err
     }
   }, [])
+
+  const applySpeed = useCallback(async () => {
+    setError(null)
+    try {
+      const res = await api.applySpeed(moveMode, {
+        speed_kmh: customSpeedKmh,
+        speed_min_kmh: speedMinKmh,
+        speed_max_kmh: speedMaxKmh,
+      })
+      // Status bar should now reflect the just-applied values, not the
+      // ones the route originally started with.
+      setEffectiveSpeed({ kmh: customSpeedKmh, min: speedMinKmh, max: speedMaxKmh })
+      return res
+    } catch (err: any) {
+      setError(err.message)
+      throw err
+    }
+  }, [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh])
 
   // Fetch initial status on mount
   const initialFetched = useRef(false)
@@ -427,9 +490,13 @@ export function useSimulation(wsMessage: WsMessage | null) {
     setPauseRandomWalk,
     pauseRemaining,
     ddiMounting,
+    waypointProgress,
+    effectiveSpeed,
+    applySpeed,
     error,
     clearError,
     teleport,
+    stop,
     navigate,
     startLoop,
     multiStop,

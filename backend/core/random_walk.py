@@ -115,10 +115,16 @@ class RandomWalkHandler:
                     await engine._emit("route_path", {
                         "coords": [{"lat": c.lat, "lng": c.lng} for c in coords],
                     })
-                    # Re-pick speed per leg so a range produces realistic variation
-                    speed_profile = resolve_speed_profile(
-                        profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
-                    )
+                    # Honor mid-flight apply_speed; otherwise re-pick per leg.
+                    if engine._speed_was_applied and engine._active_speed_profile is not None:
+                        speed_profile = dict(engine._active_speed_profile)
+                    else:
+                        speed_profile = resolve_speed_profile(
+                            profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
+                        )
+                    # Random walk has no named waypoints — disable highlight
+                    engine._user_waypoints = []
+                    engine._user_waypoint_next = 0
                     await engine._move_along_route(coords, speed_profile)
                 else:
                     logger.debug("Random walk: route too short (%d points), picking new destination", len(coords))

@@ -89,23 +89,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   React.useEffect(() => () => {
     if (scanResultTimer.current) clearTimeout(scanResultTimer.current);
   }, []);
-  const [wifiTab, setWifiTab] = useState<'ios17plus' | 'ios17minus'>('ios17plus');
-  const [legacyIp, setLegacyIp] = useState('');
-  const [legacyConnecting, setLegacyConnecting] = useState(false);
-  const [legacyError, setLegacyError] = useState<string | null>(null);
-
-  const handleLegacyConnect = async () => {
-    if (!onWifiConnect || !legacyIp.trim()) return;
-    setLegacyConnecting(true);
-    setLegacyError(null);
-    try {
-      await onWifiConnect(legacyIp.trim());
-    } catch (err: any) {
-      setLegacyError(err.message || t('device.connect_failed'));
-    } finally {
-      setLegacyConnecting(false);
-    }
-  };
+  // iOS 16-and-below WiFi state removed in v0.1.49 (LocWarp now requires iOS 17+).
 
   const handleDiscover = async () => {
     setDiscovering(true);
@@ -269,35 +253,61 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                 boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
               }}
             >
-              {devices.map((d) => (
+              {devices.map((d) => {
+                // LocWarp v0.1.49+ requires iOS 17. Mark older devices as
+                // unsupported so users don't waste a click waiting for the
+                // backend to reject the connect.
+                const major = parseInt((d.iosVersion || '0').split('.')[0], 10) || 0;
+                const unsupported = major > 0 && major < 17;
+                return (
                 <div
                   key={d.id}
                   onClick={() => {
+                    if (unsupported) return;
                     onSelect(d.id);
                     setShowDropdown(false);
                   }}
                   style={{
                     padding: '8px 12px',
-                    cursor: 'pointer',
+                    cursor: unsupported ? 'not-allowed' : 'pointer',
                     fontSize: 12,
                     display: 'flex',
                     alignItems: 'center',
                     gap: 8,
                     borderBottom: '1px solid #333',
                     background: device?.id === d.id ? '#3a3a4e' : 'transparent',
+                    opacity: unsupported ? 0.55 : 1,
                   }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e'; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = device?.id === d.id ? '#3a3a4e' : 'transparent'; }}
+                  onMouseEnter={(e) => {
+                    if (unsupported) return;
+                    (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (unsupported) return;
+                    (e.currentTarget as HTMLDivElement).style.background = device?.id === d.id ? '#3a3a4e' : 'transparent';
+                  }}
+                  title={unsupported ? t('device.ios_unsupported_label', { version: d.iosVersion }) : undefined}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="5" y="2" width="14" height="20" rx="2" />
-                    <line x1="12" y1="18" x2="12" y2="18" />
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={unsupported ? '#f44336' : 'currentColor'} strokeWidth="2">
+                    {unsupported ? (
+                      <>
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                      </>
+                    ) : (
+                      <>
+                        <rect x="5" y="2" width="14" height="20" rx="2" />
+                        <line x1="12" y1="18" x2="12" y2="18" />
+                      </>
+                    )}
                   </svg>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: device?.id === d.id ? 600 : 400 }}>{d.name}</div>
                     <div style={{ opacity: 0.5, fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      iOS {d.iosVersion}
-                      {d.connectionType && (
+                      {unsupported
+                        ? <span style={{ color: '#f44336' }}>{t('device.ios_unsupported_label', { version: d.iosVersion })}</span>
+                        : <>iOS {d.iosVersion}</>}
+                      {d.connectionType && !unsupported && (
                         <span style={{
                           fontSize: 9,
                           padding: '0 3px',
@@ -316,7 +326,8 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                     </svg>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -377,51 +388,23 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
 
           {wifiExpanded && (
             <div style={{ marginTop: 8 }}>
-              {/* iOS version tabs */}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 8, padding: 2, background: 'rgba(255,255,255,0.04)', borderRadius: 4 }}>
-                <button
-                  onClick={() => setWifiTab('ios17plus')}
-                  style={{
-                    flex: 1, padding: '4px 8px', fontSize: 11, borderRadius: 3, border: 'none',
-                    background: wifiTab === 'ios17plus' ? 'rgba(108, 140, 255, 0.2)' : 'transparent',
-                    color: wifiTab === 'ios17plus' ? '#6c8cff' : 'rgba(255,255,255,0.6)',
-                    fontWeight: wifiTab === 'ios17plus' ? 600 : 400, cursor: 'pointer',
-                  }}
-                >
-                  iOS 17+
-                </button>
-                <button
-                  onClick={() => setWifiTab('ios17minus')}
-                  style={{
-                    flex: 1, padding: '4px 8px', fontSize: 11, borderRadius: 3, border: 'none',
-                    background: wifiTab === 'ios17minus' ? 'rgba(108, 140, 255, 0.2)' : 'transparent',
-                    color: wifiTab === 'ios17minus' ? '#6c8cff' : 'rgba(255,255,255,0.6)',
-                    fontWeight: wifiTab === 'ios17minus' ? 600 : 400, cursor: 'pointer',
-                  }}
-                >
-                  {t('wifi.tab_ios17minus')}
-                </button>
-              </div>
-
-              {wifiTab === 'ios17plus' && (
-                <button
-                  onClick={() => { setRepairState('idle'); setRepairMessage(''); setShowRepairConfirm(true); }}
-                  title={t('wifi.repair_tooltip')}
-                  style={{
-                    width: '100%', padding: '5px 8px', fontSize: 11, marginBottom: 8,
-                    background: 'rgba(255, 193, 7, 0.08)',
-                    border: '1px solid rgba(255, 193, 7, 0.35)',
-                    borderRadius: 4, color: '#ffc107', cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                  }}
-                >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 12a9 9 0 11-6.219-8.56" />
-                    <polyline points="21 3 21 9 15 9" />
-                  </svg>
-                  {t('wifi.repair_button')}
-                </button>
-              )}
+              <button
+                onClick={() => { setRepairState('idle'); setRepairMessage(''); setShowRepairConfirm(true); }}
+                title={t('wifi.repair_tooltip')}
+                style={{
+                  width: '100%', padding: '5px 8px', fontSize: 11, marginBottom: 8,
+                  background: 'rgba(255, 193, 7, 0.08)',
+                  border: '1px solid rgba(255, 193, 7, 0.35)',
+                  borderRadius: 4, color: '#ffc107', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 12a9 9 0 11-6.219-8.56" />
+                  <polyline points="21 3 21 9 15 9" />
+                </svg>
+                {t('wifi.repair_button')}
+              </button>
 
               {/* Help + Discover buttons row */}
               <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
@@ -436,26 +419,24 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                 >
                   {t('wifi.help_ip')}
                 </button>
-                {wifiTab === 'ios17plus' && (
-                  <button
-                    onClick={handleDiscover}
-                    disabled={discovering || tunnelStatus.running}
-                    title={t('wifi.detect_tooltip')}
-                    style={{
-                      flex: 1, fontSize: 10, padding: '3px 6px', borderRadius: 3,
-                      border: '1px solid rgba(108, 140, 255, 0.5)',
-                      background: 'rgba(108, 140, 255, 0.12)',
-                      color: '#6c8cff', cursor: discovering ? 'wait' : 'pointer',
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 3,
-                    }}
-                  >
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={discovering ? { animation: 'spin 1s linear infinite' } : undefined}>
-                      <circle cx="11" cy="11" r="7" />
-                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                    </svg>
-                    {discovering ? t('wifi.detect_scanning') : t('wifi.detect')}
-                  </button>
-                )}
+                <button
+                  onClick={handleDiscover}
+                  disabled={discovering || tunnelStatus.running}
+                  title={t('wifi.detect_tooltip')}
+                  style={{
+                    flex: 1, fontSize: 10, padding: '3px 6px', borderRadius: 3,
+                    border: '1px solid rgba(108, 140, 255, 0.5)',
+                    background: 'rgba(108, 140, 255, 0.12)',
+                    color: '#6c8cff', cursor: discovering ? 'wait' : 'pointer',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 3,
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={discovering ? { animation: 'spin 1s linear infinite' } : undefined}>
+                    <circle cx="11" cy="11" r="7" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                  {discovering ? t('wifi.detect_scanning') : t('wifi.detect')}
+                </button>
               </div>
 
               {showIpHelp && (
@@ -477,8 +458,8 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                 </div>
               )}
 
-              {/* iOS 17+ — WiFi Tunnel (RSD) */}
-              {wifiTab === 'ios17plus' && onStartWifiTunnel && (
+              {/* iOS 17+ WiFi Tunnel (RSD) */}
+              {onStartWifiTunnel && (
                 tunnelStatus.running ? (
                   <div>
                     <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, padding: '4px 6px', background: 'rgba(76, 175, 80, 0.08)', borderRadius: 3 }}>
@@ -550,45 +531,6 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                 )
               )}
 
-              {/* iOS 17 以下 — Legacy direct WiFi */}
-              {wifiTab === 'ios17minus' && (
-                <div>
-                  {onWifiConnect ? (
-                    <>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 6 }}>
-                        <span style={{ opacity: 0.7, width: 36 }}>IP</span>
-                        <input
-                          type="text" className="search-input"
-                          placeholder={t('wifi.ip_placeholder')}
-                          value={legacyIp} onChange={(e) => setLegacyIp(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleLegacyConnect()}
-                          style={{ flex: 1, fontSize: 12 }} disabled={legacyConnecting}
-                        />
-                      </label>
-                      <button
-                        className="action-btn primary"
-                        onClick={handleLegacyConnect}
-                        disabled={legacyConnecting || !legacyIp.trim()}
-                        style={{ width: '100%', fontSize: 12 }}
-                      >
-                        {legacyConnecting ? t('wifi.legacy_connecting') : t('wifi.legacy_connect')}
-                      </button>
-                      {legacyError && (
-                        <div style={{ fontSize: 11, color: '#f44336', marginTop: 4, padding: '4px 6px', background: 'rgba(244,67,54,0.1)', borderRadius: 3 }}>
-                          {legacyError}
-                        </div>
-                      )}
-                      <div style={{ fontSize: 10, opacity: 0.4, marginTop: 6 }}>
-                        {t('wifi.legacy_hint')}
-                      </div>
-                    </>
-                  ) : (
-                    <div style={{ fontSize: 11, opacity: 0.6, padding: '8px 0' }}>
-                      {t('wifi.legacy_unavailable')}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           )}
         </div>

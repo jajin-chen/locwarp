@@ -78,6 +78,10 @@ class Navigator:
             "destination": {"lat": dest.lat, "lng": dest.lng},
         })
 
+        # User-facing waypoints for highlight: just start + destination.
+        engine._user_waypoints = [start, dest]
+        engine._user_waypoint_next = 1
+
         # Delegate to the core movement loop
         await engine._move_along_route(coords, speed_profile)
 

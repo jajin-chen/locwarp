@@ -13,7 +13,9 @@
     "jsx": "react-jsx",
     "strict": true,
     "noUnusedLocals": false,
-    "noUnusedParameters": false
+    "noUnusedParameters": false,
+    "resolveJsonModule": true,
+    "esModuleInterop": true
   },
-  "include": ["src"]
+  "include": ["src", "package.json"]
 }

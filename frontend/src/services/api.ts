@@ -1,6 +1,6 @@
 const API = 'http://127.0.0.1:8777'
 
-// Connection-refused means backend isn't up yet — retry with backoff.
+// Connection-refused means backend isn't up yet, retry with backoff.
 // Other HTTP errors (4xx/5xx) are real errors and propagate immediately.
 async function fetchWithRetry(url: string, opts: RequestInit, maxAttempts = 15): Promise<Response> {
   let lastErr: unknown
@@ -23,16 +23,20 @@ const ERROR_I18N: Record<string, { zh: string; en: string }> = {
   tunnel_script_missing: { zh: '找不到 wifi_tunnel.py 腳本', en: 'wifi_tunnel.py script not found' },
   tunnel_spawn_failed: { zh: '無法啟動 Tunnel 進程', en: 'Failed to spawn tunnel process' },
   tunnel_exited: { zh: 'Tunnel 進程異常結束', en: 'Tunnel process exited unexpectedly' },
-  tunnel_timeout: { zh: 'Tunnel 啟動逾時,請確認 iPhone 解鎖且與電腦同網段', en: 'Tunnel startup timed out — ensure iPhone is unlocked and on the same subnet' },
-  no_device: { zh: '尚未連接任何 iOS 裝置,請先透過 USB 連線', en: 'No iOS device connected — connect via USB first' },
-  no_position: { zh: '尚未取得目前位置,請先跳點到一個座標', en: 'No current position — teleport to a coordinate first' },
-  tunnel_lost: { zh: 'WiFi Tunnel 連線中斷,請重新建立', en: 'Wi-Fi tunnel dropped — please reconnect' },
-  cooldown_active: { zh: '冷卻中,請等待後再跳點', en: 'Cooldown active — wait before teleporting' },
-  repair_needs_usb: { zh: '重新配對需要 USB — 請先用線連接 iPhone', en: 'Re-pair needs USB — please connect the iPhone first' },
-  usbmux_unavailable: { zh: '無法列出 USB 裝置,請確認驅動與 Apple Mobile Device Service 是否正常', en: 'Cannot list USB devices — check iTunes/Apple Mobile Device Service' },
-  trust_failed: { zh: 'USB 信任失敗 — 請在 iPhone 上點「信任」後再試', en: 'USB trust failed — tap Trust on the iPhone and retry' },
-  remote_pair_failed: { zh: 'RemotePairing 記錄重建失敗 — 請以系統管理員身分重啟 LocWarp', en: 'RemotePairing record rebuild failed — restart LocWarp as Administrator' },
+  tunnel_timeout: { zh: 'Tunnel 啟動逾時,請確認 iPhone 解鎖且與電腦同網段', en: 'Tunnel startup timed out, ensure iPhone is unlocked and on the same subnet' },
+  no_device: { zh: '尚未連接任何 iOS 裝置,請先透過 USB 連線', en: 'No iOS device connected, connect via USB first' },
+  no_position: { zh: '尚未取得目前位置,請先跳點到一個座標', en: 'No current position, teleport to a coordinate first' },
+  tunnel_lost: { zh: 'WiFi Tunnel 連線中斷,請重新建立', en: 'Wi-Fi tunnel dropped, please reconnect' },
+  cooldown_active: { zh: '冷卻中,請等待後再跳點', en: 'Cooldown active, wait before teleporting' },
+  repair_needs_usb: { zh: '重新配對需要 USB, 請先用線連接 iPhone', en: 'Re-pair needs USB, please connect the iPhone first' },
+  usbmux_unavailable: { zh: '無法列出 USB 裝置,請確認驅動與 Apple Mobile Device Service 是否正常', en: 'Cannot list USB devices, check iTunes/Apple Mobile Device Service' },
+  trust_failed: { zh: 'USB 信任失敗, 請在 iPhone 上點「信任」後再試', en: 'USB trust failed, tap Trust on the iPhone and retry' },
+  remote_pair_failed: { zh: 'RemotePairing 記錄重建失敗, 請以系統管理員身分重啟 LocWarp', en: 'RemotePairing record rebuild failed, restart LocWarp as Administrator' },
   device_lost: { zh: '裝置連線中斷(USB 拔除或 Tunnel 死亡),請重新插上 USB 後再操作', en: 'Device connection lost (USB unplugged or tunnel died), please reconnect USB and try again' },
+  ios_unsupported: {
+    zh: '裝置 iOS 版本過舊,LocWarp 僅支援 iOS 17 以上。請升級 iOS 後再試。',
+    en: 'This device runs an unsupported iOS version. LocWarp requires iOS 17 or later. Please update and try again.',
+  },
 }
 
 function currentLang(): 'zh' | 'en' {
@@ -109,6 +113,7 @@ export const joystickStop = () => request<any>('POST', '/api/location/joystick/s
 export const pauseSim = () => request<any>('POST', '/api/location/pause')
 export const resumeSim = () => request<any>('POST', '/api/location/resume')
 export const restoreSim = () => request<any>('POST', '/api/location/restore')
+export const stopSim = () => request<any>('POST', '/api/location/stop')
 export const getStatus = () => request<any>('GET', '/api/location/status')
 
 // Cooldown
@@ -144,6 +149,14 @@ export const importBookmarks = (data: any) => request<{ imported: number }>('POS
 
 export const openLog = () => request<{ status: string; path: string }>('POST', '/api/system/open-log')
 export const openLogFolder = () => request<{ status: string; path: string }>('POST', '/api/system/open-log-folder')
+
+export const applySpeed = (mode: string, opts: { speed_kmh?: number | null; speed_min_kmh?: number | null; speed_max_kmh?: number | null }) =>
+  request<{ status: string; speed_mps: number }>('POST', '/api/location/apply-speed', {
+    mode,
+    speed_kmh: opts.speed_kmh ?? null,
+    speed_min_kmh: opts.speed_min_kmh ?? null,
+    speed_max_kmh: opts.speed_max_kmh ?? null,
+  })
 
 // Routes
 export const planRoute = (start: any, end: any, profile: string) =>

@@ -1,6 +1,33 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
+
+// Apply-speed button that disables itself for ~1.5 s after a click so a
+// frantic double-tap doesn't fire two consecutive hot-swaps (which used to
+// be able to wedge the route planner into walking back to the leg start).
+const ApplySpeedButton: React.FC<{ onApply: () => Promise<void> | void; t: (k: any) => string }> = ({ onApply, t }) => {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        className="action-btn primary"
+        style={{ width: '100%', padding: '6px 10px', fontSize: 12, opacity: busy ? 0.6 : 1 }}
+        disabled={busy}
+        onClick={async () => {
+          if (busy) return;
+          setBusy(true);
+          try { await onApply(); } finally { setTimeout(() => setBusy(false), 1500); }
+        }}
+        title={t('panel.apply_speed_tooltip')}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6, verticalAlign: 'middle' }}>
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+        {t('panel.apply_speed')}
+      </button>
+    </div>
+  );
+};
 import PauseControl from './PauseControl';
 import { SimMode, MoveMode } from '../hooks/useSimulation';
 import AddressSearch from './AddressSearch';
@@ -46,6 +73,8 @@ interface ControlPanelProps {
   onPause: () => void;
   onResume: () => void;
   onRestore: () => void;
+  onApplySpeed?: () => Promise<void> | void;
+  waypointProgress?: { current: number; next: number; total: number } | null;
   onTeleport: (lat: number, lng: number) => void;
   onNavigate: (lat: number, lng: number) => void;
   bookmarks: Bookmark[];
@@ -164,6 +193,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onPause,
   onResume,
   onRestore,
+  onApplySpeed,
+  waypointProgress,
   onTeleport,
   onNavigate,
   bookmarks,
@@ -478,6 +509,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             )}
           </div>
         )}
+
+        {/* Apply-speed button — only visible while a route is running so the
+            user can hot-swap speed mid-nav without stopping / restarting. */}
+        {isRunning && onApplySpeed && <ApplySpeedButton onApply={onApplySpeed} t={t} />}
       </div>
 
       {/* Action Buttons */}
