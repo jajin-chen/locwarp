@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
+from services.location_service import DeviceLostError
+
 from models.schemas import (
     TeleportRequest,
     NavigateRequest,
@@ -91,6 +93,45 @@ async def _engine():
     )
 
 
+async def _handle_device_lost(exc: Exception) -> "HTTPException":
+    """Clean up after a DeviceLostError: disconnect the stale device from
+    DeviceManager, drop the simulation engine, broadcast an explicit
+    `device_disconnected` WebSocket event so the frontend can banner it.
+    Returns an HTTPException the caller should raise."""
+    from main import app_state
+    from api.websocket import broadcast
+    import logging as _logging
+    _log = _logging.getLogger("locwarp")
+
+    dm = app_state.device_manager
+    lost_udids = list(dm._connections.keys())
+    for udid in lost_udids:
+        try:
+            await dm.disconnect(udid)
+            _log.info("device_lost cleanup: disconnected %s", udid)
+        except Exception:
+            _log.exception("device_lost cleanup: disconnect failed for %s", udid)
+
+    app_state.simulation_engine = None
+
+    try:
+        await broadcast("device_disconnected", {
+            "udids": lost_udids,
+            "reason": "device_lost",
+            "error": str(exc),
+        })
+    except Exception:
+        _log.exception("Failed to broadcast device_disconnected")
+
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": "device_lost",
+            "message": "裝置連線中斷(USB 拔除或 Tunnel 死亡)— 請重新插上 USB 後再操作",
+        },
+    )
+
+
 def _cooldown():
     from main import app_state
     return app_state.cooldown_timer
@@ -125,9 +166,18 @@ async def teleport(req: TeleportRequest):
         await engine.teleport(req.lat, req.lng)
     except HTTPException:
         raise
+    except DeviceLostError as e:
+        raise (await _handle_device_lost(e))
     except Exception as e:
         import traceback, logging
         logging.getLogger("locwarp").error("Teleport failed:\n%s", traceback.format_exc())
+        # Also inspect the cause — nested DeviceLostError (e.g. re-raised from
+        # the simulation engine retry loop) should still trigger cleanup.
+        cause = e
+        while cause is not None:
+            if isinstance(cause, DeviceLostError):
+                raise (await _handle_device_lost(cause))
+            cause = cause.__cause__
         raise HTTPException(status_code=500, detail=str(e))
 
     # Start cooldown if enabled and there was a previous position

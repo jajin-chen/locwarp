@@ -167,6 +167,14 @@ export function useSimulation(wsMessage: WsMessage | null) {
           : 'WiFi Tunnel 連線中斷,請重新建立')
         break
       }
+      case 'device_disconnected': {
+        const isEn = typeof localStorage !== 'undefined' && localStorage.getItem('locwarp.lang') === 'en'
+        setError(isEn
+          ? 'Device disconnected (USB unplugged or tunnel died) — please reconnect USB'
+          : '裝置連線中斷(USB 拔除或 Tunnel 死亡)— 請重新插上 USB')
+        setStatus((prev) => ({ ...prev, running: false, paused: false }))
+        break
+      }
       case 'pause_countdown':
       case 'random_walk_pause': {
         const dur = wsMessage.data?.duration_seconds

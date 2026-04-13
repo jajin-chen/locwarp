@@ -20,6 +20,13 @@ from pymobiledevice3.services.simulate_location import DtSimulateLocation
 logger = logging.getLogger(__name__)
 
 
+class DeviceLostError(RuntimeError):
+    """Raised when a location service determines the underlying device
+    connection is no longer recoverable (e.g. USB unplugged, tunnel dead).
+    Callers should drop any cached engine/connection and force a fresh
+    discover+connect on the next user action."""
+
+
 class LocationService(ABC):
     """
     Abstract base for location simulation services.
@@ -90,25 +97,37 @@ class DvtLocationService(LocationService):
             if self._lockdown is None:
                 raise RuntimeError("Cannot reconnect DVT: no lockdown/RSD reference")
 
-            delay = 2.0
-            max_attempts = 5
-            for attempt in range(1, max_attempts + 1):
+            # Fast-fail: a blip usually recovers within 1-2s. If it doesn't,
+            # the device is almost certainly gone (USB unplugged, tunnel dead)
+            # — there's no point making the user wait 60s. 2 attempts with
+            # 0.5s + 1.5s = ~2s worst case, then raise DeviceLostError.
+            delays = [0.5, 1.5]
+            last_exc: Exception | None = None
+            for attempt, delay in enumerate(delays, start=1):
                 try:
                     new_dvt = DvtProvider(self._lockdown)
                     await new_dvt.__aenter__()
                     self._dvt = new_dvt
                     logger.info("DVT provider reconnected on attempt %d", attempt)
                     return
-                except Exception:
-                    if attempt == max_attempts:
-                        logger.error("DVT provider reconnect failed after %d attempts", max_attempts)
-                        raise
+                except Exception as exc:
+                    last_exc = exc
                     logger.warning(
-                        "DVT provider reconnect attempt %d/%d failed, retrying in %.0fs",
-                        attempt, max_attempts, delay,
+                        "DVT reconnect attempt %d/%d failed (%s); retrying in %.1fs",
+                        attempt, len(delays), type(exc).__name__, delay,
                     )
                     await asyncio.sleep(delay)
-                    delay = min(delay * 2, 30.0)
+            # Final try without delay
+            try:
+                new_dvt = DvtProvider(self._lockdown)
+                await new_dvt.__aenter__()
+                self._dvt = new_dvt
+                logger.info("DVT provider reconnected on final attempt")
+                return
+            except Exception as exc:
+                last_exc = exc
+            logger.error("DVT provider reconnect exhausted — device likely lost")
+            raise DeviceLostError(f"DVT reconnect failed: {last_exc}") from last_exc
 
     async def set(self, lat: float, lng: float) -> None:
         """Simulate the device location using the DVT instrument channel."""
@@ -196,10 +215,14 @@ class LegacyLocationService(LocationService):
             logger.warning("Legacy location channel dropped (%s: %s); reconnecting and retrying",
                            type(exc).__name__, exc)
             self._reset_service()
-            svc = self._ensure_service()
-            svc.set(lat, lng)
-            self._active = True
-            logger.info("Legacy location set to (%.6f, %.6f) after reconnect", lat, lng)
+            try:
+                svc = self._ensure_service()
+                svc.set(lat, lng)
+                self._active = True
+                logger.info("Legacy location set to (%.6f, %.6f) after reconnect", lat, lng)
+            except Exception as retry_exc:
+                logger.error("Legacy reconnect failed — device likely lost (%s)", retry_exc)
+                raise DeviceLostError(f"Legacy reconnect failed: {retry_exc}") from retry_exc
         except Exception:
             logger.exception("Failed to set legacy simulated location")
             raise
