@@ -47,6 +47,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   const [showIpHelp, setShowIpHelp] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [wifiExpanded, setWifiExpanded] = useState(false);
+  const [showWifiWarning, setShowWifiWarning] = useState(false);
   const [scanning, setScanning] = useState(false);
   // null = no recent scan; number = device count from most recent scan (flash display)
   const [scanResult, setScanResult] = useState<number | null>(null);
@@ -321,7 +322,23 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
               </svg>
-              {t('wifi.section_title')}
+              <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
+                <span>{t('wifi.section_title')}</span>
+                <span style={{ fontSize: 10, opacity: 0.6 }}>{t('wifi.section_hint')}</span>
+              </span>
+              <span
+                role="button"
+                aria-label={t('wifi.warning_label')}
+                title={t('wifi.warning_label')}
+                onClick={(e) => { e.stopPropagation(); setShowWifiWarning(true); }}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 16, height: 16, borderRadius: '50%',
+                  background: 'rgba(255, 193, 7, 0.15)', color: '#ffc107',
+                  fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  border: '1px solid rgba(255, 193, 7, 0.4)',
+                }}
+              >!</span>
               {tunnelStatus.running && (
                 <span style={{
                   fontSize: 10, padding: '1px 6px', borderRadius: 3,
@@ -537,6 +554,48 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {showWifiWarning && (
+        <div
+          onClick={() => setShowWifiWarning(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 9999,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#1e1e1e', border: '1px solid #444', borderRadius: 8,
+              padding: 20, maxWidth: 420, width: '90%', color: '#e8e8e8',
+              boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 24, height: 24, borderRadius: '50%',
+                background: 'rgba(255, 193, 7, 0.15)', color: '#ffc107',
+                fontSize: 16, fontWeight: 700, border: '1px solid rgba(255,193,7,0.5)',
+              }}>!</span>
+              <strong style={{ fontSize: 14 }}>{t('wifi.warning_title')}</strong>
+            </div>
+            <div style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-line', opacity: 0.9 }}>
+              {t('wifi.warning_body')}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+              <button
+                onClick={() => setShowWifiWarning(false)}
+                style={{
+                  padding: '6px 16px', fontSize: 12, borderRadius: 4,
+                  background: '#6c8cff', color: '#fff', border: 'none', cursor: 'pointer',
+                }}
+              >{t('wifi.warning_ok')}</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
