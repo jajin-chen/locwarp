@@ -84,12 +84,15 @@ const StatusBar: React.FC<StatusBarProps> = ({
         flexWrap: 'wrap',
         rowGap: 3,
         columnGap: 12,
-        padding: '4px 12px',
+        padding: '5px 14px',
         fontSize: 12,
-        color: '#c0c0c0',
-        background: '#1a1a1e',
-        borderTop: '1px solid #333',
+        color: '#c7cbd9',
+        background: 'rgba(15, 17, 23, 0.85)',
+        backdropFilter: 'blur(12px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+        borderTop: '1px solid rgba(108, 140, 255, 0.1)',
         flexShrink: 0,
+        letterSpacing: '-0.005em',
       }}
     >
       {/* Connection / device name / iOS version removed from the bottom bar —

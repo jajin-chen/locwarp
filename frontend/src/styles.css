@@ -4,12 +4,18 @@
 
 /* ---------- CSS Variables ---------- */
 :root {
-  --bg-primary: #0f1117;
-  --bg-surface: #1a1d27;
-  --bg-surface-hover: #222633;
-  --bg-elevated: #252a3a;
-  --border-color: #2e3345;
-  --border-light: #3a4058;
+  /* Refreshed palette — deeper, slightly warmer base than before so the
+     blue accent pops harder and surfaces read as distinct floating layers
+     instead of a single flat dark field. */
+  --bg-primary: #0a0c12;
+  --bg-surface: #141722;
+  --bg-surface-hover: #1b1f2d;
+  --bg-elevated: #1f2334;
+  --bg-overlay: rgba(20, 23, 34, 0.9);
+  --border-color: #262b3b;
+  --border-light: #323851;
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-accent: rgba(108, 140, 255, 0.22);
 
   --text-primary: #e8eaf0;
   --text-secondary: #9499ac;
@@ -18,6 +24,7 @@
   --accent-blue: #6c8cff;
   --accent-blue-hover: #8aa3ff;
   --accent-blue-dim: rgba(108, 140, 255, 0.15);
+  --accent-blue-glow: rgba(108, 140, 255, 0.35);
   --accent-green: #4ecdc4;
   --accent-green-dim: rgba(78, 205, 196, 0.15);
   --accent-pink: #ff6b9d;
@@ -33,14 +40,36 @@
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
+  --radius-xl: 16px;
   --radius-full: 9999px;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  /* Shadows tinted with a cool blue hue so they feel native to the
+     app's accent rather than a generic black drop-shadow. */
+  --shadow-sm: 0 1px 2px rgba(12, 18, 40, 0.5);
+  --shadow-md: 0 4px 14px rgba(12, 18, 40, 0.45), 0 1px 2px rgba(12, 18, 40, 0.3);
+  --shadow-lg: 0 10px 32px rgba(12, 18, 40, 0.55), 0 2px 6px rgba(12, 18, 40, 0.35);
+  --shadow-xl: 0 20px 60px rgba(12, 18, 40, 0.65), 0 4px 12px rgba(12, 18, 40, 0.4);
+  --shadow-accent: 0 6px 20px rgba(108, 140, 255, 0.28);
 
-  --transition-fast: 150ms ease;
-  --transition-normal: 250ms ease;
+  /* Easing curves. Snappy for enter, smooth for exit, spring for playful. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --transition-fast: 140ms var(--ease-out);
+  --transition-normal: 220ms var(--ease-out);
+  --transition-slow: 320ms var(--ease-out);
+
+  /* Z-index scale — no more 9999 magic numbers. */
+  --z-base: 1;
+  --z-docked: 10;
+  --z-dropdown: 100;
+  --z-overlay: 500;
+  --z-sticky: 800;
+  --z-map-ui: 850;
+  --z-modal: 1000;
+  --z-toast: 1500;
+  --z-tooltip: 2000;
 }
 
 /* ---------- Reset & Base ---------- */
@@ -61,14 +90,44 @@ body,
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto,
-    Oxygen, Ubuntu, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, Oxygen, Ubuntu, sans-serif;
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-primary);
   background: var(--bg-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
+}
+
+/* Tabular nums on data-heavy elements so digits don't jiggle. */
+.tabular,
+input[type="number"],
+.mono,
+code,
+kbd,
+pre {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1, 'cv11' 1;
+}
+
+.mono, code, kbd, pre {
+  font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas,
+    'Cascadia Mono', monospace;
+}
+
+/* Keyboard-visible focus ring across all interactive controls. */
+:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+button:focus,
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
 }
 
 /* ---------- Scrollbar ---------- */
@@ -95,6 +154,10 @@ body {
   flex-direction: row;
   height: 100%;
   width: 100%;
+  background:
+    radial-gradient(ellipse 80% 60% at 15% 0%, rgba(108, 140, 255, 0.08), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 90% 100%, rgba(180, 140, 255, 0.05), transparent 60%),
+    var(--bg-primary);
 }
 
 /* ---------- Sidebar ---------- */
@@ -102,33 +165,45 @@ body {
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
   height: 100%;
-  background: var(--bg-surface);
-  border-right: 1px solid var(--border-color);
+  background: transparent;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  z-index: 10;
+  z-index: var(--z-docked);
+  padding: 10px 8px 10px 10px;
+  gap: 8px;
 }
 
 .sidebar-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 12px 14px;
   display: flex;
   align-items: center;
   gap: 10px;
+  background: linear-gradient(135deg, rgba(108, 140, 255, 0.12), rgba(108, 140, 255, 0.03));
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }
 
 .sidebar-header h1 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--text-primary);
+  background: linear-gradient(135deg, #e8eaf0, #9ac0ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .sidebar-content {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 0;
+  padding: 2px 2px;
+  margin-right: -4px; /* give scrollbar room */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .sidebar-section {
@@ -140,11 +215,11 @@ body {
 }
 
 .section-title {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin-bottom: 8px;
   padding: 0 4px;
 }
@@ -218,12 +293,19 @@ body {
   background: var(--bg-surface-hover);
   color: var(--text-primary);
   border-color: var(--border-light);
+  transform: translateY(-1px);
+}
+
+.mode-btn:active {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 80ms;
 }
 
 .mode-btn.active {
   background: var(--accent-blue-dim);
   color: var(--accent-blue);
   border-color: var(--accent-blue);
+  box-shadow: inset 0 0 0 1px var(--accent-blue-dim), 0 0 0 3px rgba(108, 140, 255, 0.1);
 }
 
 .mode-btn .mode-icon {
@@ -536,7 +618,7 @@ body {
   flex: 1;
   width: 100%;
   height: 100%;
-  background: var(--bg-primary);
+  background: #0f1117;
 }
 
 /* ---------- Map Markers ---------- */
@@ -579,36 +661,130 @@ body {
 }
 
 /* Click marker bounce in */
-.click-marker {
-  animation: marker-drop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
+/* click-marker removed in v0.1.50 — left-click no longer drops a pin. */
 
 @keyframes marker-drop {
-  0% { transform: translateY(-30px); opacity: 0; }
-  60% { transform: translateY(4px); }
+  0%   { transform: translateY(-24px); opacity: 0; }
+  60%  { transform: translateY(3px); opacity: 1; }
   100% { transform: translateY(0); opacity: 1; }
 }
 
-/* Destination marker gentle bounce */
-.dest-marker {
-  animation: marker-drop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+/* Destination marker gentle drop — animate the inner SVG so Leaflet's
+   positioning transform on the outer element is preserved. */
+.dest-marker svg {
+  animation: marker-drop 0.42s var(--ease-spring);
+  transform-origin: 50% 90%;
 }
 
-/* Waypoint marker pop in */
-.waypoint-marker {
-  animation: marker-pop 0.3s ease-out;
+/* Waypoint marker pop in — animate the inner SVG, not the outer
+   container (Leaflet uses transform on the outer for positioning;
+   overriding it flashes the marker at the wrong place). */
+.waypoint-marker svg {
+  animation: marker-pop 0.28s var(--ease-spring);
+  transform-origin: 50% 90%;
 }
 
 @keyframes marker-pop {
-  0% { transform: scale(0); }
-  70% { transform: scale(1.15); }
-  100% { transform: scale(1); }
+  0%   { transform: scale(0); opacity: 0; }
+  70%  { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 /* Breathing highlight for the waypoint currently being approached. */
 @keyframes wp-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.35); }
   50%      { box-shadow: 0 0 0 4px rgba(255, 152, 0, 0.0); }
+}
+
+/* --- Reusable animation utilities ---
+   Used by toasts, modals, menus, panels, tooltips. All transform + opacity
+   only (GPU-accelerated, no layout thrash). */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes fade-slide-down {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+@keyframes fade-slide-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes scale-in-tl {
+  from { opacity: 0; transform: scale(0.94); transform-origin: top left; }
+  to   { opacity: 1; transform: scale(1); transform-origin: top left; }
+}
+@keyframes backdrop-in {
+  from { opacity: 0; backdrop-filter: blur(0); }
+  to   { opacity: 1; backdrop-filter: blur(6px); }
+}
+
+.anim-fade-in         { animation: fade-in 180ms var(--ease-out) both; }
+.anim-fade-slide-down { animation: fade-slide-down 220ms var(--ease-out) both; }
+.anim-fade-slide-up   { animation: fade-slide-up 240ms var(--ease-out) both; }
+.anim-scale-in        { animation: scale-in 200ms var(--ease-out) both; }
+.anim-scale-in-tl     { animation: scale-in-tl 160ms var(--ease-out) both; }
+.anim-backdrop-in     { animation: backdrop-in 220ms var(--ease-out) both; }
+
+/* Floating Action Button */
+.fab {
+  position: absolute;
+  right: 20px;
+  bottom: 72px;
+  z-index: var(--z-map-ui);
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: var(--accent-blue);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(108, 140, 255, 0.4), 0 2px 6px rgba(12, 18, 40, 0.4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--transition-fast),
+              box-shadow var(--transition-fast),
+              background var(--transition-fast);
+}
+.fab:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 12px 32px rgba(108, 140, 255, 0.5), 0 4px 10px rgba(12, 18, 40, 0.45);
+  background: var(--accent-blue-hover);
+}
+.fab:active:not(:disabled) {
+  transform: scale(0.97);
+  transition-duration: 80ms;
+}
+.fab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: var(--shadow-md);
+}
+.fab.danger {
+  background: var(--accent-red);
+  box-shadow: 0 8px 24px rgba(255, 71, 87, 0.4), 0 2px 6px rgba(12, 18, 40, 0.4);
+}
+.fab.danger:hover:not(:disabled) {
+  background: #ff5c69;
+  box-shadow: 0 12px 32px rgba(255, 71, 87, 0.5), 0 4px 10px rgba(12, 18, 40, 0.45);
+}
+
+/* Subtle noise overlay — breaks up perfectly flat dark surfaces without
+   calling attention to itself. Uses an inline SVG so no extra request. */
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  z-index: var(--z-base);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 
 /* Slight tone-down so OSM Standard tiles blend with the dark sidebar.
@@ -1218,27 +1394,55 @@ body {
 }
 
 .section {
-  padding: 10px 12px;
+  padding: 12px 14px;
+  background: rgba(20, 23, 34, 0.75);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.section:hover {
+  border-color: rgba(108, 140, 255, 0.18);
 }
 
 .section + .section {
-  border-top: 1px solid var(--border-color);
+  /* floating cards — gap handled by flex parent */
+  border-top: 1px solid var(--border-subtle);
 }
 
 .section > .section-title {
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   user-select: none;
+  position: relative;
+  padding-left: 10px;
+}
+
+/* Accent bar on the left of every section title so the section starts
+   with a visual anchor instead of just being text. */
+.section > .section-title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent-blue), rgba(108, 140, 255, 0.25));
+  opacity: 0.7;
 }
 
 .section > .section-title:hover {
-  color: var(--text-secondary);
+  color: var(--text-primary);
+}
+.section > .section-title:hover::before {
+  opacity: 1;
 }
 
 .section-content {
-  padding-top: 8px;
+  padding-top: 10px;
 }
 
 /* ---------- Action Buttons ---------- */
@@ -1266,8 +1470,9 @@ body {
   border-color: var(--border-light);
 }
 
-.action-btn:active {
+.action-btn:active:not(:disabled) {
   transform: scale(0.97);
+  transition-duration: 80ms;
 }
 
 .action-btn:disabled {
@@ -1280,11 +1485,13 @@ body {
   background: var(--accent-blue);
   color: #fff;
   border-color: var(--accent-blue);
+  box-shadow: var(--shadow-accent);
 }
 
 .action-btn.primary:hover:not(:disabled) {
   background: var(--accent-blue-hover);
   border-color: var(--accent-blue-hover);
+  box-shadow: 0 8px 24px rgba(108, 140, 255, 0.4);
 }
 
 .action-btn.danger {

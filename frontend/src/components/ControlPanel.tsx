@@ -604,11 +604,14 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
       {libraryOpen && createPortal(
         <div
+          className="anim-scale-in"
           style={{
-            position: 'fixed', left: libraryPos.x, top: libraryPos.y, zIndex: 9000,
+            position: 'fixed', left: libraryPos.x, top: libraryPos.y, zIndex: 800,
             width: 'min(420px, 90vw)', maxHeight: '75vh',
-            background: '#23232a', border: '1px solid #3a3a42', borderRadius: 8,
-            boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+            background: 'rgba(26, 29, 39, 0.96)',
+            backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+            border: '1px solid rgba(108, 140, 255, 0.18)', borderRadius: 12,
+            boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.04) inset',
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}
         >

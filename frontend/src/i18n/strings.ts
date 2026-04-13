@@ -153,6 +153,9 @@ export const STRINGS = {
   'map.coords_copied': { zh: '座標已複製', en: 'Coordinates copied' },
   'panel.coord_placeholder': { zh: '輸入座標 例如 25.045, 121.517', en: 'Enter coords e.g. 25.045, 121.517' },
   'panel.coord_invalid': { zh: '座標格式錯誤,請輸入 緯度, 經度', en: 'Invalid format — expected "lat, lng"' },
+  'panel.paste': { zh: '貼上', en: 'Paste' },
+  'panel.paste_tooltip': { zh: '從剪貼簿貼上座標', en: 'Paste coordinates from clipboard' },
+  'panel.paste_denied': { zh: '無法讀取剪貼簿,請改用 Ctrl+V', en: 'Clipboard read denied — use Ctrl+V instead' },
 
   // ── EtaBar ───────────────────────────────────
   'eta.remaining': { zh: '剩餘', en: 'Remaining' },

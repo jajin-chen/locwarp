@@ -370,6 +370,7 @@ const App: React.FC = () => {
 
   return (
     <div className="app-layout">
+      <div className="noise-overlay" aria-hidden />
       <div className="sidebar">
         <div className="sidebar-content">
         <DeviceStatus
@@ -674,11 +675,14 @@ const App: React.FC = () => {
         {addBmDialog && createPortal(
           <div
             onClick={(e) => e.stopPropagation()}
+            className="anim-scale-in"
             style={{
               position: 'fixed', top: 60, left: '50%', transform: 'translateX(-50%)',
-              zIndex: 100000, background: '#23232a', border: '1px solid #3a3a42',
-              borderRadius: 8, padding: 14, width: 300,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+              zIndex: 1000, background: 'rgba(26, 29, 39, 0.96)',
+              backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+              border: '1px solid rgba(108, 140, 255, 0.2)',
+              borderRadius: 12, padding: 16, width: 300,
+              boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05) inset',
             }}
           >
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{t('bm.add')}</div>
@@ -752,28 +756,29 @@ const App: React.FC = () => {
 
         {toastMsg && (
           <div
+            key={toastMsg}
+            className="anim-fade-slide-down"
             style={{
               position: 'fixed',
-              top: 70,
+              top: 72,
               left: '50%',
               transform: 'translateX(-50%)',
-              zIndex: 10001,
-              background: 'rgba(40, 44, 60, 0.95)',
+              zIndex: 1500,
+              background: 'rgba(26, 29, 39, 0.92)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
               color: '#fff',
-              padding: '10px 20px',
-              borderRadius: 6,
+              padding: '10px 18px',
+              borderRadius: 10,
               fontSize: 13,
               fontWeight: 500,
-              boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-              border: '1px solid rgba(108, 140, 255, 0.4)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
+              letterSpacing: '-0.005em',
+              boxShadow: '0 10px 32px rgba(12, 18, 40, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06) inset',
+              border: '1px solid rgba(108, 140, 255, 0.3)',
+              maxWidth: '70vw',
+              textAlign: 'center',
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4caf50" strokeWidth="2.5">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
             {toastMsg}
           </div>
         )}

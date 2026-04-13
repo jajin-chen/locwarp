@@ -539,21 +539,26 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
       {showWifiWarning && createPortal(
         <div
           onClick={() => setShowWifiWarning(false)}
+          className="anim-fade-in"
           style={{
             position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.65)',
+            background: 'rgba(8, 10, 20, 0.55)',
+            backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            zIndex: 100000, padding: 20,
+            zIndex: 1000, padding: 20,
           }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
+            className="anim-scale-in"
             style={{
-              background: '#1e1e1e', border: '1px solid #444', borderRadius: 10,
-              padding: 24, maxWidth: 560, width: '100%',
+              background: 'rgba(26, 29, 39, 0.96)',
+              backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+              border: '1px solid rgba(108, 140, 255, 0.2)', borderRadius: 14,
+              padding: 26, maxWidth: 560, width: '100%',
               maxHeight: '80vh', overflowY: 'auto',
               color: '#e8e8e8',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.75)',
+              boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05) inset',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
@@ -587,20 +592,25 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
       {showRepairConfirm && createPortal(
         <div
           onClick={() => { if (repairState !== 'running') setShowRepairConfirm(false); }}
+          className="anim-fade-in"
           style={{
             position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.65)',
+            background: 'rgba(8, 10, 20, 0.55)',
+            backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            zIndex: 100000, padding: 20,
+            zIndex: 1000, padding: 20,
           }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
+            className="anim-scale-in"
             style={{
-              background: '#1e1e1e', border: '1px solid #444', borderRadius: 10,
-              padding: 24, maxWidth: 460, width: '100%',
+              background: 'rgba(26, 29, 39, 0.96)',
+              backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+              border: '1px solid rgba(108, 140, 255, 0.2)', borderRadius: 14,
+              padding: 26, maxWidth: 460, width: '100%',
               color: '#e8e8e8',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.75)',
+              boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05) inset',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>

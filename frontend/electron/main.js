@@ -96,11 +96,18 @@ async function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: 'LocWarp',
+    // Match the app's dark theme so the initial frame isn't white while
+    // the renderer attaches — previously caused a jarring white flash.
+    backgroundColor: '#0f1117',
+    show: false,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
     },
   })
+  // Show the window once the first frame is painted. Combined with
+  // backgroundColor above, this eliminates the blank/white boot state.
+  mainWindow.once('ready-to-show', () => { mainWindow.show() })
 
   // Open target="_blank" / external links in the user's default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -115,12 +122,11 @@ async function createWindow() {
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
   } else {
+    // Spawn the backend in parallel and load the UI immediately. The
+    // renderer already has fetch-with-retry so it rides out the backend
+    // startup race — no need to block loadFile on waitForBackend() and
+    // stare at a blank window for seconds.
     startBackend()
-    try {
-      await waitForBackend()
-    } catch (err) {
-      console.error('[electron] backend did not come up:', err)
-    }
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
 }

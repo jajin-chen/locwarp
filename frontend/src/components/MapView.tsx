@@ -432,15 +432,16 @@ const MapView: React.FC<MapViewProps> = ({
           width: 30,
           height: 30,
           borderRadius: 4,
-          border: '1px solid rgba(0,0,0,0.2)',
-          background: currentPosition ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.6)',
-          color: currentPosition ? '#333' : '#aaa',
+          border: '1px solid rgba(0,0,0,0.25)',
+          background: currentPosition ? '#6c8cff' : '#3a4050',
+          color: '#fff',
           cursor: currentPosition ? 'pointer' : 'not-allowed',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.35)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           padding: 0,
+          opacity: currentPosition ? 1 : 0.55,
         }}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -453,14 +454,24 @@ const MapView: React.FC<MapViewProps> = ({
       </button>
 
       {/* Coord input overlay — bottom-left, above the map's status footer.
-          Takes a single "lat, lng" string; Enter or the teleport button goes. */}
+          Takes a single "lat, lng" string; Enter or the teleport button goes.
+          Stop right-click propagation so the browser's native context menu
+          (Paste / Copy) still works inside the input instead of the map's
+          custom teleport menu popping up. */}
       <div
+        onContextMenu={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="anim-fade-slide-up"
         style={{
-          position: 'absolute', left: 12, bottom: 28, zIndex: 800,
+          position: 'absolute', left: 12, bottom: 28, zIndex: 850,
           display: 'flex', alignItems: 'center', gap: 6,
-          background: 'rgba(30, 30, 36, 0.92)', borderRadius: 6,
-          padding: '6px 8px', boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
-          border: '1px solid rgba(255,255,255,0.1)',
+          background: 'rgba(26, 29, 39, 0.82)',
+          backdropFilter: 'blur(14px) saturate(140%)',
+          WebkitBackdropFilter: 'blur(14px) saturate(140%)',
+          borderRadius: 10,
+          padding: '7px 9px',
+          boxShadow: '0 10px 32px rgba(12, 18, 40, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06) inset',
+          border: '1px solid rgba(108, 140, 255, 0.15)',
         }}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6c8cff" strokeWidth="2" style={{ flexShrink: 0 }}>
@@ -480,6 +491,29 @@ const MapView: React.FC<MapViewProps> = ({
           }}
         />
         <button
+          onClick={async () => {
+            try {
+              const text = await navigator.clipboard.readText();
+              if (text) setCoordInput(text.trim());
+            } catch {
+              if (onShowToast) onShowToast(tRef.current('panel.paste_denied'));
+            }
+          }}
+          title={tRef.current('panel.paste_tooltip')}
+          style={{
+            background: 'rgba(255,255,255,0.08)',
+            color: '#c7d0e4', border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 4, padding: '4px 8px', fontSize: 11, fontWeight: 600,
+            cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3,
+          }}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" />
+            <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+          </svg>
+          {tRef.current('panel.paste')}
+        </button>
+        <button
           onClick={submitCoordGo}
           disabled={!coordInput.trim() || !deviceConnected}
           title={t('map.teleport_here')}
@@ -494,17 +528,19 @@ const MapView: React.FC<MapViewProps> = ({
 
       {contextMenu.visible && (
         <div
-          className="context-menu"
+          className="context-menu anim-scale-in-tl"
           style={{
             position: 'fixed',
             left: contextMenu.x,
             top: contextMenu.y,
-            zIndex: 10000,
-            background: '#2a2a2e',
-            border: '1px solid #444',
-            borderRadius: 6,
+            zIndex: 1000,
+            background: 'rgba(26, 29, 39, 0.95)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+            border: '1px solid rgba(108, 140, 255, 0.18)',
+            borderRadius: 10,
             padding: '4px 0',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            boxShadow: '0 10px 32px rgba(12, 18, 40, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04) inset',
             minWidth: 180,
           }}
           onClick={(e) => e.stopPropagation()}

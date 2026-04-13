@@ -616,18 +616,24 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
       {showCustomDialog && createPortal(
         <div
           onClick={() => setShowCustomDialog(false)}
+          className="anim-fade-in"
           style={{
             position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.6)', zIndex: 100001,
+            background: 'rgba(8, 10, 20, 0.55)',
+            backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+            zIndex: 1000,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
+            className="anim-scale-in"
             style={{
-              background: '#23232a', border: '1px solid #3a3a42', borderRadius: 8,
-              padding: 16, width: 320, color: '#e0e0e0',
-              boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
+              background: 'rgba(26, 29, 39, 0.96)',
+              backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+              border: '1px solid rgba(108, 140, 255, 0.2)',
+              borderRadius: 12, padding: 18, width: 320, color: '#e0e0e0',
+              boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05) inset',
             }}
           >
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
