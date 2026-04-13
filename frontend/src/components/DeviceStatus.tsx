@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { wifiTunnelDiscover } from '../services/api';
 import { useT } from '../i18n';
 
@@ -557,46 +558,52 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
         </div>
       )}
 
-      {showWifiWarning && (
+      {showWifiWarning && createPortal(
         <div
           onClick={() => setShowWifiWarning(false)}
           style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.65)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            zIndex: 9999,
+            zIndex: 100000, padding: 20,
           }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: '#1e1e1e', border: '1px solid #444', borderRadius: 8,
-              padding: 20, maxWidth: 420, width: '90%', color: '#e8e8e8',
-              boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
+              background: '#1e1e1e', border: '1px solid #444', borderRadius: 10,
+              padding: 24, maxWidth: 560, width: '100%',
+              maxHeight: '80vh', overflowY: 'auto',
+              color: '#e8e8e8',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.75)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
               <span style={{
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                width: 24, height: 24, borderRadius: '50%',
+                width: 32, height: 32, borderRadius: '50%',
                 background: 'rgba(255, 193, 7, 0.15)', color: '#ffc107',
-                fontSize: 16, fontWeight: 700, border: '1px solid rgba(255,193,7,0.5)',
+                fontSize: 20, fontWeight: 700, border: '1px solid rgba(255,193,7,0.5)',
+                flexShrink: 0,
               }}>!</span>
-              <strong style={{ fontSize: 14 }}>{t('wifi.warning_title')}</strong>
+              <strong style={{ fontSize: 16 }}>{t('wifi.warning_title')}</strong>
             </div>
-            <div style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-line', opacity: 0.9 }}>
+            <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-line', opacity: 0.92 }}>
               {t('wifi.warning_body')}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
               <button
                 onClick={() => setShowWifiWarning(false)}
                 style={{
-                  padding: '6px 16px', fontSize: 12, borderRadius: 4,
+                  padding: '8px 20px', fontSize: 13, borderRadius: 5,
                   background: '#6c8cff', color: '#fff', border: 'none', cursor: 'pointer',
+                  fontWeight: 600,
                 }}
               >{t('wifi.warning_ok')}</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
