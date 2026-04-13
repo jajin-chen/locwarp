@@ -11,7 +11,7 @@
 >
 > | iOS 版本 | 驗證來源 | 狀態 |
 > | --- | --- | --- |
-> | **26.4.1** | 開發者實測 | ![Verified](https://img.shields.io/badge/驗證通過-4caf50?style=flat-square) |
+> | **26.4.1** | 開發者實測 | ![Tested](https://img.shields.io/badge/測試可用-4caf50?style=flat-square) |
 > | **26.4** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
 > | **18.1.1** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
 >
