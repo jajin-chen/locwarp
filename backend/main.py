@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
@@ -14,7 +16,23 @@ from services.bookmarks import BookmarkManager
 from services.coord_format import CoordinateFormatter
 from services.reconnect import ReconnectManager
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+# Configure logging — console + rotating file in ~/.locwarp/logs/
+_log_fmt = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
+_log_dir = Path.home() / ".locwarp" / "logs"
+try:
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    _file_handler = RotatingFileHandler(
+        _log_dir / "backend.log",
+        maxBytes=2 * 1024 * 1024,  # 2 MB
+        backupCount=3,
+        encoding="utf-8",
+    )
+    _file_handler.setFormatter(logging.Formatter(_log_fmt))
+    _file_handler.setLevel(logging.INFO)
+    _handlers = [logging.StreamHandler(), _file_handler]
+except Exception:
+    _handlers = [logging.StreamHandler()]
+logging.basicConfig(level=logging.INFO, format=_log_fmt, handlers=_handlers, force=True)
 logger = logging.getLogger("locwarp")
 
 

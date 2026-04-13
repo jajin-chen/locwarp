@@ -19,9 +19,11 @@ router = APIRouter(prefix="/api/location", tags=["location"])
 
 
 async def _engine():
-    """Return the active SimulationEngine, lazily rebuilding it if a device
-    is actually connected but the engine slot is empty (e.g. DVT setup failed
-    during startup auto-connect, iPad screen was locked, etc.)."""
+    """Return the active SimulationEngine, lazily rebuilding it when the
+    device is reachable but the engine slot is empty. On the first attempt
+    we just rebuild the engine; if that fails we force a full disconnect +
+    reconnect + engine rebuild (covers the common iOS 17+ case where the
+    RSD tunnel is alive but the DVT channel has silently gone stale)."""
     from main import app_state
     import logging as _logging
     _log = _logging.getLogger("locwarp")
@@ -29,22 +31,55 @@ async def _engine():
     if app_state.simulation_engine is not None:
         return app_state.simulation_engine
 
-    # Engine missing — try to rebuild from any currently connected device
     dm = app_state.device_manager
-    connected_udids = list(dm._connections.keys())
-    if connected_udids:
-        udid = connected_udids[0]
-        _log.info("simulation_engine missing; attempting lazy rebuild for %s", udid)
+
+    # Pick a target UDID — already-connected first, then any discoverable device
+    target_udid = next(iter(dm._connections.keys()), None)
+    if target_udid is None:
         try:
-            await app_state.create_engine_for_device(udid)
-            if app_state.simulation_engine is not None:
-                return app_state.simulation_engine
+            discovered = await dm.discover_devices()
+            if discovered:
+                target_udid = discovered[0].udid
         except Exception:
-            _log.exception("Lazy engine rebuild failed for %s", udid)
+            _log.exception("discover_devices failed during lazy rebuild")
+
+    if target_udid is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "no_device", "message": "尚未連接任何 iOS 裝置,請先透過 USB 連線"},
+        )
+
+    # Attempt 1: rebuild engine on top of existing connection
+    _log.info("simulation_engine missing; attempt 1 (rebuild) for %s", target_udid)
+    try:
+        await app_state.create_engine_for_device(target_udid)
+        if app_state.simulation_engine is not None:
+            _log.info("Engine rebuild succeeded on attempt 1")
+            return app_state.simulation_engine
+    except Exception:
+        _log.exception("Engine rebuild (attempt 1) failed for %s", target_udid)
+
+    # Attempt 2: hard reset — disconnect + reconnect + rebuild
+    _log.info("attempt 2 (hard reset) for %s", target_udid)
+    try:
+        try:
+            await dm.disconnect(target_udid)
+        except Exception:
+            _log.warning("disconnect during hard reset failed; proceeding", exc_info=True)
+        await dm.connect(target_udid)
+        await app_state.create_engine_for_device(target_udid)
+        if app_state.simulation_engine is not None:
+            _log.info("Engine rebuild succeeded on attempt 2")
+            return app_state.simulation_engine
+    except Exception:
+        _log.exception("Engine rebuild (attempt 2, hard reset) failed for %s", target_udid)
 
     raise HTTPException(
         status_code=400,
-        detail={"code": "no_device", "message": "尚未連接任何 iOS 裝置,請先透過 USB 連線"},
+        detail={
+            "code": "no_device",
+            "message": "裝置連線已失效,請嘗試重新插拔 USB 或重新啟動 LocWarp(詳見 ~/.locwarp/logs/backend.log)",
+        },
     )
 
 
