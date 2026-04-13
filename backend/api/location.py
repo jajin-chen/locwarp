@@ -18,11 +18,34 @@ from models.schemas import (
 router = APIRouter(prefix="/api/location", tags=["location"])
 
 
-def _engine():
+async def _engine():
+    """Return the active SimulationEngine, lazily rebuilding it if a device
+    is actually connected but the engine slot is empty (e.g. DVT setup failed
+    during startup auto-connect, iPad screen was locked, etc.)."""
     from main import app_state
-    if app_state.simulation_engine is None:
-        raise HTTPException(status_code=400, detail={"code": "no_device", "message": "尚未連接任何 iOS 裝置,請先透過 USB 連線"})
-    return app_state.simulation_engine
+    import logging as _logging
+    _log = _logging.getLogger("locwarp")
+
+    if app_state.simulation_engine is not None:
+        return app_state.simulation_engine
+
+    # Engine missing — try to rebuild from any currently connected device
+    dm = app_state.device_manager
+    connected_udids = list(dm._connections.keys())
+    if connected_udids:
+        udid = connected_udids[0]
+        _log.info("simulation_engine missing; attempting lazy rebuild for %s", udid)
+        try:
+            await app_state.create_engine_for_device(udid)
+            if app_state.simulation_engine is not None:
+                return app_state.simulation_engine
+        except Exception:
+            _log.exception("Lazy engine rebuild failed for %s", udid)
+
+    raise HTTPException(
+        status_code=400,
+        detail={"code": "no_device", "message": "尚未連接任何 iOS 裝置,請先透過 USB 連線"},
+    )
 
 
 def _cooldown():
@@ -39,7 +62,7 @@ def _coord_fmt():
 
 @router.post("/teleport")
 async def teleport(req: TeleportRequest):
-    engine = _engine()
+    engine = await _engine()
     cooldown = _cooldown()
 
     # Enforce cooldown server-side: if enabled and currently active,
@@ -74,7 +97,7 @@ async def teleport(req: TeleportRequest):
 @router.post("/navigate")
 async def navigate(req: NavigateRequest):
     import asyncio
-    engine = _engine()
+    engine = await _engine()
     asyncio.create_task(engine.navigate(
         Coordinate(lat=req.lat, lng=req.lng), req.mode,
         speed_kmh=req.speed_kmh,
@@ -86,7 +109,7 @@ async def navigate(req: NavigateRequest):
 @router.post("/loop")
 async def loop(req: LoopRequest):
     import asyncio
-    engine = _engine()
+    engine = await _engine()
     asyncio.create_task(engine.start_loop(
         req.waypoints, req.mode,
         speed_kmh=req.speed_kmh,
@@ -98,7 +121,7 @@ async def loop(req: LoopRequest):
 @router.post("/multistop")
 async def multi_stop(req: MultiStopRequest):
     import asyncio
-    engine = _engine()
+    engine = await _engine()
     asyncio.create_task(engine.multi_stop(
         req.waypoints, req.mode, req.stop_duration, req.loop,
         speed_kmh=req.speed_kmh,
@@ -110,7 +133,7 @@ async def multi_stop(req: MultiStopRequest):
 @router.post("/randomwalk")
 async def random_walk(req: RandomWalkRequest):
     import asyncio
-    engine = _engine()
+    engine = await _engine()
     asyncio.create_task(engine.random_walk(
         req.center, req.radius_m, req.mode, req.min_pause, req.max_pause,
         speed_kmh=req.speed_kmh,
@@ -121,7 +144,7 @@ async def random_walk(req: RandomWalkRequest):
 
 @router.post("/joystick/start")
 async def joystick_start(req: JoystickStartRequest):
-    engine = _engine()
+    engine = await _engine()
     try:
         await engine.joystick_start(req.mode)
     except Exception as e:
@@ -131,35 +154,35 @@ async def joystick_start(req: JoystickStartRequest):
 
 @router.post("/joystick/stop")
 async def joystick_stop():
-    engine = _engine()
+    engine = await _engine()
     await engine.joystick_stop()
     return {"status": "stopped"}
 
 
 @router.post("/pause")
 async def pause():
-    engine = _engine()
+    engine = await _engine()
     await engine.pause()
     return {"status": "paused"}
 
 
 @router.post("/resume")
 async def resume():
-    engine = _engine()
+    engine = await _engine()
     await engine.resume()
     return {"status": "resumed"}
 
 
 @router.post("/restore")
 async def restore():
-    engine = _engine()
+    engine = await _engine()
     await engine.restore()
     return {"status": "restored"}
 
 
 @router.delete("/simulation")
 async def stop_simulation():
-    engine = _engine()
+    engine = await _engine()
     await engine.restore()
     return {"status": "stopped"}
 
@@ -183,7 +206,7 @@ async def debug_info():
 
 @router.get("/status", response_model=SimulationStatus)
 async def get_status():
-    engine = _engine()
+    engine = await _engine()
     status = engine.get_status()
     cooldown = _cooldown()
     cs = cooldown.get_status()
