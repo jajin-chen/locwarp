@@ -7,6 +7,15 @@
   <a href="README.en.md"><img alt="English" src="https://img.shields.io/badge/English-gray?style=flat-square"></a>
 </p>
 
+> ### 專案性質聲明
+>
+> LocWarp 為個人獨立維護之開源專案(hobby project),非商業產品,亦無專職團隊。開發者將盡力於合理時間內新增功能、回應 Issue、修復 Bug 並隨 iOS / pymobiledevice3 版本演進持續更新,然:
+>
+> - 本專案僅保證**於開發者本人測試環境**(目前為 iPhone 16 Pro Max / iOS 26.4.1 + Windows 11 專業版)下運作正常;
+> - **不保證於其他裝置、iOS 修補版本、網路環境、系統配置下皆能穩定使用**;
+> - 若遇到問題,歡迎至 [Issues](https://github.com/keezxc1223/locwarp/issues) 提交完整環境資訊與日誌,以協助定位與改善;
+> - 本專案不保證永續維護,亦不承擔因使用本工具所生之任何責任。
+
 > ### 相容性測試狀態
 >
 > | iOS 版本 | 驗證來源 | 狀態 |
@@ -341,6 +350,25 @@ locwarp/
 | Tunnel 啟動後 backend 連不上 | 確認以系統管理員身份啟動 |
 | `No such service: com.apple.instruments.dtservicehub` (iOS 17+/26) | LocWarp 會自動嘗試掛載 Developer Disk Image;若仍失敗,請:(1) 設定 → 隱私權與安全性 → **開發者模式** 關閉,重開機,再次開啟;(2) 確認可連線至 github.com(DDI 由此下載,約 20MB);(3) 拔除重插裝置再試。v0.1.34 起會自動回退到 legacy `com.apple.dt.simulatelocation` 服務。 |
 | DDI 下載卡住 / 逾時 | 檢查網路是否可到達 github.com;公司或校園網路可能封鎖 raw.githubusercontent.com。 |
+| **開發者模式未顯示**(iOS 16+) | 需先讓裝置被任一自簽 IPA 部署過,設定中方會出現該選項。請見下方「附錄:iPhone 開啟開發者模式(Windows 流程)」。 |
+
+---
+
+### 附錄:iPhone 開啟開發者模式(Windows 流程)
+
+iOS 16 起,「設定 → 隱私權與安全性 → 開發者模式」預設**不顯示**。Apple 要求裝置必須曾經被開發者簽署之 App 部署過,該選項才會出現。使用者可依下列流程側載任一自簽 IPA 完成觸發:
+
+1. 安裝 [**Sideloadly**](https://sideloadly.io/)。
+2. 於 [**Decrypt IPA Store**](https://decrypt.day/) 等解密 IPA 網站取得任意 IPA 檔案。建議挑選體積較小的檔案管理類 App 以縮短側載時間。
+3. 將 IPA 拖入 Sideloadly 視窗。
+4. USB 連接 iPhone,於 Sideloadly 輸入個人 Apple ID。
+5. 按下 **Start** 執行側載,等待完成。
+6. iPhone 上 設定 → 隱私權與安全性 → 滑至底部 → 會出現「**開發者模式**」。開啟該開關。
+7. 系統提示重新啟動,重啟後再次確認開發者模式為開啟狀態。
+
+完成後即可回到 LocWarp 建立連線。首次連線時,LocWarp 會視需要自動下載並掛載 Developer Disk Image。
+
+> 本流程參考自社群使用者回饋,感謝分享。
 
 ---
 

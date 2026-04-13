@@ -7,6 +7,15 @@
   <a href="README.en.md"><img alt="English" src="https://img.shields.io/badge/English-active-2d3748?style=flat-square"></a>
 </p>
 
+> ### Project Nature
+>
+> LocWarp is an independently-maintained open source hobby project — not a commercial product, and without a dedicated team. The author will make reasonable efforts to add features, respond to issues, fix bugs and track iOS / pymobiledevice3 updates, however:
+>
+> - Stable operation is only guaranteed in **the developer's own test environment** (currently iPhone 16 Pro Max / iOS 26.4.1 + Windows 11 Pro);
+> - **Stability on other devices, iOS patch revisions, network environments or system configurations is not guaranteed**;
+> - If you run into issues, please open an [Issue](https://github.com/keezxc1223/locwarp/issues) with full environment details and logs so the problem can be reproduced and addressed;
+> - The project makes no commitment to perpetual maintenance, and accepts no liability for consequences arising from its use.
+
 > ### Compatibility Status
 >
 > | iOS Version | Source | Status |
@@ -227,6 +236,25 @@ The installer is self-contained — end users need no Python or Node installed.
 | Backend unreachable after tunnel started | Make sure LocWarp was launched as Administrator |
 | `No such service: com.apple.instruments.dtservicehub` (iOS 17+/26) | LocWarp auto-mounts the Developer Disk Image. If it still fails: (1) Settings → Privacy & Security → **Developer Mode** off, reboot, turn it back on; (2) make sure github.com is reachable (DDI is downloaded from there, ~20 MB); (3) unplug and reconnect the device. Since v0.1.34 LocWarp also falls back to the legacy `com.apple.dt.simulatelocation` service automatically. |
 | DDI download hangs / times out | Check that github.com / raw.githubusercontent.com is reachable — some corporate or campus networks block it. |
+| **Developer Mode option missing** (iOS 16+) | The device must have had a signed app deployed to it before the option appears in Settings. See **Appendix: Enabling Developer Mode on iPhone (Windows)** below. |
+
+---
+
+### Appendix: Enabling Developer Mode on iPhone (Windows)
+
+Starting with iOS 16, **Settings → Privacy & Security → Developer Mode** is hidden by default. Apple only surfaces the toggle after the device has been deployed to by a developer-signed app at least once. Windows users can trigger this by sideloading any self-signed IPA:
+
+1. Install [**Sideloadly**](https://sideloadly.io/).
+2. Obtain an IPA file from a decrypted IPA source such as [**Decrypt IPA Store**](https://decrypt.day/). A small file-manager-style app is recommended to keep sideload time short.
+3. Drag the IPA into the Sideloadly window.
+4. Connect the iPhone via USB and enter your personal Apple ID in Sideloadly.
+5. Press **Start** and wait for the sideload to complete.
+6. On the iPhone: Settings → Privacy & Security → scroll to the bottom → the **Developer Mode** toggle will now appear. Turn it on.
+7. The device will prompt to restart. After the reboot, verify Developer Mode is still on.
+
+Once done, return to LocWarp and connect. On first connection LocWarp will download and mount the Developer Disk Image automatically if needed.
+
+> Procedure adapted from community feedback — thanks for sharing.
 
 ---
 
