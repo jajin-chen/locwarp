@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 
 interface Bookmark {
@@ -73,6 +74,11 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   const [contextMenu, setContextMenu] = useState<{ bm: Bookmark; x: number; y: number } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [showCustomDialog, setShowCustomDialog] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [customLat, setCustomLat] = useState('');
+  const [customLng, setCustomLng] = useState('');
+  const [customCategory, setCustomCategory] = useState(categories[0] || 'Default');
 
   // Close the context menu on any document click outside of it.
   // Using a document-level listener (instead of a full-screen overlay div)
@@ -112,6 +118,18 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
     setShowAddDialog(false);
   };
 
+  const handleAddCustom = () => {
+    const name = customName.trim();
+    const lat = parseFloat(customLat);
+    const lng = parseFloat(customLng);
+    if (!name) return;
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) return;
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) return;
+    onBookmarkAdd({ name, lat, lng, category: customCategory });
+    setCustomName(''); setCustomLat(''); setCustomLng('');
+    setShowCustomDialog(false);
+  };
+
   const handleContextMenu = (e: React.MouseEvent, bm: Bookmark) => {
     e.preventDefault();
     e.stopPropagation();
@@ -144,6 +162,21 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
           {t('bm.add')}
+        </button>
+        <button
+          className="action-btn"
+          onClick={() => {
+            setCustomCategory(categories[0] || 'Default');
+            setShowCustomDialog(true);
+          }}
+          style={{ padding: '3px 8px', fontSize: 12 }}
+          title={t('bm.add_custom_tooltip')}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="10" r="3" />
+            <path d="M12 2a8 8 0 00-8 8c0 6 8 12 8 12s8-6 8-12a8 8 0 00-8-8z" />
+          </svg>
+          {t('bm.add_custom')}
         </button>
         {exportUrl && (
           <a
@@ -578,6 +611,92 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             )}
           </div>
         </>
+      )}
+
+      {showCustomDialog && createPortal(
+        <div
+          onClick={() => setShowCustomDialog(false)}
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.6)', zIndex: 100001,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#23232a', border: '1px solid #3a3a42', borderRadius: 8,
+              padding: 16, width: 320, color: '#e0e0e0',
+              boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
+              {t('bm.add_custom')}
+            </div>
+            <input
+              type="text"
+              className="search-input"
+              placeholder={t('bm.name_placeholder')}
+              value={customName}
+              autoFocus
+              onChange={(e) => setCustomName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAddCustom();
+                if (e.key === 'Escape') setShowCustomDialog(false);
+              }}
+              style={{ width: '100%', marginBottom: 8 }}
+            />
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+              <input
+                type="text"
+                className="search-input"
+                inputMode="decimal"
+                placeholder={t('bm.lat_placeholder')}
+                value={customLat}
+                onChange={(e) => setCustomLat(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <input
+                type="text"
+                className="search-input"
+                inputMode="decimal"
+                placeholder={t('bm.lng_placeholder')}
+                value={customLng}
+                onChange={(e) => setCustomLng(e.target.value)}
+                style={{ flex: 1 }}
+              />
+            </div>
+            <select
+              value={customCategory}
+              onChange={(e) => setCustomCategory(e.target.value)}
+              style={{
+                width: '100%', marginBottom: 12, padding: '6px 8px',
+                background: '#1e1e22', color: '#e0e0e0', border: '1px solid #444',
+                borderRadius: 4, fontSize: 12,
+              }}
+            >
+              {categories.map((c) => (
+                <option key={c} value={c}>{displayCat(c)}</option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                className="action-btn primary"
+                style={{ flex: 1 }}
+                disabled={
+                  !customName.trim() ||
+                  !Number.isFinite(parseFloat(customLat)) ||
+                  !Number.isFinite(parseFloat(customLng))
+                }
+                onClick={handleAddCustom}
+              >{t('generic.add')}</button>
+              <button className="action-btn" onClick={() => setShowCustomDialog(false)}>
+                {t('generic.cancel')}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
