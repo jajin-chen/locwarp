@@ -28,6 +28,9 @@ class MultiStopNavigator:
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
+        pause_enabled: bool = True,
+        pause_min: float = 5.0,
+        pause_max: float = 20.0,
     ) -> None:
         """Navigate through *waypoints* one leg at a time.
 
@@ -148,14 +151,18 @@ class MultiStopNavigator:
                     "lng": wp_b.lng,
                 })
 
-                # Pause at the stop. If caller provided stop_duration, use it;
-                # otherwise default to a random 5~20s pause for realism.
-                # Last stop only pauses when looping.
+                # Pause at the stop. Precedence: explicit stop_duration > per-mode
+                # random range (when pause_enabled). Last stop only pauses when looping.
                 is_last = i == len(waypoints) - 2
                 if stop_duration and stop_duration > 0:
                     this_pause = float(stop_duration)
+                elif pause_enabled:
+                    lo, hi = sorted((float(pause_min), float(pause_max)))
+                    if lo < 0:
+                        lo = 0.0
+                    this_pause = random.uniform(lo, hi) if hi > 0 else 0.0
                 else:
-                    this_pause = random.uniform(5.0, 20.0)
+                    this_pause = 0.0
                 should_pause = this_pause > 0 and (not is_last or loop)
 
                 if should_pause:

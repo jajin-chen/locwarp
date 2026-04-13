@@ -183,6 +183,9 @@ class SimulationEngine:
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
+        pause_enabled: bool = True,
+        pause_min: float = 5.0,
+        pause_max: float = 20.0,
     ) -> None:
         """Start looping through a closed route."""
         await self._ensure_stopped()
@@ -192,6 +195,7 @@ class SimulationEngine:
             self._looper.start_loop(
                 waypoints, mode, speed_kmh=speed_kmh,
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
+                pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
             ),
             "Loop",
         )
@@ -220,6 +224,9 @@ class SimulationEngine:
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
+        pause_enabled: bool = True,
+        pause_min: float = 5.0,
+        pause_max: float = 20.0,
     ) -> None:
         """Navigate through waypoints with optional stops."""
         await self._ensure_stopped()
@@ -229,6 +236,7 @@ class SimulationEngine:
             self._multi_stop.start(
                 waypoints, mode, stop_duration, loop, speed_kmh=speed_kmh,
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
+                pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
             ),
             "Multi-stop",
         )
@@ -238,11 +246,12 @@ class SimulationEngine:
         center: Coordinate,
         radius_m: float,
         mode: MovementMode,
-        min_pause: float = 5.0,
-        max_pause: float = 30.0,
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
+        pause_enabled: bool = True,
+        pause_min: float = 5.0,
+        pause_max: float = 20.0,
     ) -> None:
         """Begin a random walk within a radius."""
         await self._ensure_stopped()
@@ -250,8 +259,10 @@ class SimulationEngine:
         self._pause_event.set()
         await self._run_handler(
             self._random_walk.start(
-                center, radius_m, mode, min_pause, max_pause, speed_kmh=speed_kmh,
+                center, radius_m, mode,
+                speed_kmh=speed_kmh,
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
+                pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
             ),
             "Random walk",
         )

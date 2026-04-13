@@ -48,6 +48,33 @@ export function useSimulation(wsMessage: WsMessage | null) {
   const [customSpeedKmh, setCustomSpeedKmh] = useState<number | null>(null)
   const [speedMinKmh, setSpeedMinKmh] = useState<number | null>(null)
   const [speedMaxKmh, setSpeedMaxKmh] = useState<number | null>(null)
+
+  // Per-mode pause settings, persisted in localStorage.
+  interface PauseSetting { enabled: boolean; min: number; max: number }
+  const defaultPause: PauseSetting = { enabled: true, min: 5, max: 20 }
+  const loadPause = (key: string): PauseSetting => {
+    try {
+      const raw = localStorage.getItem(key)
+      if (!raw) return defaultPause
+      const p = JSON.parse(raw)
+      return {
+        enabled: typeof p.enabled === 'boolean' ? p.enabled : true,
+        min: typeof p.min === 'number' ? p.min : 5,
+        max: typeof p.max === 'number' ? p.max : 20,
+      }
+    } catch {
+      return defaultPause
+    }
+  }
+  const savePause = (key: string, v: PauseSetting) => {
+    try { localStorage.setItem(key, JSON.stringify(v)) } catch { /* ignore */ }
+  }
+  const [pauseMultiStop, setPauseMultiStopRaw] = useState<PauseSetting>(() => loadPause('locwarp.pause.multi_stop'))
+  const [pauseLoop, setPauseLoopRaw] = useState<PauseSetting>(() => loadPause('locwarp.pause.loop'))
+  const [pauseRandomWalk, setPauseRandomWalkRaw] = useState<PauseSetting>(() => loadPause('locwarp.pause.random_walk'))
+  const setPauseMultiStop = (v: PauseSetting) => { setPauseMultiStopRaw(v); savePause('locwarp.pause.multi_stop', v) }
+  const setPauseLoop = (v: PauseSetting) => { setPauseLoopRaw(v); savePause('locwarp.pause.loop', v) }
+  const setPauseRandomWalk = (v: PauseSetting) => { setPauseRandomWalkRaw(v); savePause('locwarp.pause.random_walk', v) }
   const [error, setError] = useState<string | null>(null)
   // Random-walk pause countdown (unix epoch seconds of when pause ends)
   const [pauseEndAt, setPauseEndAt] = useState<number | null>(null)
@@ -202,7 +229,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
         throw err
       }
     },
-    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh],
+    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseMultiStop, pauseLoop, pauseRandomWalk],
   )
 
   const startLoop = useCallback(
@@ -212,7 +239,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
         setMode(SimMode.Loop)
         setWaypoints(wps)
         setProgress(0)
-        const res = await api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh })
+        const res = await api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseLoop.enabled, pause_min: pauseLoop.min, pause_max: pauseLoop.max })
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
         return res
       } catch (err: any) {
@@ -220,7 +247,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
         throw err
       }
     },
-    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh],
+    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseMultiStop, pauseLoop, pauseRandomWalk],
   )
 
   const multiStop = useCallback(
@@ -230,7 +257,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
         setMode(SimMode.MultiStop)
         setWaypoints(wps)
         setProgress(0)
-        const res = await api.multiStop(wps, moveMode, stopDuration, loop, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh })
+        const res = await api.multiStop(wps, moveMode, stopDuration, loop, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseMultiStop.enabled, pause_min: pauseMultiStop.min, pause_max: pauseMultiStop.max })
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
         return res
       } catch (err: any) {
@@ -238,7 +265,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
         throw err
       }
     },
-    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh],
+    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseMultiStop, pauseLoop, pauseRandomWalk],
   )
 
   const randomWalk = useCallback(
@@ -247,7 +274,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
       try {
         setMode(SimMode.RandomWalk)
         setProgress(0)
-        const res = await api.randomWalk(center, radiusM, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh })
+        const res = await api.randomWalk(center, radiusM, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseRandomWalk.enabled, pause_min: pauseRandomWalk.min, pause_max: pauseRandomWalk.max })
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
         return res
       } catch (err: any) {
@@ -255,7 +282,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
         throw err
       }
     },
-    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh],
+    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseMultiStop, pauseLoop, pauseRandomWalk],
   )
 
   const joystickStart = useCallback(async () => {
@@ -367,6 +394,12 @@ export function useSimulation(wsMessage: WsMessage | null) {
     setSpeedMinKmh,
     speedMaxKmh,
     setSpeedMaxKmh,
+    pauseMultiStop,
+    setPauseMultiStop,
+    pauseLoop,
+    setPauseLoop,
+    pauseRandomWalk,
+    setPauseRandomWalk,
     pauseRemaining,
     error,
     clearError,

@@ -26,6 +26,9 @@ class RouteLooper:
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
+        pause_enabled: bool = True,
+        pause_min: float = 5.0,
+        pause_max: float = 20.0,
     ) -> None:
         """Build a multi-waypoint route that forms a closed loop, then
         traverse it repeatedly until stopped.
@@ -95,19 +98,24 @@ class RouteLooper:
             await engine._emit("lap_complete", {"lap": engine.lap_count})
             logger.info("Loop lap %d complete", engine.lap_count)
 
-            # Random 5~20s pause between laps for realism
-            lap_pause = random.uniform(5.0, 20.0)
-            logger.info("Loop: pausing %.1fs before next lap", lap_pause)
-            await engine._emit("pause_countdown", {
-                "duration_seconds": lap_pause,
-                "source": "loop",
-            })
-            try:
-                await asyncio.wait_for(engine._stop_event.wait(), timeout=lap_pause)
-                break
-            except asyncio.TimeoutError:
-                pass
-            await engine._emit("pause_countdown_end", {"source": "loop"})
+            # Optional random pause between laps
+            if pause_enabled:
+                lo, hi = sorted((float(pause_min), float(pause_max)))
+                if lo < 0:
+                    lo = 0.0
+                if hi > 0:
+                    lap_pause = random.uniform(lo, hi)
+                    logger.info("Loop: pausing %.1fs before next lap", lap_pause)
+                    await engine._emit("pause_countdown", {
+                        "duration_seconds": lap_pause,
+                        "source": "loop",
+                    })
+                    try:
+                        await asyncio.wait_for(engine._stop_event.wait(), timeout=lap_pause)
+                        break
+                    except asyncio.TimeoutError:
+                        pass
+                    await engine._emit("pause_countdown_end", {"source": "loop"})
 
         if engine.state == SimulationState.LOOPING:
             engine.state = SimulationState.IDLE

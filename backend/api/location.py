@@ -149,6 +149,7 @@ async def loop(req: LoopRequest):
         req.waypoints, req.mode,
         speed_kmh=req.speed_kmh,
         speed_min_kmh=req.speed_min_kmh, speed_max_kmh=req.speed_max_kmh,
+        pause_enabled=req.pause_enabled, pause_min=req.pause_min, pause_max=req.pause_max,
     ))
     return {"status": "started", "waypoints": len(req.waypoints), "mode": req.mode}
 
@@ -161,6 +162,7 @@ async def multi_stop(req: MultiStopRequest):
         req.waypoints, req.mode, req.stop_duration, req.loop,
         speed_kmh=req.speed_kmh,
         speed_min_kmh=req.speed_min_kmh, speed_max_kmh=req.speed_max_kmh,
+        pause_enabled=req.pause_enabled, pause_min=req.pause_min, pause_max=req.pause_max,
     ))
     return {"status": "started", "stops": len(req.waypoints), "mode": req.mode}
 
@@ -170,9 +172,10 @@ async def random_walk(req: RandomWalkRequest):
     import asyncio
     engine = await _engine()
     asyncio.create_task(engine.random_walk(
-        req.center, req.radius_m, req.mode, req.min_pause, req.max_pause,
+        req.center, req.radius_m, req.mode,
         speed_kmh=req.speed_kmh,
         speed_min_kmh=req.speed_min_kmh, speed_max_kmh=req.speed_max_kmh,
+        pause_enabled=req.pause_enabled, pause_min=req.pause_min, pause_max=req.pause_max,
     ))
     return {"status": "started", "radius_m": req.radius_m, "mode": req.mode}
 

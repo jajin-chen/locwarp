@@ -64,6 +64,9 @@ class LoopRequest(BaseModel):
     speed_kmh: float | None = None
     speed_min_kmh: float | None = None
     speed_max_kmh: float | None = None
+    pause_enabled: bool = True
+    pause_min: float = 5.0
+    pause_max: float = 20.0
 
 
 class MultiStopRequest(BaseModel):
@@ -74,17 +77,21 @@ class MultiStopRequest(BaseModel):
     speed_kmh: float | None = None
     speed_min_kmh: float | None = None
     speed_max_kmh: float | None = None
+    pause_enabled: bool = True
+    pause_min: float = 5.0
+    pause_max: float = 20.0
 
 
 class RandomWalkRequest(BaseModel):
     center: Coordinate
     radius_m: float = 500.0
     mode: MovementMode = MovementMode.WALKING
-    min_pause: float = 5.0
-    max_pause: float = 30.0
     speed_kmh: float | None = None
     speed_min_kmh: float | None = None
     speed_max_kmh: float | None = None
+    pause_enabled: bool = True
+    pause_min: float = 5.0
+    pause_max: float = 20.0
 
 
 class JoystickStartRequest(BaseModel):

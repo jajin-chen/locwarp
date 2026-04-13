@@ -180,6 +180,7 @@ export const STRINGS = {
 
   // ── Toasts extra ─────────────────────────────
   'toast.no_position_random': { zh: '尚未取得目前位置,無法產生隨機路徑點', en: 'No current position — cannot generate random waypoints' },
+  'toast.no_waypoints': { zh: '尚未設定路徑點,請在地圖上右鍵添加或使用隨機產生', en: 'No waypoints set — right-click the map to add, or use Random generate' },
   'toast.pause_countdown': { zh: '到點暫停中 · 剩餘 {n}s', en: 'Paused at waypoint · {n}s left' },
 
   // ── Bookmarks ────────────────────────────────
@@ -208,6 +209,14 @@ export const STRINGS = {
 
   // ── Map extras ──────────────────────────────
   'map.destination': { zh: '目的地', en: 'Destination' },
+
+  // ── Pause settings ──────────────────────────
+  'pause.multi_stop': { zh: '每站隨機暫停', en: 'Random pause at each stop' },
+  'pause.loop': { zh: '每圈隨機暫停', en: 'Random pause between laps' },
+  'pause.random_walk': { zh: '每段隨機暫停', en: 'Random pause between legs' },
+  'pause.min': { zh: '最小', en: 'Min' },
+  'pause.max': { zh: '最大', en: 'Max' },
+  'pause.seconds': { zh: '秒', en: 's' },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

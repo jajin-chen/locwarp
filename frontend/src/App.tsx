@@ -12,6 +12,7 @@ import ControlPanel from './components/ControlPanel'
 import DeviceStatus from './components/DeviceStatus'
 import JoystickPad from './components/JoystickPad'
 import EtaBar from './components/EtaBar'
+import PauseControl from './components/PauseControl'
 import StatusBar from './components/StatusBar'
 
 import { SimMode, MoveMode } from './hooks/useSimulation'
@@ -184,28 +185,38 @@ const App: React.FC = () => {
   }, [sim])
 
   const handleStartWaypointRoute = useCallback(() => {
-    if (sim.waypoints.length < 1) return
+    if (sim.waypoints.length < 1) {
+      showToast(t('toast.no_waypoints'))
+      return
+    }
     const route = sim.currentPosition
       ? [{ lat: sim.currentPosition.lat, lng: sim.currentPosition.lng }, ...sim.waypoints]
       : sim.waypoints
-    if (route.length < 2) return
+    if (route.length < 2) {
+      showToast(t('toast.no_waypoints'))
+      return
+    }
     if (sim.mode === SimMode.Loop) {
       sim.startLoop(route)
     } else if (sim.mode === SimMode.MultiStop) {
       sim.multiStop(route, 0, false)
     }
-  }, [sim])
+  }, [sim, showToast, t])
 
   // -- ControlPanel handlers --
   const handleStart = useCallback(() => {
     if (sim.mode === SimMode.Joystick) {
       sim.joystickStart(sim.moveMode)
-    } else if (sim.mode === SimMode.RandomWalk && sim.currentPosition) {
+    } else if (sim.mode === SimMode.RandomWalk) {
+      if (!sim.currentPosition) {
+        showToast(t('toast.no_position_random'))
+        return
+      }
       sim.randomWalk(sim.currentPosition, randomWalkRadius)
     } else if (sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop) {
       handleStartWaypointRoute()
     }
-  }, [sim, randomWalkRadius, handleStartWaypointRoute])
+  }, [sim, randomWalkRadius, handleStartWaypointRoute, showToast, t])
 
   const handleStop = useCallback(() => {
     sim.restore()
@@ -369,6 +380,8 @@ const App: React.FC = () => {
           onRouteLoad={handleRouteLoad}
           onRouteSave={handleRouteSave}
           randomWalkRadius={randomWalkRadius}
+          pauseRandomWalk={sim.pauseRandomWalk}
+          onPauseRandomWalkChange={sim.setPauseRandomWalk}
           onRandomWalkRadiusChange={setRandomWalkRadius}
           currentWaypointsCount={sim.waypoints.length}
           modeExtraSection={(sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop) ? (
@@ -383,6 +396,11 @@ const App: React.FC = () => {
               <span style={{ fontSize: 10, opacity: 0.5, marginLeft: 4 }}>{t('panel.waypoints_hint')}</span>
             </div>
             <div className="section-content">
+              <PauseControl
+                labelKey={sim.mode === SimMode.Loop ? 'pause.loop' : 'pause.multi_stop'}
+                value={sim.mode === SimMode.Loop ? sim.pauseLoop : sim.pauseMultiStop}
+                onChange={sim.mode === SimMode.Loop ? sim.setPauseLoop : sim.setPauseMultiStop}
+              />
               <div style={{ marginBottom: 6, fontSize: 11 }}>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
                   <span style={{ opacity: 0.7, width: 36 }}>{t('panel.waypoints_radius')}</span>

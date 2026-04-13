@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
+import PauseControl from './PauseControl';
 import { SimMode, MoveMode } from '../hooks/useSimulation';
 import AddressSearch from './AddressSearch';
 import BookmarkList from './BookmarkList';
@@ -63,6 +64,8 @@ interface ControlPanelProps {
   onRouteGpxImport?: (file: File) => Promise<void>;
   onRouteGpxExport?: (id: string) => void;
   randomWalkRadius: number;
+  pauseRandomWalk?: { enabled: boolean; min: number; max: number };
+  onPauseRandomWalkChange?: (v: { enabled: boolean; min: number; max: number }) => void;
   onRandomWalkRadiusChange: (radius: number) => void;
   modeExtraSection?: React.ReactNode;
   currentWaypointsCount?: number;
@@ -177,6 +180,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onRouteGpxImport,
   onRouteGpxExport,
   randomWalkRadius,
+  pauseRandomWalk,
+  onPauseRandomWalkChange,
   onRandomWalkRadiusChange,
   modeExtraSection,
   currentWaypointsCount = 0,
@@ -332,6 +337,15 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </button>
               ))}
             </div>
+            {pauseRandomWalk && onPauseRandomWalkChange && (
+              <div style={{ marginTop: 8 }}>
+                <PauseControl
+                  labelKey="pause.random_walk"
+                  value={pauseRandomWalk}
+                  onChange={onPauseRandomWalkChange}
+                />
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -512,27 +526,40 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
         {sections.coords && (
           <div className="section-content">
-            <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-              <input
-                type="text"
-                className="search-input"
-                placeholder={t('panel.coord_lat')}
-                value={coordLat}
-                onChange={(e) => setCoordLat(e.target.value)}
+            <input
+              type="text"
+              className="search-input"
+              placeholder={t('panel.coord_lat')}
+              value={coordLat}
+              onChange={(e) => setCoordLat(e.target.value)}
+              style={{ width: '100%', marginBottom: 6 }}
+            />
+            <input
+              type="text"
+              className="search-input"
+              placeholder={t('panel.coord_lng')}
+              value={coordLng}
+              onChange={(e) => setCoordLng(e.target.value)}
+              style={{ width: '100%', marginBottom: 6 }}
+            />
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                className="action-btn primary"
+                onClick={handleCoordGo}
                 style={{ flex: 1 }}
-              />
-              <input
-                type="text"
-                className="search-input"
-                placeholder={t('panel.coord_lng')}
-                value={coordLng}
-                onChange={(e) => setCoordLng(e.target.value)}
-                style={{ flex: 1 }}
-              />
+              >
+                {t('panel.coord_go')}
+              </button>
+              <button
+                className="action-btn"
+                onClick={() => { setCoordLat(''); setCoordLng(''); }}
+                disabled={!coordLat && !coordLng}
+                style={{ padding: '4px 12px' }}
+                title={t('generic.clear')}
+              >
+                {t('generic.clear')}
+              </button>
             </div>
-            <button className="action-btn primary" onClick={handleCoordGo} style={{ width: '100%' }}>
-              {t('panel.coord_go')}
-            </button>
             {currentPosition && (
               <div style={{ fontSize: 11, opacity: 0.6, marginTop: 6 }}>
                 {t('panel.current_pos')} {currentPosition.lat.toFixed(6)}, {currentPosition.lng.toFixed(6)}

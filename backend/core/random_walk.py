@@ -27,12 +27,13 @@ class RandomWalkHandler:
         center: Coordinate,
         radius_m: float,
         mode: MovementMode,
-        min_pause: float = 5.0,
-        max_pause: float = 30.0,
         *,
         speed_kmh: float | None = None,
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
+        pause_enabled: bool = True,
+        pause_min: float = 5.0,
+        pause_max: float = 20.0,
     ) -> None:
         """Begin a random walk around *center* within *radius_m*.
 
@@ -44,10 +45,10 @@ class RandomWalkHandler:
             Maximum distance from centre (meters).
         mode
             Movement speed profile.
-        min_pause
-            Minimum pause (seconds) at each random destination.
-        max_pause
-            Maximum pause (seconds) at each random destination.
+        pause_enabled
+            Whether to pause at each random destination (True by default).
+        pause_min, pause_max
+            When pause_enabled is True, pause for a random duration in this range.
         """
         engine = self.engine
 
@@ -191,8 +192,15 @@ class RandomWalkHandler:
 
             logger.info("Random walk arrived at destination %d", walk_count)
 
-            # Random pause at the destination
-            pause_duration = random.uniform(min_pause, max_pause)
+            # Optional random pause at the destination
+            if not pause_enabled:
+                continue
+            lo, hi = sorted((float(pause_min), float(pause_max)))
+            if lo <= 0 and hi <= 0:
+                continue
+            if lo < 0:
+                lo = 0.0
+            pause_duration = random.uniform(lo, hi)
             logger.info("Random walk pausing for %.1fs before next leg", pause_duration)
 
             await engine._emit("pause_countdown", {
