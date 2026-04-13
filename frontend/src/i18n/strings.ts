@@ -131,6 +131,8 @@ export const STRINGS = {
 
   // ── Map ──────────────────────────────────────
   'map.recenter': { zh: '定位到目前位置', en: 'Recenter on current position' },
+  'map.click_not_locate': { zh: '此功能非定位', en: 'This is NOT teleport' },
+  'map.click_use_right': { zh: '請用右鍵「瞬移到這裡」', en: 'Right-click to "Teleport here"' },
   'map.teleport_here': { zh: '瞬移到這裡', en: 'Teleport here' },
   'map.navigate_here': { zh: '導航到這裡', en: 'Navigate here' },
   'map.add_waypoint': { zh: '添加路徑點', en: 'Add waypoint' },

@@ -114,18 +114,25 @@ const MapView: React.FC<MapViewProps> = ({
 
       // Reuse the same marker to avoid a visible remount flash at (0,0)
       // before CSS transform kicks in. setLatLng is atomic.
+      const clickHintLine1 = t('map.click_not_locate');
+      const clickHintLine2 = t('map.click_use_right');
+      const tooltipHtml = (
+        `<div style="text-align:center;line-height:1.35">` +
+          `<div>${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}</div>` +
+          `<div style="font-size:10px;color:#ffb74d;margin-top:2px">${clickHintLine1}</div>` +
+          `<div style="font-size:10px;color:#ffb74d">${clickHintLine2}</div>` +
+        `</div>`
+      );
       if (!clickMarkerRef.current) {
         clickMarkerRef.current = L.marker([e.latlng.lat, e.latlng.lng], { icon: clickIcon });
         clickMarkerRef.current.bindTooltip(
-          `${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`,
+          tooltipHtml,
           { direction: 'top', offset: [0, -52], permanent: false },
         );
         clickMarkerRef.current.addTo(map);
       } else {
         clickMarkerRef.current.setLatLng([e.latlng.lat, e.latlng.lng]);
-        clickMarkerRef.current.setTooltipContent(
-          `${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`,
-        );
+        clickMarkerRef.current.setTooltipContent(tooltipHtml);
       }
       clickMarkerRef.current.openTooltip();
 
