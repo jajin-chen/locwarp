@@ -76,30 +76,47 @@
 - **Three presets**: Walking 5 / Running 10 / Driving 40 km/h
 - **Custom fixed speed**: override with any km/h value
 - **Random range**: enter min–max (e.g., 40–80 km/h); backend re-picks per leg for realistic variation
-- Status bar reflects the active speed (range > custom > preset)
+- **Apply new speed mid-route**: change speed during navigate / loop / multi-stop / random-walk / joystick and press **Apply** — backend re-interpolates the remaining route from the device's current position with the new speed and continues, **no stop+restart needed**
+- Status bar shows the **backend-reported active speed** (typed-but-not-applied values don't lie about what's running)
 - Orange countdown banner shows on top of the map during pauses
 
-### Connection
+### Connection (iOS 17+)
 
 - **USB**: plug in and auto-connect; screen can be locked freely
-- **Wi-Fi Tunnel (iOS 17+)**:
+- **Wi-Fi Tunnel (USB-free mode)**:
   - "Auto Detect" first tries mDNS, then falls back to a /24 TCP scan on port 49152
   - Successful IP / Port is saved to localStorage and auto-filled next launch
   - Stopping the tunnel automatically falls back to USB if still plugged in
-- Wi-Fi panel is collapsible with iOS-version tabs
+  - **Re-pair** button: rebuilds a damaged RemotePairing record (`~/.pymobiledevice3/`) via USB in one click (iPhone shows the Trust prompt)
+- **Real-time USB hotplug detection**:
+  - Unplug detected within ~4 s: drops engine + red banner + right-click menu shows "USB disconnected"
+  - Re-plug auto-detected and reconnected, engine rebuilt, **no refresh needed**
+- **Version check on connect**: iOS <17 devices are rejected with an explicit version + upgrade prompt
+
+### Developer Disk Image
+
+- iOS 17+ first-time connect auto-mounts the **Personalized DDI** (downloaded from GitHub, ~20 MB); already-mounted is a no-op
+- Mount progress shown in the UI; failures surface the real error message instead of being swallowed into the log
 
 ### Map & Utilities
 
 - **Recenter button** (bottom-left): centers the map on the current virtual position
-- **One-click Restore** (status bar): clears the iPhone's virtual location with toast confirmation
-- **Bookmarks & categories**, **saved routes**, **address search** (Nominatim)
+- **One-click Restore** (status bar): clears the iPhone's virtual location, with "Clearing…" then "Cleared, please wait for it to take effect" toasts
+- **Stop ≠ Restore**: Stop only halts movement; the simulated location stays put. Use Restore to actually clear it.
+- **Bookmarks & categories**: custom-coordinate entries, JSON full export / import (merge, no overwrite), right-click "Copy name & coords"
+- **Saved routes** with **GPX import / export**
+- **Waypoint progress highlight**: during multi-stop / loop / navigate, the current target waypoint pulses orange with a ▶ icon; passed waypoints fade to grey + ✓; the start waypoint is rendered as a green "Start" tag (map markers match: S badge / numbered)
+- **Address search** (Nominatim)
 - **Cooldown anti-detection**: dynamic delay based on teleport distance
 - **Coordinate format switching**: DD / DMS / DM
 
 ### UX
 
 - Auto-retry on startup races (up to ~20 s window) — no manual relaunch required
-- Real-time WebSocket push for position, progress, ETA, remaining distance
+- Real-time WebSocket push for position, progress, ETA, remaining distance, device connection state, DDI mount progress
+- **Open Log Folder** button (status bar): opens `~/.locwarp/logs/` so you can attach `backend.log` to bug reports
+- Current app version shown in the bottom-right corner
+- UI language: 繁體中文 / English, switchable on the fly
 - All state (bookmarks, settings, tunnel info) lives in `~/.locwarp/`
 
 ---
