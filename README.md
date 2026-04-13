@@ -198,7 +198,7 @@
 - Python **3.13**(WiFi tunnel,TLS-PSK 需求)
 - Node.js 18+
 - iPhone 已透過 iTunes / Apple Devices 配對過這台電腦
-- iOS 16+ 需開啟「開發人員模式」
+- iOS 17+ 需開啟「開發人員模式」
 
 ### 首次設置
 
@@ -277,7 +277,7 @@ Windows 需要 Apple 的 USB driver 才能與 iPhone 溝通。
 
 首次使用前,用 USB 線接上 iPhone,iPhone 會跳「要信任這部電腦嗎?」,點 **信任** 並輸入密碼。這會產生 pair record,後續 LocWarp 才能與裝置通訊。
 
-### 3. 開啟開發人員模式(iOS 16+)
+### 3. 開啟開發人員模式(iOS 17+)
 
 iPhone 上:**設定 → 隱私權與安全性 → 開發者模式 → 開啟**
 
@@ -359,13 +359,13 @@ locwarp/
 | Tunnel 啟動後 backend 連不上 | 確認以系統管理員身份啟動 |
 | `No such service: com.apple.instruments.dtservicehub` (iOS 17+/26) | LocWarp 會自動嘗試掛載 Developer Disk Image;若仍失敗,請:(1) 設定 → 隱私權與安全性 → **開發者模式** 關閉,重開機,再次開啟;(2) 確認可連線至 github.com(DDI 由此下載,約 20MB);(3) 拔除重插裝置再試。v0.1.34 起會自動回退到 legacy `com.apple.dt.simulatelocation` 服務。 |
 | DDI 下載卡住 / 逾時 | 檢查網路是否可到達 github.com;公司或校園網路可能封鎖 raw.githubusercontent.com。 |
-| **開發者模式未顯示**(iOS 16+) | 需先讓裝置被任一自簽 IPA 部署過,設定中方會出現該選項。請見下方 [附錄:iPhone 開啟開發者模式(Windows 流程)](#附錄iphone-開啟開發者模式windows-流程)。 |
+| **開發者模式未顯示**(iOS 17+) | 需先讓裝置被任一自簽 IPA 部署過,設定中方會出現該選項。請見下方 [附錄:iPhone 開啟開發者模式(Windows 流程)](#附錄iphone-開啟開發者模式windows-流程)。 |
 
 ---
 
 ### 附錄:iPhone 開啟開發者模式(Windows 流程)
 
-iOS 16 起,「設定 → 隱私權與安全性 → 開發者模式」預設**不顯示**。Apple 要求裝置必須曾經被開發者簽署之 App 部署過,該選項才會出現。使用者可依下列流程側載任一自簽 IPA 完成觸發:
+iOS 17+ 的「設定 → 隱私權與安全性 → 開發者模式」預設**不顯示**。Apple 要求裝置必須曾經被開發者簽署之 App 部署過,該選項才會出現。使用者可依下列流程側載任一自簽 IPA 完成觸發:
 
 1. 安裝 [**Sideloadly**](https://sideloadly.io/)。
 2. 於 [**Decrypt IPA Store**](https://decrypt.day/) 等解密 IPA 網站取得任意 IPA 檔案。建議挑選體積較小的檔案管理類 App 以縮短側載時間。
