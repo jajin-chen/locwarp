@@ -35,3 +35,4 @@ Thumbs.db
 # (icon.png / icon.ico are kept in frontend/build/ — committed)
 S__*.png
 S__*.jpg
+_geoport/
