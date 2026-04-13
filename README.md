@@ -30,7 +30,9 @@
   </a>
 </p>
 
-https://github.com/user-attachments/assets/6e06df87-1be1-4635-a9fd-6d5448dc8361
+<p align="center">
+  <img src="docs/demo.gif" width="720" alt="LocWarp demo">
+</p>
 
 ---
 
