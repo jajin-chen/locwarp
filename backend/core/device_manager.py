@@ -371,8 +371,14 @@ class DeviceManager:
         except Exception:
             logger.warning("Could not query image mount status; will attempt to mount anyway", exc_info=True)
 
-        # 2. Not mounted — download + mount.
+        # 2. Not mounted — download + mount. Notify frontend so the user
+        # sees a "preparing device" overlay instead of a frozen UI.
         logger.info("Personalized DDI not mounted on %s; mounting (may download ~20MB)...", conn.udid)
+        try:
+            from api.websocket import broadcast
+            await broadcast("ddi_mounting", {"udid": conn.udid})
+        except Exception:
+            pass
         try:
             await auto_mount_personalized(conn.lockdown)
             logger.info("Personalized DDI mounted successfully for %s", conn.udid)
@@ -380,7 +386,18 @@ class DeviceManager:
             logger.info("DDI was mounted concurrently for %s", conn.udid)
         except Exception:
             logger.exception("auto_mount_personalized failed for %s", conn.udid)
+            try:
+                from api.websocket import broadcast
+                await broadcast("ddi_mount_failed", {"udid": conn.udid})
+            except Exception:
+                pass
             raise
+        finally:
+            try:
+                from api.websocket import broadcast
+                await broadcast("ddi_mounted", {"udid": conn.udid})
+            except Exception:
+                pass
 
     async def _create_dvt_location_service(
         self, conn: _ActiveConnection

@@ -485,6 +485,47 @@ const App: React.FC = () => {
           traveledDistance={sim.status?.distance_traveled ?? 0}
           eta={sim.eta ?? 0}
         />
+        {sim.ddiMounting && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 10000,
+              background: 'rgba(20, 22, 32, 0.85)',
+              backdropFilter: 'blur(3px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'auto',
+            }}
+          >
+            <div
+              style={{
+                background: '#23232a',
+                border: '1px solid #3a3a42',
+                borderRadius: 8,
+                padding: '20px 28px',
+                maxWidth: 420,
+                textAlign: 'center',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+              }}
+            >
+              <svg
+                width="32" height="32" viewBox="0 0 24 24" fill="none"
+                stroke="#6c8cff" strokeWidth="2"
+                style={{ animation: 'spin 1s linear infinite', margin: '0 auto 10px' }}
+              >
+                <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="16" />
+              </svg>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
+                {t('ddi.mounting_title')}
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.6 }}>
+                {t('ddi.mounting_hint')}
+              </div>
+            </div>
+          </div>
+        )}
         {sim.pauseRemaining != null && sim.pauseRemaining > 0 && (
           <div
             style={{

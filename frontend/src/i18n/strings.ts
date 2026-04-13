@@ -217,6 +217,10 @@ export const STRINGS = {
   'pause.min': { zh: '最小', en: 'Min' },
   'pause.max': { zh: '最大', en: 'Max' },
   'pause.seconds': { zh: '秒', en: 's' },
+
+  // ── DDI mount overlay ───────────────────────
+  'ddi.mounting_title': { zh: '首次設定裝置中', en: 'Preparing device' },
+  'ddi.mounting_hint': { zh: '正在下載並掛載 Developer Disk Image(約 20MB),請保持網路連線,約需 10~30 秒...', en: 'Downloading and mounting the Developer Disk Image (~20MB). Please keep your internet connected. This takes 10–30 seconds...' },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

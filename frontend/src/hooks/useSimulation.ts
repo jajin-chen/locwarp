@@ -79,6 +79,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
   // Random-walk pause countdown (unix epoch seconds of when pause ends)
   const [pauseEndAt, setPauseEndAt] = useState<number | null>(null)
   const [pauseRemaining, setPauseRemaining] = useState<number | null>(null)
+  const [ddiMounting, setDdiMounting] = useState(false)
 
   // Tick the pause countdown at 1 Hz
   useEffect(() => {
@@ -148,6 +149,15 @@ export function useSimulation(wsMessage: WsMessage | null) {
         setProgress(1)
         setEta(null)
         setPauseEndAt(null)
+        break
+      }
+      case 'ddi_mounting': {
+        setDdiMounting(true)
+        break
+      }
+      case 'ddi_mounted':
+      case 'ddi_mount_failed': {
+        setDdiMounting(false)
         break
       }
       case 'tunnel_lost': {
@@ -401,6 +411,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
     pauseRandomWalk,
     setPauseRandomWalk,
     pauseRemaining,
+    ddiMounting,
     error,
     clearError,
     teleport,
