@@ -539,7 +539,7 @@ const App: React.FC = () => {
                     }}
                   >
                     <span style={{ color: approaching ? '#ff9800' : passed ? '#666' : isStart ? '#4caf50' : '#ff9800', fontWeight: 600, width: 24, fontSize: isStart ? 10 : undefined }}>
-                      {approaching ? '▶' : passed ? '✓' : isStart ? t('panel.waypoint_start') : `#${i}`}
+                      {approaching ? '>' : passed ? 'OK' : isStart ? t('panel.waypoint_start') : `#${i}`}
                     </span>
                     <span style={{ flex: 1, opacity: 0.85 }}>{wp.lat.toFixed(5)}, {wp.lng.toFixed(5)}</span>
                     <button
@@ -547,7 +547,7 @@ const App: React.FC = () => {
                       style={{ padding: '2px 6px', fontSize: 10 }}
                       onClick={() => handleRemoveWaypoint(i)}
                       title={t('panel.waypoints_remove')}
-                    >✕</button>
+                    >X</button>
                   </div>
                 );
               })}
@@ -661,6 +661,7 @@ const App: React.FC = () => {
           onAddWaypoint={handleAddWaypoint}
           showWaypointOption={sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop || sim.mode === SimMode.Navigate}
           deviceConnected={device.connectedDevice !== null}
+          onShowToast={showToast}
         />
         {sim.mode === SimMode.Joystick && (
           <JoystickPad

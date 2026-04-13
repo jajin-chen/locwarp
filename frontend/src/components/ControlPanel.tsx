@@ -316,16 +316,29 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           {chevron(sections.mode)} {t('panel.mode')}
         </div>
         {sections.mode && (
-          <div className="section-content" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <div
+            className="section-content"
+            style={{
+              // 2-column grid gives each button enough width for the
+              // longer EN labels ('Random Walk', 'Multi-stop') without
+              // ellipsing them.
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+              gap: 6,
+            }}
+          >
             {Object.values(SimMode).map((mode) => (
               <button
                 key={mode}
                 className={`mode-btn${simMode === mode ? ' active' : ''}`}
                 onClick={() => onModeChange(mode)}
                 title={t(modeLabelKeys[mode])}
+                style={{ justifyContent: 'flex-start', minWidth: 0 }}
               >
                 {modeIcons[mode]}
-                <span style={{ fontSize: 11, marginTop: 2 }}>{t(modeLabelKeys[mode])}</span>
+                <span style={{ fontSize: 11, whiteSpace: 'normal', lineHeight: 1.15 }}>
+                  {t(modeLabelKeys[mode])}
+                </span>
               </button>
             ))}
           </div>
@@ -554,59 +567,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
       </div>
 
-      {/* Coordinate Input */}
-      <div className="section">
-        <div
-          className="section-title"
-          onClick={() => toggleSection('coords')}
-          style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-        >
-          {chevron(sections.coords)} {t('panel.coords')}
-        </div>
-        {sections.coords && (
-          <div className="section-content">
-            <input
-              type="text"
-              className="search-input"
-              placeholder={t('panel.coord_lat')}
-              value={coordLat}
-              onChange={(e) => setCoordLat(e.target.value)}
-              style={{ width: '100%', marginBottom: 6 }}
-            />
-            <input
-              type="text"
-              className="search-input"
-              placeholder={t('panel.coord_lng')}
-              value={coordLng}
-              onChange={(e) => setCoordLng(e.target.value)}
-              style={{ width: '100%', marginBottom: 6 }}
-            />
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                className="action-btn primary"
-                onClick={handleCoordGo}
-                style={{ flex: 1 }}
-              >
-                {t('panel.coord_go')}
-              </button>
-              <button
-                className="action-btn"
-                onClick={() => { setCoordLat(''); setCoordLng(''); }}
-                disabled={!coordLat && !coordLng}
-                style={{ padding: '4px 12px' }}
-                title={t('generic.clear')}
-              >
-                {t('generic.clear')}
-              </button>
-            </div>
-            {currentPosition && (
-              <div style={{ fontSize: 11, opacity: 0.6, marginTop: 6 }}>
-                {t('panel.current_pos')} {currentPosition.lat.toFixed(6)}, {currentPosition.lng.toFixed(6)}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {/* Coordinate input moved into the map overlay (see MapView). */}
 
       {/* Address Search */}
       <div className="section">
@@ -683,7 +644,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 style={{ padding: '10px 14px', borderRadius: 0 }}
                 onClick={() => setLibraryOpen(false)}
                 title={t('panel.close')}
-              >✕</button>
+              >X</button>
             </div>
             <div style={{ padding: 12, overflowY: 'auto', flex: 1 }}>
               {libraryTab === 'bookmarks' ? (
@@ -834,7 +795,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                             }}
                             style={{ padding: '2px 6px', fontSize: 10, color: '#f44336' }}
                           >
-                            ✕
+                            X
                           </button>
                         )}
                       </div>

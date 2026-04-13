@@ -34,6 +34,7 @@ interface MapViewProps {
   onAddWaypoint?: (lat: number, lng: number) => void;
   showWaypointOption?: boolean;
   deviceConnected?: boolean;
+  onShowToast?: (msg: string) => void;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -49,6 +50,7 @@ const MapView: React.FC<MapViewProps> = ({
   onAddWaypoint,
   showWaypointOption,
   deviceConnected = true,
+  onShowToast,
 }) => {
   const t = useT();
   // The map-init useEffect only runs once, so its click handler captures the
@@ -63,7 +65,7 @@ const MapView: React.FC<MapViewProps> = ({
   const destMarkerRef = useRef<L.Marker | null>(null);
   const waypointMarkersRef = useRef<L.Marker[]>([]);
   const polylineRef = useRef<L.Polyline | null>(null);
-  const clickMarkerRef = useRef<L.Marker | null>(null);
+  // clickMarkerRef removed — left-click no longer drops a pin.
   const radiusCircleRef = useRef<L.Circle | null>(null);
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -85,65 +87,46 @@ const MapView: React.FC<MapViewProps> = ({
     const map = L.map(mapContainerRef.current, {
       center: [25.033, 121.5654],
       zoom: 13,
-      zoomControl: true,
+      // Keep Leaflet's default control off so we can position our own
+      // zoom control below the EtaBar on the left (default top-left
+      // would collide with the overlay).
+      zoomControl: false,
     });
+    const zoomCtrl = L.control.zoom({ position: 'topleft' });
+    zoomCtrl.addTo(map);
+    // Nudge the whole topleft control cluster down so it sits below the
+    // EtaBar instead of behind it.
+    const topLeftEl = (map as any)._controlCorners?.topleft as HTMLElement | undefined;
+    if (topLeftEl) {
+      topLeftEl.style.marginTop = '56px';
+    }
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      subdomains: 'abcd',
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      maxZoom: 20,
-    }).addTo(map);
-
-    const clickIcon = L.divIcon({
-      className: 'click-marker',
-      html: `<svg width="40" height="54" viewBox="0 0 40 54">
-        <defs>
-          <filter id="clickShadow" x="-20%" y="-10%" width="140%" height="130%">
-            <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.4"/>
-          </filter>
-        </defs>
-        <path d="M20 50 L20 46" stroke="#6c8cff" stroke-width="2" opacity="0.5"/>
-        <ellipse cx="20" cy="50" rx="6" ry="2" fill="#000" opacity="0.2"/>
-        <path d="M20 2C10.6 2 3 9.6 3 19c0 12.7 17 31 17 31s17-18.3 17-31C37 9.6 29.4 2 20 2z"
-              fill="#6c8cff" filter="url(#clickShadow)"/>
-        <path d="M20 4C11.7 4 5 10.7 5 19c0 11.5 15 28 15 28s15-16.5 15-28C35 10.7 28.3 4 20 4z"
-              fill="#5a7ff0"/>
-        <circle cx="20" cy="19" r="7" fill="#ffffff" opacity="0.95"/>
-        <circle cx="20" cy="19" r="3" fill="#6c8cff"/>
-      </svg>`,
-      iconSize: [40, 54],
-      iconAnchor: [20, 50],
+    // OSM Standard (Mapnik). Electron main hooks a compliant User-Agent
+    // for these hosts (see electron/main.js), otherwise the tile.osm.org
+    // endpoint returns HTTP 418 for the default Chromium UA.
+    const osmLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     });
-
-    map.on('click', (e: L.LeafletMouseEvent) => {
-      closeContextMenu();
-
-      // Reuse the same marker to avoid a visible remount flash at (0,0)
-      // before CSS transform kicks in. setLatLng is atomic.
-      const clickHintLine1 = tRef.current('map.click_not_locate');
-      const clickHintLine2 = tRef.current('map.click_use_right');
-      const tooltipHtml = (
-        `<div style="text-align:center;line-height:1.35">` +
-          `<div>${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}</div>` +
-          `<div style="font-size:10px;color:#ffb74d;margin-top:2px">${clickHintLine1}</div>` +
-          `<div style="font-size:10px;color:#ffb74d">${clickHintLine2}</div>` +
-        `</div>`
-      );
-      if (!clickMarkerRef.current) {
-        clickMarkerRef.current = L.marker([e.latlng.lat, e.latlng.lng], { icon: clickIcon });
-        clickMarkerRef.current.bindTooltip(
-          tooltipHtml,
-          { direction: 'top', offset: [0, -52], permanent: false },
-        );
-        clickMarkerRef.current.addTo(map);
-      } else {
-        clickMarkerRef.current.setLatLng([e.latlng.lat, e.latlng.lng]);
-        clickMarkerRef.current.setTooltipContent(tooltipHtml);
+    // OSM France mirror — same Mapnik style, looser policy, used as a fallback
+    // when the main tile server is rate-limited or regionally unreachable.
+    const osmFrLayer = L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+      subdomains: 'abc', maxZoom: 20,
+      attribution: '&copy; <a href="https://www.openstreetmap.fr/">OSM France</a>',
+    });
+    osmLayer.on('tileerror', () => {
+      if (!map.hasLayer(osmFrLayer)) {
+        map.removeLayer(osmLayer);
+        osmFrLayer.addTo(map);
       }
-      clickMarkerRef.current.openTooltip();
+    });
+    osmLayer.addTo(map);
 
-      onMapClick(e.latlng.lat, e.latlng.lng);
+    // Left-click on the map now only dismisses any open context menu.
+    // The previous blue "click marker" was confusing users into thinking
+    // a left-click meant "teleport"; teleport lives on right-click.
+    map.on('click', () => {
+      closeContextMenu();
     });
 
     map.on('contextmenu', (e: L.LeafletMouseEvent) => {
@@ -410,35 +393,57 @@ const MapView: React.FC<MapViewProps> = ({
     });
   }, [currentPosition]);
 
+  // Coordinate-input overlay (replaces the sidebar's two-field coord input).
+  // Accepts any of: "25.04, 121.51", "25.04,121.51", or "25.04 121.51".
+  const [coordInput, setCoordInput] = useState('');
+  const parseCoordInput = (raw: string): { lat: number; lng: number } | null => {
+    const m = raw.trim().match(/^(-?\d+(?:\.\d+)?)[\s,]+(-?\d+(?:\.\d+)?)$/);
+    if (!m) return null;
+    const lat = parseFloat(m[1]);
+    const lng = parseFloat(m[2]);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) return null;
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) return null;
+    return { lat, lng };
+  };
+  const submitCoordGo = () => {
+    const parsed = parseCoordInput(coordInput);
+    if (!parsed) {
+      if (onShowToast) onShowToast(tRef.current('panel.coord_invalid'));
+      return;
+    }
+    onTeleport(parsed.lat, parsed.lng);
+    setCoordInput('');
+  };
+
   return (
     <div className="map-container" style={{ position: 'relative', flex: 1 }}>
       <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
 
-      {/* Recenter on user position */}
+      {/* Recenter on user position — left side, below the zoom control. */}
       <button
         onClick={recenter}
         disabled={!currentPosition}
         title={t('map.recenter')}
         style={{
           position: 'absolute',
-          left: 16,
-          bottom: 24,
+          left: 10,
+          top: 132,  // just below the (shifted-down) zoom control
           zIndex: 800,
-          width: 40,
-          height: 40,
-          borderRadius: '50%',
-          border: '1px solid rgba(255,255,255,0.15)',
-          background: currentPosition ? 'rgba(40, 44, 60, 0.95)' : 'rgba(40, 44, 60, 0.5)',
-          color: currentPosition ? '#6c8cff' : '#666',
+          width: 30,
+          height: 30,
+          borderRadius: 4,
+          border: '1px solid rgba(0,0,0,0.2)',
+          background: currentPosition ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.6)',
+          color: currentPosition ? '#333' : '#aaa',
           cursor: currentPosition ? 'pointer' : 'not-allowed',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           padding: 0,
         }}
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="3" />
           <line x1="12" y1="2" x2="12" y2="5" />
           <line x1="12" y1="19" x2="12" y2="22" />
@@ -446,6 +451,46 @@ const MapView: React.FC<MapViewProps> = ({
           <line x1="19" y1="12" x2="22" y2="12" />
         </svg>
       </button>
+
+      {/* Coord input overlay — bottom-left, above the map's status footer.
+          Takes a single "lat, lng" string; Enter or the teleport button goes. */}
+      <div
+        style={{
+          position: 'absolute', left: 12, bottom: 28, zIndex: 800,
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: 'rgba(30, 30, 36, 0.92)', borderRadius: 6,
+          padding: '6px 8px', boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
+          border: '1px solid rgba(255,255,255,0.1)',
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6c8cff" strokeWidth="2" style={{ flexShrink: 0 }}>
+          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+          <circle cx="12" cy="10" r="3" />
+        </svg>
+        <input
+          type="text"
+          value={coordInput}
+          onChange={(e) => setCoordInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submitCoordGo(); }}
+          placeholder={tRef.current('panel.coord_placeholder')}
+          style={{
+            width: 210, background: 'transparent', border: 'none',
+            color: '#e8e8e8', fontSize: 12, outline: 'none',
+            fontFamily: 'monospace',
+          }}
+        />
+        <button
+          onClick={submitCoordGo}
+          disabled={!coordInput.trim() || !deviceConnected}
+          title={t('map.teleport_here')}
+          style={{
+            background: !coordInput.trim() || !deviceConnected ? 'rgba(108,140,255,0.3)' : '#6c8cff',
+            color: '#fff', border: 'none', borderRadius: 4,
+            padding: '4px 10px', fontSize: 11, fontWeight: 600,
+            cursor: !coordInput.trim() || !deviceConnected ? 'not-allowed' : 'pointer',
+          }}
+        >Go</button>
+      </div>
 
       {contextMenu.visible && (
         <div
@@ -464,6 +509,31 @@ const MapView: React.FC<MapViewProps> = ({
           }}
           onClick={(e) => e.stopPropagation()}
         >
+          {/* 1. Coordinates label — always visible at the top of the menu.
+                Not clickable; shows the exact lat/lng of the right-click
+                target directly instead of making the user click through. */}
+          <div
+            style={{
+              padding: '8px 16px 6px',
+              color: '#9ac0ff',
+              fontSize: 12,
+              fontFamily: 'monospace',
+              display: 'flex',
+              alignItems: 'center',
+              userSelect: 'text',
+              cursor: 'default',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, opacity: 0.7 }}>
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+              <circle cx="12" cy="10" r="3" />
+            </svg>
+            {contextMenu.lat.toFixed(6)}, {contextMenu.lng.toFixed(6)}
+          </div>
+          <div style={{ height: 1, background: '#444', margin: '2px 0 4px' }} />
+
+          {/* 2 + 3. Teleport / Navigate (device-gated). */}
           {deviceConnected ? (
             <>
               <div
@@ -472,7 +542,6 @@ const MapView: React.FC<MapViewProps> = ({
                 onMouseEnter={highlightItem}
                 onMouseLeave={unhighlightItem}
                 onClick={() => {
-                  if (clickMarkerRef.current) { clickMarkerRef.current.remove(); clickMarkerRef.current = null; }
                   onTeleport(contextMenu.lat, contextMenu.lng);
                   closeContextMenu();
                 }}
@@ -492,7 +561,6 @@ const MapView: React.FC<MapViewProps> = ({
                 onMouseEnter={highlightItem}
                 onMouseLeave={unhighlightItem}
                 onClick={() => {
-                  if (clickMarkerRef.current) { clickMarkerRef.current.remove(); clickMarkerRef.current = null; }
                   onNavigate(contextMenu.lat, contextMenu.lng);
                   closeContextMenu();
                 }}
@@ -505,12 +573,7 @@ const MapView: React.FC<MapViewProps> = ({
             </>
           ) : (
             <div
-              style={{
-                ...contextMenuItemStyle,
-                color: '#ff6b6b',
-                cursor: 'not-allowed',
-                opacity: 0.75,
-              }}
+              style={{ ...contextMenuItemStyle, color: '#ff6b6b', cursor: 'not-allowed', opacity: 0.75 }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
                 <circle cx="12" cy="12" r="10" />
@@ -519,30 +582,37 @@ const MapView: React.FC<MapViewProps> = ({
               {t('map.device_disconnected')}
             </div>
           )}
-          {showWaypointOption && onAddWaypoint && (
-            <div
-              className="context-menu-item"
-              style={contextMenuItemStyle}
-              onMouseEnter={highlightItem}
-              onMouseLeave={unhighlightItem}
-              onClick={() => {
-                onAddWaypoint(contextMenu.lat, contextMenu.lng);
-                closeContextMenu();
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
-                <circle cx="12" cy="12" r="3" />
-                <line x1="12" y1="5" x2="12" y2="1" />
-                <line x1="12" y1="23" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="1" y2="12" />
-                <line x1="23" y1="12" x2="19" y2="12" />
-              </svg>
-              {t('map.add_waypoint')}
-            </div>
-          )}
+
+          {/* 4. Copy coordinates to clipboard. */}
           <div
-            style={{ height: 1, background: '#444', margin: '4px 0' }}
-          />
+            className="context-menu-item"
+            style={contextMenuItemStyle}
+            onMouseEnter={highlightItem}
+            onMouseLeave={unhighlightItem}
+            onClick={async () => {
+              const txt = `${contextMenu.lat.toFixed(6)}, ${contextMenu.lng.toFixed(6)}`;
+              try {
+                await navigator.clipboard.writeText(txt);
+              } catch {
+                const ta = document.createElement('textarea');
+                ta.value = txt;
+                document.body.appendChild(ta);
+                ta.select();
+                try { document.execCommand('copy'); } catch { /* ignore */ }
+                document.body.removeChild(ta);
+              }
+              if (onShowToast) onShowToast(tRef.current('map.coords_copied'));
+              closeContextMenu();
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+            </svg>
+            {t('map.copy_coords')}
+          </div>
+
+          {/* 5. Add to bookmarks. */}
           <div
             className="context-menu-item"
             style={contextMenuItemStyle}
@@ -558,6 +628,32 @@ const MapView: React.FC<MapViewProps> = ({
             </svg>
             {t('map.add_bookmark')}
           </div>
+
+          {/* 6. Add waypoint (only when in a route mode). */}
+          {showWaypointOption && onAddWaypoint && (
+            <>
+              <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
+              <div
+                className="context-menu-item"
+                style={contextMenuItemStyle}
+                onMouseEnter={highlightItem}
+                onMouseLeave={unhighlightItem}
+                onClick={() => {
+                  onAddWaypoint(contextMenu.lat, contextMenu.lng);
+                  closeContextMenu();
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
+                  <circle cx="12" cy="12" r="3" />
+                  <line x1="12" y1="5" x2="12" y2="1" />
+                  <line x1="12" y1="23" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="1" y2="12" />
+                  <line x1="23" y1="12" x2="19" y2="12" />
+                </svg>
+                {t('map.add_waypoint')}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

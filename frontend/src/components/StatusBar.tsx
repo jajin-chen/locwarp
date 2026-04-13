@@ -82,9 +82,9 @@ const StatusBar: React.FC<StatusBarProps> = ({
         display: 'flex',
         alignItems: 'center',
         flexWrap: 'wrap',
-        rowGap: 4,
-        columnGap: 16,
-        padding: '6px 16px',
+        rowGap: 3,
+        columnGap: 12,
+        padding: '4px 12px',
         fontSize: 12,
         color: '#c0c0c0',
         background: '#1a1a1e',
@@ -92,46 +92,9 @@ const StatusBar: React.FC<StatusBarProps> = ({
         flexShrink: 0,
       }}
     >
-      {/* Connection status */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <div
-          style={{
-            width: 7,
-            height: 7,
-            borderRadius: '50%',
-            background: isConnected ? '#4caf50' : '#f44336',
-            boxShadow: isConnected ? '0 0 4px #4caf50' : '0 0 4px #f44336',
-          }}
-        />
-        <span style={{ color: isConnected ? '#4caf50' : '#f44336', fontWeight: 500 }}>
-          {isConnected ? t('status.connected') : t('status.disconnected')}
-        </span>
-      </div>
-
-      {/* Separator */}
-      <div style={{ width: 1, height: 14, background: '#333' }} />
-
-      {/* Device name */}
-      {deviceName && (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5 }}>
-              <rect x="5" y="2" width="14" height="20" rx="2" />
-              <line x1="12" y1="18" x2="12" y2="18" />
-            </svg>
-            <span>{deviceName}</span>
-          </div>
-          <div style={{ width: 1, height: 14, background: '#333' }} />
-        </>
-      )}
-
-      {/* iOS version */}
-      {iosVersion && (
-        <>
-          <span style={{ opacity: 0.6 }}>iOS {iosVersion}</span>
-          <div style={{ width: 1, height: 14, background: '#333' }} />
-        </>
-      )}
+      {/* Connection / device name / iOS version removed from the bottom bar —
+          the left-side DeviceStatus panel already shows all of this, so
+          repeating it here only ate horizontal space. */}
 
       {/* Current coordinates */}
       {currentPosition && (
@@ -284,18 +247,17 @@ const StatusBar: React.FC<StatusBarProps> = ({
       {/* Spacer to push right-aligned items */}
       <div style={{ flex: 1 }} />
 
-      {/* Right cluster: app version on top, lang/time below */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, lineHeight: 1.1 }}>
-        <span style={{ fontSize: 9, opacity: 0.45, fontFamily: 'monospace' }}>
+      {/* Right cluster: lang toggle · time · version, all inline. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <LangToggle />
+        <div style={{ width: 1, height: 12, background: '#333' }} />
+        <span style={{ opacity: 0.4, fontSize: 10 }}>
+          {new Date().toLocaleTimeString(undefined, { hour12: false })}
+        </span>
+        <div style={{ width: 1, height: 12, background: '#333' }} />
+        <span style={{ fontSize: 10, opacity: 0.45, fontFamily: 'monospace' }}>
           v{APP_VERSION}
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <LangToggle />
-          <div style={{ width: 1, height: 12, background: '#333' }} />
-          <span style={{ opacity: 0.4, fontSize: 10 }}>
-            {new Date().toLocaleTimeString(undefined, { hour12: false })}
-          </span>
-        </div>
       </div>
     </div>
   );

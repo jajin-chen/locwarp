@@ -1,7 +1,11 @@
-const { app, BrowserWindow, shell } = require('electron')
+const { app, BrowserWindow, Menu, shell } = require('electron')
 const path = require('path')
 const { spawn } = require('child_process')
 const http = require('http')
+
+// Strip the default "File Edit View Window Help" menubar — LocWarp has its
+// own in-window controls and the native menu only adds noise on Windows.
+Menu.setApplicationMenu(null)
 
 let mainWindow
 let backendProc = null
@@ -57,6 +61,35 @@ function waitForBackend(timeoutMs = 30000) {
 }
 
 async function createWindow() {
+  // OSM tile policy (https://operations.osmfoundation.org/policies/tiles/)
+  // requires an identifying User-Agent; Electron's default Chrome UA is
+  // blocked with HTTP 418. Rewrite the UA on requests to the OSM tile
+  // endpoints so we can use the 'Standard' (Mapnik) style for free.
+  try {
+    const { session } = require('electron')
+    const OSM_HOSTS = [
+      'tile.openstreetmap.org',
+      'a.tile.openstreetmap.org',
+      'b.tile.openstreetmap.org',
+      'c.tile.openstreetmap.org',
+      'tile.openstreetmap.fr',
+      'a.tile.openstreetmap.fr',
+      'b.tile.openstreetmap.fr',
+      'c.tile.openstreetmap.fr',
+    ]
+    session.defaultSession.webRequest.onBeforeSendHeaders((details, cb) => {
+      try {
+        const u = new URL(details.url)
+        if (OSM_HOSTS.includes(u.hostname)) {
+          details.requestHeaders['User-Agent'] =
+            'LocWarp/0.1.49 (+https://github.com/keezxc1223/locwarp)'
+          details.requestHeaders['Referer'] = 'https://github.com/keezxc1223/locwarp'
+        }
+      } catch {}
+      cb({ requestHeaders: details.requestHeaders })
+    })
+  } catch (e) { console.error('[electron] UA hook failed:', e) }
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,

@@ -185,7 +185,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4caf50" strokeWidth="3">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              <span style={{ color: '#4caf50' }}>{t('device.scan_found', { n: scanResult })}</span>
+              <span style={{ color: '#4caf50' }}>{t('device.scan_found')}</span>
             </>
           ) : scanResult === 0 ? (
             <>
@@ -650,7 +650,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
             {repairState === 'success' && (
               <>
                 <div style={{ fontSize: 13, lineHeight: 1.7, color: '#4caf50' }}>
-                  ✓ {t('wifi.repair_success')}
+                  {t('wifi.repair_success')}
                 </div>
                 {repairMessage && (
                   <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>{repairMessage}</div>
@@ -668,7 +668,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
             {repairState === 'failed' && (
               <>
                 <div style={{ fontSize: 13, lineHeight: 1.7, color: '#ff6b6b' }}>
-                  ✗ {t('wifi.repair_failed')}
+                  {t('wifi.repair_failed')}
                 </div>
                 {repairMessage && (
                   <div style={{ fontSize: 12, opacity: 0.8, marginTop: 8, padding: 8,

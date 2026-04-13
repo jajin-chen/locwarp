@@ -395,6 +395,9 @@ export function useSimulation(wsMessage: WsMessage | null) {
       setRoutePath([])
       setWaypointProgress(null)
       setEffectiveSpeed(null)
+      // Clear the destination so the red "target" marker goes away —
+      // lingering destination pin after Stop was a reported UX bug.
+      setDestination(null)
       return res
     } catch (err: any) {
       setError(err.message)

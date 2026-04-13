@@ -93,7 +93,7 @@ export const STRINGS = {
   'device.no_device': { zh: '未偵測到裝置', en: 'No device detected' },
   'device.scan': { zh: 'USB', en: 'USB' },
   'device.scan_scanning': { zh: '掃描中', en: 'Scanning' },
-  'device.scan_found': { zh: '找到 {n} 台', en: 'Found {n}' },
+  'device.scan_found': { zh: '已找到裝置', en: 'Device found' },
   'device.scan_none': { zh: '未偵測到', en: 'Not found' },
   'device.scan_tooltip': { zh: '掃描 USB 裝置', en: 'Scan USB devices' },
   'wifi.section_title': { zh: 'WiFi 無線連線', en: 'Wi-Fi Connection' },
@@ -148,6 +148,11 @@ export const STRINGS = {
   'map.navigate_here': { zh: '導航到這裡', en: 'Navigate here' },
   'map.add_waypoint': { zh: '添加路徑點', en: 'Add waypoint' },
   'map.add_bookmark': { zh: '加入座標收藏', en: 'Add to bookmarks' },
+  'map.show_coords': { zh: '顯示座標', en: 'Show coordinates' },
+  'map.copy_coords': { zh: '複製座標', en: 'Copy coordinates' },
+  'map.coords_copied': { zh: '座標已複製', en: 'Coordinates copied' },
+  'panel.coord_placeholder': { zh: '輸入座標 例如 25.045, 121.517', en: 'Enter coords e.g. 25.045, 121.517' },
+  'panel.coord_invalid': { zh: '座標格式錯誤,請輸入 緯度, 經度', en: 'Invalid format — expected "lat, lng"' },
 
   // ── EtaBar ───────────────────────────────────
   'eta.remaining': { zh: '剩餘', en: 'Remaining' },

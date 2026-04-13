@@ -209,7 +209,9 @@ body {
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition-fast);
-  white-space: nowrap;
+  /* labels may wrap to 2 lines on long EN strings — that's preferred to
+     ellipsis (瞬... / Tei...) */
+  text-align: left;
 }
 
 .mode-btn:hover {
@@ -609,9 +611,10 @@ body {
   50%      { box-shadow: 0 0 0 4px rgba(255, 152, 0, 0.0); }
 }
 
-/* Dark map tiles overlay */
+/* Slight tone-down so OSM Standard tiles blend with the dark sidebar.
+   Kept minimal — over-filtering washes out the pink/cream aesthetic. */
 .leaflet-tile-pane {
-  filter: brightness(0.85) contrast(1.05) saturate(0.85);
+  filter: brightness(0.96) saturate(0.95);
 }
 
 /* Fix leaflet controls for dark theme */
