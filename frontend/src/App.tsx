@@ -48,11 +48,16 @@ const App: React.FC = () => {
     // movement was active or the channel is flaky. Give the user a visible
     // "working on it" toast up front so the UI doesn't feel frozen.
     showToast(t('status.restore_in_progress'), 10000)
+    const startedAt = Date.now()
     try {
       await sim.restore()
-      // The clear command has been sent; iOS may take a short moment to
-      // actually drop the simulated location and resume real GPS, so tell
-      // the user that explicitly instead of pretending it's instant.
+      // Keep the in-progress toast visible for at least 1.2 s — otherwise a
+      // fast restore (sub-second) would overwrite it before the user even
+      // noticed it appeared.
+      const elapsed = Date.now() - startedAt
+      if (elapsed < 1200) {
+        await new Promise((r) => setTimeout(r, 1200 - elapsed))
+      }
       showToast(t('status.restore_success_wait'))
     } catch {
       showToast(t('status.restore_failed'))
