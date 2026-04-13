@@ -16,6 +16,12 @@
 > - 若遇到問題,歡迎至 [Issues](https://github.com/keezxc1223/locwarp/issues) 提交完整環境資訊與日誌,以協助定位與改善;
 > - 本專案不保證永續維護,亦不承擔因使用本工具所生之任何責任。
 
+> ### 系統需求
+>
+> **LocWarp 自 v0.1.49 起僅支援 iOS / iPadOS 17 以上的裝置。**
+>
+> iOS 16 及更早版本因 Developer Disk Image 機制差異與多位使用者實測無法正常運作,已停止支援;若連接 iOS <17 裝置,LocWarp 會直接拒絕並顯示提示。
+
 > ### 相容性測試狀態
 >
 > | iOS 版本 | 驗證來源 | 狀態 |
@@ -26,10 +32,11 @@
 > | **18.7.7** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
 > | **18.5**(iPadOS) | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
 > | **18.1.1** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
+> | **16.x 及以下** | — | ![Unsupported](https://img.shields.io/badge/不支援-f44336?style=flat-square) |
 >
 > **說明**:上表僅彙整開發者實測與少數社群回饋的結果,**並不保證於所有相同版本的裝置、網路環境或系統組合下皆能正常運作**。iOS 虛擬定位的穩定性高度依賴 iOS 修補版本、pymobiledevice3 對該版本的支援程度、Developer Disk Image 是否成功掛載,以及 Windows 端的驅動、VPN、防火牆、AV 配置。因此「回報可用」僅代表**至少一位使用者在其特定環境下成功運作**,不等同於通用相容性聲明。
 >
-> 未列於上表的 iOS 版本並非確定不相容,僅表示尚未收到回報。使用前請自行評估風險,若遇到問題、發現 Bug 或確認某版本可用,歡迎至 [Issues](https://github.com/keezxc1223/locwarp/issues) 提出以協助累積相容性資料。
+> 未列於上表的 iOS 17+ 版本並非確定不相容,僅表示尚未收到回報。使用前請自行評估風險,若遇到問題、發現 Bug 或確認某版本可用,歡迎至 [Issues](https://github.com/keezxc1223/locwarp/issues) 提出以協助累積相容性資料。
 
 <p align="center">
   <img src="frontend/build/icon.png" width="128" alt="LocWarp">
