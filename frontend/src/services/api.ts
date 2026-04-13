@@ -139,6 +139,9 @@ export const createCategory = (cat: any) => request<any>('POST', '/api/bookmarks
 export const updateCategory = (id: string, cat: any) => request<any>('PUT', `/api/bookmarks/categories/${id}`, cat)
 export const deleteCategory = (id: string) => request<any>('DELETE', `/api/bookmarks/categories/${id}`)
 
+export const bookmarksExportUrl = () => `${API}/api/bookmarks/export`
+export const importBookmarks = (data: any) => request<{ imported: number }>('POST', '/api/bookmarks/import', data)
+
 // Routes
 export const planRoute = (start: any, end: any, profile: string) =>
   request<any>('POST', '/api/route/plan', { start, end, profile })

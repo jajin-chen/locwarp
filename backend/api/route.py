@@ -68,9 +68,14 @@ async def import_gpx(file: UploadFile = File(...)):
     content = await file.read()
     text = content.decode("utf-8")
     coords = gpx_service.parse_gpx(text)
+    # Strip the .gpx extension from the filename so the rename input
+    # doesn't show "myroute.gpx" — the format suffix is irrelevant to the
+    # in-app route name.
+    raw_name = file.filename or "Imported GPX"
+    base_name = raw_name.rsplit(".", 1)[0] if raw_name.lower().endswith(".gpx") else raw_name
     route = SavedRoute(
         id=str(uuid.uuid4()),
-        name=file.filename or "Imported GPX",
+        name=base_name or "Imported GPX",
         waypoints=coords,
         profile="walking",
         created_at=datetime.now(timezone.utc).isoformat(),

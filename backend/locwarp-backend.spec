@@ -10,6 +10,14 @@ pmd_datas, pmd_binaries, pmd_hiddenimports = collect_all('pymobiledevice3')
 # pytun_pmd3 ships wintun.dll as a data file that ctypes loads at runtime
 pytun_datas, pytun_binaries, pytun_hidden = collect_all('pytun_pmd3')
 
+# developer_disk_image is an indirect dependency of pymobiledevice3 (imported
+# at the top of services/mobile_image_mounter.py). PyInstaller doesn't pick
+# it up via collect_all('pymobiledevice3'), so previously the bundled exe
+# would fail to import mobile_image_mounter and silently skip DDI mount.
+# That broke iOS <17 users (e.g. iPhone 8 Plus / iOS 16.7) — DtSimulateLocation
+# accepts the call but iOS rejects it without DDI.
+ddi_datas, ddi_binaries, ddi_hidden = collect_all('developer_disk_image')
+
 # uvicorn/fastapi also need their sub-modules collected
 uvicorn_hidden = collect_submodules('uvicorn')
 fastapi_hidden = collect_submodules('fastapi')
@@ -17,6 +25,7 @@ fastapi_hidden = collect_submodules('fastapi')
 hidden = [
     *pmd_hiddenimports,
     *pytun_hidden,
+    *ddi_hidden,
     *uvicorn_hidden,
     *fastapi_hidden,
     'uvicorn.logging',
@@ -41,8 +50,8 @@ hidden = [
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=[*pmd_binaries, *pytun_binaries],
-    datas=[*pmd_datas, *pytun_datas],
+    binaries=[*pmd_binaries, *pytun_binaries, *ddi_binaries],
+    datas=[*pmd_datas, *pytun_datas, *ddi_datas],
     hiddenimports=hidden,
     hookspath=[],
     hooksconfig={},

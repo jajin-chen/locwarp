@@ -365,6 +365,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
       const res = await api.restoreSim()
       // leave mode as-is; status drives running state
       setStatus({ running: false, paused: false, speed: 0 })
+      setCurrentPosition(null)
       setDestination(null)
       setProgress(0)
       setEta(null)

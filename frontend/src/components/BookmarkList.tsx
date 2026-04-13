@@ -24,6 +24,8 @@ interface BookmarkListProps {
   onBookmarkEdit: (id: string, bm: Partial<Bookmark>) => void;
   onCategoryAdd: (name: string) => void;
   onCategoryDelete: (name: string) => void;
+  onImport?: (file: File) => Promise<void>;
+  exportUrl?: string;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -55,6 +57,8 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   onBookmarkEdit,
   onCategoryAdd,
   onCategoryDelete,
+  onImport,
+  exportUrl,
 }) => {
   const t = useT();
   // Backend may store the built-in default category as the Chinese '預設'.
@@ -141,10 +145,50 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
           </svg>
           {t('bm.add')}
         </button>
+        {exportUrl && (
+          <a
+            className="action-btn"
+            href={exportUrl}
+            download="bookmarks.json"
+            style={{ padding: '3px 8px', fontSize: 12, marginLeft: 'auto', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+            title={t('bm.export_tooltip')}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            {t('bm.export')}
+          </a>
+        )}
+        {onImport && (
+          <label
+            className="action-btn"
+            style={{ padding: '3px 8px', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: exportUrl ? 0 : 'auto' }}
+            title={t('bm.import_tooltip')}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            {t('bm.import')}
+            <input
+              type="file"
+              accept="application/json,.json"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (f) await onImport(f);
+                e.target.value = '';
+              }}
+            />
+          </label>
+        )}
         <button
           className="action-btn"
           onClick={() => setShowCategoryMgr(!showCategoryMgr)}
-          style={{ padding: '3px 8px', fontSize: 12, marginLeft: 'auto' }}
+          style={{ padding: '3px 8px', fontSize: 12, marginLeft: (exportUrl || onImport) ? 0 : 'auto' }}
           title={t('bm.manage_categories')}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

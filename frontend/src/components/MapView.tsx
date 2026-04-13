@@ -165,10 +165,19 @@ const MapView: React.FC<MapViewProps> = ({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Update current position marker — move existing marker instead of recreating
+  // Update current position marker — move existing marker instead of recreating.
+  // When currentPosition becomes null (e.g. after 一鍵還原) remove the marker.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !currentPosition) return;
+    if (!map) return;
+    if (!currentPosition) {
+      if (currentMarkerRef.current) {
+        try { (currentMarkerRef.current as any).remove(); } catch { /* ignore */ }
+        currentMarkerRef.current = null;
+      }
+      prevPositionRef.current = null;
+      return;
+    }
 
     const latlng: L.LatLngExpression = [currentPosition.lat, currentPosition.lng];
 

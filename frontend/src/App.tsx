@@ -258,6 +258,18 @@ const App: React.FC = () => {
     window.open(url, '_blank')
   }, [])
 
+  const handleBookmarkImport = useCallback(async (file: File) => {
+    try {
+      const text = await file.text()
+      const data = JSON.parse(text)
+      const res = await api.importBookmarks(data)
+      await bm.refresh()
+      showToast(t('bm.import_success', { n: res.imported }))
+    } catch (err: any) {
+      showToast(t('bm.import_failed', { error: err?.message || 'unknown' }))
+    }
+  }, [bm, showToast, t])
+
   const handleRouteRename = useCallback(async (id: string, name: string) => {
     try {
       await api.renameRoute(id, name)
@@ -371,6 +383,8 @@ const App: React.FC = () => {
             const cat = bm.categories.find(c => c.name === name)
             if (cat) bm.deleteCategory(cat.id)
           }}
+          onBookmarkImport={handleBookmarkImport}
+          bookmarkExportUrl={api.bookmarksExportUrl()}
           savedRoutes={savedRoutes.map(r => ({ id: r.id, name: r.name, waypoints: r.waypoints ?? [] }))}
           onRouteGpxImport={handleGpxImport}
           onRouteGpxExport={handleGpxExport}

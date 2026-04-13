@@ -56,6 +56,8 @@ interface ControlPanelProps {
   onBookmarkEdit: (id: string, bm: Partial<Bookmark>) => void;
   onCategoryAdd: (name: string) => void;
   onCategoryDelete: (name: string) => void;
+  onBookmarkImport?: (file: File) => Promise<void>;
+  bookmarkExportUrl?: string;
   savedRoutes: SavedRoute[];
   onRouteLoad: (id: string) => void;
   onRouteSave: (name: string) => void;
@@ -172,6 +174,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onBookmarkEdit,
   onCategoryAdd,
   onCategoryDelete,
+  onBookmarkImport,
+  bookmarkExportUrl,
   savedRoutes,
   onRouteLoad,
   onRouteSave,
@@ -658,6 +662,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   onBookmarkEdit={onBookmarkEdit}
                   onCategoryAdd={onCategoryAdd}
                   onCategoryDelete={onCategoryDelete}
+                  onImport={onBookmarkImport}
+                  exportUrl={bookmarkExportUrl}
                 />
               ) : (
                 <>
