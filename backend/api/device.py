@@ -17,35 +17,6 @@ async def list_devices():
     return await dm.discover_devices()
 
 
-@router.post("/{udid}/connect")
-async def connect_device(udid: str):
-    from main import app_state
-    dm = _dm()
-    try:
-        await dm.connect(udid)
-        await app_state.create_engine_for_device(udid)
-        return {"status": "connected", "udid": udid}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/{udid}/connect")
-async def disconnect_device(udid: str):
-    dm = _dm()
-    await dm.disconnect(udid)
-    return {"status": "disconnected", "udid": udid}
-
-
-@router.get("/{udid}/info", response_model=DeviceInfo | None)
-async def device_info(udid: str):
-    dm = _dm()
-    devices = await dm.discover_devices()
-    for d in devices:
-        if d.udid == udid:
-            return d
-    raise HTTPException(status_code=404, detail="Device not found")
-
-
 # ── WiFi connection ─────────────────────────────────────
 
 class WifiConnectRequest(BaseModel):
@@ -554,3 +525,35 @@ async def wifi_tunnel_start_and_connect(req: WifiTunnelStartRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Tunnel started but connection failed: {e}")
+
+
+# ── Generic UDID routes (MUST be defined after all specific /wifi/* routes
+#    so that /wifi/* paths do not accidentally match {udid}). ─────────────
+
+@router.post("/{udid}/connect")
+async def connect_device(udid: str):
+    from main import app_state
+    dm = _dm()
+    try:
+        await dm.connect(udid)
+        await app_state.create_engine_for_device(udid)
+        return {"status": "connected", "udid": udid}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{udid}/connect")
+async def disconnect_device(udid: str):
+    dm = _dm()
+    await dm.disconnect(udid)
+    return {"status": "disconnected", "udid": udid}
+
+
+@router.get("/{udid}/info", response_model=DeviceInfo | None)
+async def device_info(udid: str):
+    dm = _dm()
+    devices = await dm.discover_devices()
+    for d in devices:
+        if d.udid == udid:
+            return d
+    raise HTTPException(status_code=404, detail="Device not found")
