@@ -62,6 +62,7 @@ class _ActiveConnection:
     tunnel_context: object = None  # async context manager for the tunnel
     rsd: Optional[RemoteServiceDiscoveryService] = None
     location_service: Optional[LocationService] = None
+    usbmux_lockdown: object = None  # Original lockdown client (for legacy fallback on iOS 17+)
 
 
 class DeviceManager:
@@ -225,6 +226,7 @@ class DeviceManager:
                 tunnel_proxy=proxy,
                 tunnel_context=tunnel_ctx,
                 rsd=rsd,
+                usbmux_lockdown=lockdown,
             )
         except Exception:
             logger.exception(
@@ -379,25 +381,46 @@ class DeviceManager:
             await broadcast("ddi_mounting", {"udid": conn.udid})
         except Exception:
             pass
+        mount_succeeded = False
         try:
-            await auto_mount_personalized(conn.lockdown)
+            # auto_mount_personalized internally uses requests.get for the
+            # GitHub DDI download. Hard-cap the whole operation so a slow or
+            # blocked network can't freeze us indefinitely.
+            await asyncio.wait_for(auto_mount_personalized(conn.lockdown), timeout=120.0)
             logger.info("Personalized DDI mounted successfully for %s", conn.udid)
+            mount_succeeded = True
         except AlreadyMountedError:
             logger.info("DDI was mounted concurrently for %s", conn.udid)
-        except Exception:
+            mount_succeeded = True
+        except asyncio.TimeoutError:
+            logger.error("DDI mount timed out after 120s for %s", conn.udid)
+            try:
+                from api.websocket import broadcast
+                await broadcast("ddi_mount_failed", {
+                    "udid": conn.udid,
+                    "error": "DDI download/mount timed out (120s). Check network access to github.com.",
+                })
+            except Exception:
+                pass
+            raise RuntimeError("DDI mount timed out — check network access to github.com")
+        except Exception as exc:
             logger.exception("auto_mount_personalized failed for %s", conn.udid)
             try:
                 from api.websocket import broadcast
-                await broadcast("ddi_mount_failed", {"udid": conn.udid})
+                await broadcast("ddi_mount_failed", {
+                    "udid": conn.udid,
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                })
             except Exception:
                 pass
             raise
         finally:
-            try:
-                from api.websocket import broadcast
-                await broadcast("ddi_mounted", {"udid": conn.udid})
-            except Exception:
-                pass
+            if mount_succeeded:
+                try:
+                    from api.websocket import broadcast
+                    await broadcast("ddi_mounted", {"udid": conn.udid})
+                except Exception:
+                    pass
 
     async def _create_dvt_location_service(
         self, conn: _ActiveConnection
@@ -419,9 +442,27 @@ class DeviceManager:
             conn.dvt_provider = dvt
             logger.debug("DVT provider opened for %s", conn.udid)
             return DvtLocationService(dvt, lockdown=conn.lockdown)
-        except Exception:
-            logger.exception("Failed to create DVT location service for %s", conn.udid)
-            raise
+        except Exception as dvt_exc:
+            logger.warning(
+                "DVT location service failed for %s (%s). Falling back to "
+                "legacy DtSimulateLocation over lockdown.",
+                conn.udid, dvt_exc,
+            )
+            # iOS 17+ still exposes com.apple.dt.simulatelocation on some
+            # devices (reported working on iOS 26 by multiple users), so
+            # try the legacy service before giving up entirely.
+            try:
+                # Prefer the original usbmux/TCP lockdown for DtSimulateLocation;
+                # fall back to whatever we have stored if not available.
+                legacy_lockdown = conn.usbmux_lockdown or conn.lockdown
+                legacy = LegacyLocationService(legacy_lockdown)
+                logger.info("Using LegacyLocationService fallback for %s", conn.udid)
+                return legacy
+            except Exception:
+                logger.exception(
+                    "Both DVT and legacy location services failed for %s", conn.udid
+                )
+                raise dvt_exc
 
     async def _create_legacy_location_service(
         self, conn: _ActiveConnection

@@ -145,7 +145,7 @@ const App: React.FC = () => {
   }, [sim])
 
   const handleNavigate = useCallback((lat: number, lng: number) => {
-    sim.navigate(lat, lng, sim.moveMode)
+    sim.navigate(lat, lng)
   }, [sim])
 
   const [addBmDialog, setAddBmDialog] = useState<{ lat: number; lng: number; name: string; category: string } | null>(null)
@@ -163,7 +163,6 @@ const App: React.FC = () => {
     if (!addBmDialog || !addBmDialog.name.trim()) return
     const cat = bm.categories.find(c => c.name === addBmDialog.category)
     bm.createBookmark({
-      id: '',
       name: addBmDialog.name.trim(),
       lat: addBmDialog.lat,
       lng: addBmDialog.lng,
@@ -206,7 +205,7 @@ const App: React.FC = () => {
   // -- ControlPanel handlers --
   const handleStart = useCallback(() => {
     if (sim.mode === SimMode.Joystick) {
-      sim.joystickStart(sim.moveMode)
+      sim.joystickStart()
     } else if (sim.mode === SimMode.RandomWalk) {
       if (!sim.currentPosition) {
         showToast(t('toast.no_position_random'))
@@ -318,8 +317,8 @@ const App: React.FC = () => {
             connectionType: d.connection_type,
           }))}
           isConnected={device.connectedDevice !== null}
-          onScan={device.scan}
-          onSelect={(id: string) => device.connect(id)}
+          onScan={() => { device.scan() }}
+          onSelect={(id: string) => { device.connect(id) }}
           onStartWifiTunnel={device.startWifiTunnel}
           onWifiConnect={device.connectWifi}
           onStopTunnel={device.stopTunnel}
@@ -363,11 +362,11 @@ const App: React.FC = () => {
           onBookmarkClick={(b: any) => handleTeleport(b.lat, b.lng)}
           onBookmarkAdd={(b: any) => {
             const cat = bm.categories.find(c => c.name === b.category)
-            bm.createBookmark({ id: '', name: b.name, lat: b.lat, lng: b.lng, category_id: cat?.id || 'default' })
+            bm.createBookmark({ name: b.name, lat: b.lat, lng: b.lng, category_id: cat?.id || 'default' })
           }}
           onBookmarkDelete={(id: string) => bm.deleteBookmark(id)}
           onBookmarkEdit={(id: string, data: any) => bm.updateBookmark(id, data)}
-          onCategoryAdd={(name: string) => bm.createCategory({ id: '', name, color: '#6c8cff' })}
+          onCategoryAdd={(name: string) => bm.createCategory({ name, color: '#6c8cff' })}
           onCategoryDelete={(name: string) => {
             const cat = bm.categories.find(c => c.name === name)
             if (cat) bm.deleteCategory(cat.id)

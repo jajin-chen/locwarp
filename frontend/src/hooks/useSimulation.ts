@@ -312,7 +312,7 @@ export function useSimulation(wsMessage: WsMessage | null) {
     setError(null)
     try {
       const res = await api.joystickStop()
-      setMode(null)
+      // leave mode as-is; status drives running state
       setStatus((prev) => ({ ...prev, running: false, paused: false }))
       return res
     } catch (err: any) {
@@ -349,8 +349,8 @@ export function useSimulation(wsMessage: WsMessage | null) {
     setError(null)
     try {
       const res = await api.restoreSim()
-      setMode(null)
-      setStatus({ running: false, paused: false, mode: null, speed: 0 })
+      // leave mode as-is; status drives running state
+      setStatus({ running: false, paused: false, speed: 0 })
       setDestination(null)
       setProgress(0)
       setEta(null)
