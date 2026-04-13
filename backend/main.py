@@ -138,8 +138,119 @@ app_state = AppState()
 
 # ── Lifespan ─────────────────────────────────────────────
 
+async def _usbmux_presence_watchdog():
+    """Poll usbmuxd every 2 s for both directions:
+
+    * **Disappearance** — a UDID present in DeviceManager._connections that
+      drops off the usbmux list for 2 consecutive polls is treated as USB
+      unplug: disconnect, clear simulation_engine, broadcast device_disconnected.
+    * **Appearance** — a USB device showing up while we have no active
+      connection triggers an auto-connect + engine rebuild, broadcasting
+      device_reconnected when it succeeds. Failed attempts are throttled
+      (min 5 s between retries per UDID) so we don't spam connect() while
+      the device is still in the "Trust this computer?" dialog.
+
+    WiFi (Network) devices are skipped on both sides — those are covered by
+    the WiFi tunnel watchdog. Consecutive-miss debouncing protects against
+    usbmuxd re-enumeration hiccups.
+    """
+    import asyncio
+    import time
+    from pymobiledevice3.usbmux import list_devices
+    from api.websocket import broadcast
+
+    miss_counts: dict[str, int] = {}
+    miss_threshold = 2
+    last_reconnect_attempt: dict[str, float] = {}
+    reconnect_cooldown = 5.0  # seconds between retry attempts per UDID
+
+    while True:
+        await asyncio.sleep(2.0)
+        try:
+            dm = app_state.device_manager
+            connected = {
+                udid for udid, conn in dm._connections.items()
+                if getattr(conn, "connection_type", "USB") == "USB"
+            }
+
+            try:
+                raw = await list_devices()
+            except Exception:
+                logger.debug("usbmux list_devices failed in watchdog", exc_info=True)
+                continue
+            present_usb = {
+                r.serial for r in raw
+                if getattr(r, "connection_type", "USB") == "USB"
+            }
+
+            # --- Disappearance detection ---
+            lost_now: list[str] = []
+            for udid in connected:
+                if udid in present_usb:
+                    miss_counts.pop(udid, None)
+                else:
+                    miss_counts[udid] = miss_counts.get(udid, 0) + 1
+                    if miss_counts[udid] >= miss_threshold:
+                        lost_now.append(udid)
+
+            if lost_now:
+                logger.warning("usbmux watchdog: device(s) gone → %s", lost_now)
+                for udid in lost_now:
+                    miss_counts.pop(udid, None)
+                    try:
+                        await dm.disconnect(udid)
+                    except Exception:
+                        logger.exception("watchdog: disconnect failed for %s", udid)
+                app_state.simulation_engine = None
+                try:
+                    await broadcast("device_disconnected", {
+                        "udids": lost_now,
+                        "reason": "usb_unplugged",
+                    })
+                except Exception:
+                    logger.exception("watchdog: broadcast (disconnected) failed")
+                continue  # skip appearance logic this tick
+
+            # --- Appearance (auto-reconnect) ---
+            # If nothing is connected but a USB device shows up, connect it.
+            if connected or not present_usb:
+                continue
+            if app_state.simulation_engine is not None:
+                continue  # already got one somehow
+
+            now = time.monotonic()
+            for udid in present_usb:
+                last = last_reconnect_attempt.get(udid, 0.0)
+                if now - last < reconnect_cooldown:
+                    continue
+                last_reconnect_attempt[udid] = now
+                logger.info("usbmux watchdog: new USB device %s detected, auto-reconnecting", udid)
+                try:
+                    await dm.connect(udid)
+                    await app_state.create_engine_for_device(udid)
+                    # Only broadcast success when an engine was actually built
+                    if app_state.simulation_engine is not None:
+                        try:
+                            await broadcast("device_reconnected", {"udid": udid})
+                        except Exception:
+                            logger.exception("watchdog: broadcast (reconnected) failed")
+                        logger.info("Auto-reconnect succeeded for %s", udid)
+                        last_reconnect_attempt.pop(udid, None)
+                        break  # connected one device, done for this tick
+                except Exception:
+                    logger.warning(
+                        "Auto-reconnect for %s failed (will retry in %.0fs): likely Trust pending",
+                        udid, reconnect_cooldown, exc_info=True,
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("usbmux watchdog iteration crashed; continuing")
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    import asyncio
     # ── Startup ──
     logger.info("LocWarp starting — scanning for devices…")
     try:
@@ -155,9 +266,17 @@ async def lifespan(application: FastAPI):
     except Exception:
         logger.exception("Auto-connect on startup failed (device may need manual connect)")
 
+    watchdog_task = asyncio.create_task(_usbmux_presence_watchdog())
+
     yield
 
     # ── Shutdown ──
+    watchdog_task.cancel()
+    try:
+        await watchdog_task
+    except (asyncio.CancelledError, Exception):
+        pass
+
     app_state.save_settings()
     await app_state.device_manager.disconnect_all()
     logger.info("LocWarp shut down")

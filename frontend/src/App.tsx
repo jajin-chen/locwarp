@@ -26,7 +26,7 @@ const SPEED_MAP: Record<MoveMode, number> = {
 const App: React.FC = () => {
   const t = useT()
   const ws = useWebSocket()
-  const device = useDevice()
+  const device = useDevice(ws.lastMessage)
   const sim = useSimulation(ws.lastMessage)
   const joystick = useJoystick(ws.sendMessage, sim.mode === SimMode.Joystick)
   const bm = useBookmarks()
@@ -568,6 +568,7 @@ const App: React.FC = () => {
           onAddBookmark={handleAddBookmark}
           onAddWaypoint={handleAddWaypoint}
           showWaypointOption={sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop || sim.mode === SimMode.Navigate}
+          deviceConnected={device.connectedDevice !== null}
         />
         {sim.mode === SimMode.Joystick && (
           <JoystickPad

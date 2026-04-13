@@ -32,7 +32,7 @@ const ERROR_I18N: Record<string, { zh: string; en: string }> = {
   usbmux_unavailable: { zh: '無法列出 USB 裝置,請確認驅動與 Apple Mobile Device Service 是否正常', en: 'Cannot list USB devices — check iTunes/Apple Mobile Device Service' },
   trust_failed: { zh: 'USB 信任失敗 — 請在 iPhone 上點「信任」後再試', en: 'USB trust failed — tap Trust on the iPhone and retry' },
   remote_pair_failed: { zh: 'RemotePairing 記錄重建失敗 — 請以系統管理員身分重啟 LocWarp', en: 'RemotePairing record rebuild failed — restart LocWarp as Administrator' },
-  device_lost: { zh: '裝置連線中斷(USB 拔除或 Tunnel 死亡)— 請重新插上 USB 後再操作', en: 'Device connection lost (USB unplugged or tunnel died) — please reconnect USB and try again' },
+  device_lost: { zh: '裝置連線中斷(USB 拔除或 Tunnel 死亡),請重新插上 USB 後再操作', en: 'Device connection lost (USB unplugged or tunnel died), please reconnect USB and try again' },
 }
 
 function currentLang(): 'zh' | 'en' {

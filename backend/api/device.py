@@ -444,6 +444,8 @@ def _find_python313() -> list[str] | None:
 
 async def _cleanup_wifi_connections() -> list[str]:
     """Disconnect any Network devices + drop the simulation engine.
+    Broadcasts device_disconnected so the frontend banners/disables context
+    menu items immediately instead of waiting for the next failed action.
     Returns the UDIDs that were disconnected."""
     from main import app_state
     dm = _dm()
@@ -461,6 +463,15 @@ async def _cleanup_wifi_connections() -> list[str]:
                 _tunnel_logger.exception("Failed to disconnect %s", udid)
         if udids and app_state.simulation_engine is not None:
             app_state.simulation_engine = None
+        if udids:
+            try:
+                from api.websocket import broadcast
+                await broadcast("device_disconnected", {
+                    "udids": udids,
+                    "reason": "wifi_tunnel_stopped",
+                })
+            except Exception:
+                _tunnel_logger.exception("WiFi cleanup: broadcast failed")
     except Exception:
         _tunnel_logger.exception("WiFi cleanup step failed")
     return udids

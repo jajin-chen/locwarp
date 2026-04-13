@@ -170,9 +170,15 @@ export function useSimulation(wsMessage: WsMessage | null) {
       case 'device_disconnected': {
         const isEn = typeof localStorage !== 'undefined' && localStorage.getItem('locwarp.lang') === 'en'
         setError(isEn
-          ? 'Device disconnected (USB unplugged or tunnel died) — please reconnect USB'
-          : '裝置連線中斷(USB 拔除或 Tunnel 死亡)— 請重新插上 USB')
+          ? 'Device disconnected (USB unplugged or tunnel died), please reconnect USB'
+          : '裝置連線中斷(USB 拔除或 Tunnel 死亡),請重新插上 USB')
         setStatus((prev) => ({ ...prev, running: false, paused: false }))
+        break
+      }
+      case 'device_reconnected': {
+        // Auto-reconnected by the usbmux watchdog after a re-plug — clear
+        // the banner; the success is already visible via DeviceStatus.
+        setError(null)
         break
       }
       case 'pause_countdown':

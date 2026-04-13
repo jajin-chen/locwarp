@@ -33,6 +33,7 @@ interface MapViewProps {
   onAddBookmark: (lat: number, lng: number) => void;
   onAddWaypoint?: (lat: number, lng: number) => void;
   showWaypointOption?: boolean;
+  deviceConnected?: boolean;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -47,8 +48,14 @@ const MapView: React.FC<MapViewProps> = ({
   onAddBookmark,
   onAddWaypoint,
   showWaypointOption,
+  deviceConnected = true,
 }) => {
   const t = useT();
+  // The map-init useEffect only runs once, so its click handler captures the
+  // first-render `t`. Language switches then don't reach the tooltip hint.
+  // Route lookups through a ref that we keep in sync every render.
+  const tRef = useRef(t);
+  tRef.current = t;
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const currentMarkerRef = useRef<L.CircleMarker | null>(null);
@@ -114,8 +121,8 @@ const MapView: React.FC<MapViewProps> = ({
 
       // Reuse the same marker to avoid a visible remount flash at (0,0)
       // before CSS transform kicks in. setLatLng is atomic.
-      const clickHintLine1 = t('map.click_not_locate');
-      const clickHintLine2 = t('map.click_use_right');
+      const clickHintLine1 = tRef.current('map.click_not_locate');
+      const clickHintLine2 = tRef.current('map.click_use_right');
       const tooltipHtml = (
         `<div style="text-align:center;line-height:1.35">` +
           `<div>${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}</div>` +
@@ -441,42 +448,61 @@ const MapView: React.FC<MapViewProps> = ({
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div
-            className="context-menu-item"
-            style={contextMenuItemStyle}
-            onMouseEnter={highlightItem}
-            onMouseLeave={unhighlightItem}
-            onClick={() => {
-              if (clickMarkerRef.current) { clickMarkerRef.current.remove(); clickMarkerRef.current = null; }
-              onTeleport(contextMenu.lat, contextMenu.lng);
-              closeContextMenu();
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="2" x2="12" y2="6" />
-              <line x1="12" y1="18" x2="12" y2="22" />
-              <line x1="2" y1="12" x2="6" y2="12" />
-              <line x1="18" y1="12" x2="22" y2="12" />
-            </svg>
-            {t('map.teleport_here')}
-          </div>
-          <div
-            className="context-menu-item"
-            style={contextMenuItemStyle}
-            onMouseEnter={highlightItem}
-            onMouseLeave={unhighlightItem}
-            onClick={() => {
-              if (clickMarkerRef.current) { clickMarkerRef.current.remove(); clickMarkerRef.current = null; }
-              onNavigate(contextMenu.lat, contextMenu.lng);
-              closeContextMenu();
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
-              <polygon points="3,11 22,2 13,21 11,13" />
-            </svg>
-            {t('map.navigate_here')}
-          </div>
+          {deviceConnected ? (
+            <>
+              <div
+                className="context-menu-item"
+                style={contextMenuItemStyle}
+                onMouseEnter={highlightItem}
+                onMouseLeave={unhighlightItem}
+                onClick={() => {
+                  if (clickMarkerRef.current) { clickMarkerRef.current.remove(); clickMarkerRef.current = null; }
+                  onTeleport(contextMenu.lat, contextMenu.lng);
+                  closeContextMenu();
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="2" x2="12" y2="6" />
+                  <line x1="12" y1="18" x2="12" y2="22" />
+                  <line x1="2" y1="12" x2="6" y2="12" />
+                  <line x1="18" y1="12" x2="22" y2="12" />
+                </svg>
+                {t('map.teleport_here')}
+              </div>
+              <div
+                className="context-menu-item"
+                style={contextMenuItemStyle}
+                onMouseEnter={highlightItem}
+                onMouseLeave={unhighlightItem}
+                onClick={() => {
+                  if (clickMarkerRef.current) { clickMarkerRef.current.remove(); clickMarkerRef.current = null; }
+                  onNavigate(contextMenu.lat, contextMenu.lng);
+                  closeContextMenu();
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
+                  <polygon points="3,11 22,2 13,21 11,13" />
+                </svg>
+                {t('map.navigate_here')}
+              </div>
+            </>
+          ) : (
+            <div
+              style={{
+                ...contextMenuItemStyle,
+                color: '#ff6b6b',
+                cursor: 'not-allowed',
+                opacity: 0.75,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8 }}>
+                <circle cx="12" cy="12" r="10" />
+                <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+              </svg>
+              {t('map.device_disconnected')}
+            </div>
+          )}
           {showWaypointOption && onAddWaypoint && (
             <div
               className="context-menu-item"

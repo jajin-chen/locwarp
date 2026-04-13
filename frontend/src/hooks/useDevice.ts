@@ -1,9 +1,10 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
   listDevices, connectDevice, disconnectDevice,
   wifiConnect, wifiScan,
   wifiTunnelStartAndConnect, wifiTunnelStatus, wifiTunnelStop,
 } from '../services/api'
+import type { WsMessage } from './useWebSocket'
 
 export interface DeviceInfo {
   udid: string
@@ -20,9 +21,27 @@ export interface WifiScanResult {
   ios_version: string
 }
 
-export function useDevice() {
+export function useDevice(wsMessage?: WsMessage | null) {
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [connectedDevice, setConnectedDevice] = useState<DeviceInfo | null>(null)
+
+  // React to real-time device state broadcasts.
+  useEffect(() => {
+    if (!wsMessage) return
+    if (wsMessage.type === 'device_disconnected') {
+      setConnectedDevice(null)
+      setDevices((prev) => prev.map((d) => ({ ...d, is_connected: false })))
+    } else if (wsMessage.type === 'device_reconnected') {
+      // Refresh the device list so the newly-connected device surfaces
+      // without the user needing to click the scan button.
+      listDevices().then((list) => {
+        setDevices(list)
+        const udid = wsMessage.data?.udid
+        const match = udid ? list.find((d) => d.udid === udid) : null
+        setConnectedDevice(match ?? list.find((d) => d.is_connected) ?? null)
+      }).catch(() => {})
+    }
+  }, [wsMessage])
   const [scanning, setScanning] = useState(false)
   const [wifiScanning, setWifiScanning] = useState(false)
   const [wifiDevices, setWifiDevices] = useState<WifiScanResult[]>([])

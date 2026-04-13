@@ -127,7 +127,7 @@ async def _handle_device_lost(exc: Exception) -> "HTTPException":
         status_code=503,
         detail={
             "code": "device_lost",
-            "message": "裝置連線中斷(USB 拔除或 Tunnel 死亡)— 請重新插上 USB 後再操作",
+            "message": "裝置連線中斷(USB 拔除或 Tunnel 死亡),請重新插上 USB 後再操作",
         },
     )
 
