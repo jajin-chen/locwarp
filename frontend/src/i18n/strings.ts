@@ -140,7 +140,7 @@ export const STRINGS = {
   'map.teleport_here': { zh: '瞬移到這裡', en: 'Teleport here' },
   'map.navigate_here': { zh: '導航到這裡', en: 'Navigate here' },
   'map.add_waypoint': { zh: '添加路徑點', en: 'Add waypoint' },
-  'map.add_bookmark': { zh: '加入書籤', en: 'Add bookmark' },
+  'map.add_bookmark': { zh: '加入座標收藏', en: 'Add to bookmarks' },
 
   // ── EtaBar ───────────────────────────────────
   'eta.remaining': { zh: '剩餘', en: 'Remaining' },
@@ -183,8 +183,8 @@ export const STRINGS = {
   // ── Panel extras ────────────────────────────
   'panel.mode': { zh: '模式', en: 'Mode' },
   'panel.address_search': { zh: '地址搜尋', en: 'Address Search' },
-  'panel.library': { zh: '收藏與路線', en: 'Library' },
-  'panel.library_drag_hint': { zh: '收藏與路線 · 拖曳此處移動', en: 'Library · Drag to move' },
+  'panel.library': { zh: '收藏座標與路線', en: 'Bookmarks & Routes' },
+  'panel.library_drag_hint': { zh: '收藏座標與路線 · 拖曳此處移動', en: 'Bookmarks & Routes · Drag to move' },
   'panel.bookmarks_count': { zh: '座標收藏', en: 'Bookmarks' },
   'panel.routes_count': { zh: '路線', en: 'Routes' },
   'panel.close': { zh: '關閉', en: 'Close' },
