@@ -33,15 +33,23 @@ async def _engine():
 
     dm = app_state.device_manager
 
-    # Pick a target UDID — already-connected first, then any discoverable device
+    # Pick a target UDID — already-connected first, then any discoverable device.
+    # usbmuxd can transiently return an empty list right after device re-enum,
+    # so retry up to 10× with 1s gap (matches GeoPort's get_devices_with_retry).
     target_udid = next(iter(dm._connections.keys()), None)
     if target_udid is None:
-        try:
-            discovered = await dm.discover_devices()
-            if discovered:
-                target_udid = discovered[0].udid
-        except Exception:
-            _log.exception("discover_devices failed during lazy rebuild")
+        import asyncio as _asyncio
+        for attempt in range(10):
+            try:
+                discovered = await dm.discover_devices()
+                if discovered:
+                    target_udid = discovered[0].udid
+                    if attempt > 0:
+                        _log.info("discover_devices returned device on attempt %d", attempt + 1)
+                    break
+            except Exception:
+                _log.exception("discover_devices failed during lazy rebuild (attempt %d)", attempt + 1)
+            await _asyncio.sleep(1.0)
 
     if target_udid is None:
         raise HTTPException(

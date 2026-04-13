@@ -166,7 +166,11 @@ async def wifi_repair():
     """
     from pymobiledevice3.lockdown import create_using_usbmux
     from pymobiledevice3.usbmux import list_devices as mux_list_devices
-    from pymobiledevice3.remote.tunnel_service import CoreDeviceTunnelProxy
+    from pymobiledevice3.remote.tunnel_service import (
+        CoreDeviceTunnelProxy,
+        create_core_device_tunnel_service_using_rsd,
+    )
+    from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscoveryService
 
     try:
         raw_devices = await mux_list_devices()
@@ -216,34 +220,88 @@ async def wifi_repair():
 
     remote_record_regenerated = False
     if major >= 17:
+        # Delete any stale remote pair record for this udid so the
+        # RemotePairingProtocol.connect() path can't short-circuit through
+        # the cached (possibly-corrupt) record and actually runs _pair().
         try:
-            proxy = await CoreDeviceTunnelProxy.create(lockdown)
-            ctx = proxy.start_tcp_tunnel()
-            tunnel_result = await ctx.__aenter__()
-            _tunnel_logger.info(
-                "Re-pair: opened RSD tunnel for %s at %s:%s (record should now be fresh)",
-                udid, tunnel_result.address, tunnel_result.port,
+            from pymobiledevice3.common import get_home_folder
+            from pymobiledevice3.pair_records import (
+                PAIRING_RECORD_EXT,
+                get_remote_pairing_record_filename,
             )
-            await ctx.__aexit__(None, None, None)
-            try:
-                proxy.close()
-            except Exception:
-                pass
+            stale = get_home_folder() / f"{get_remote_pairing_record_filename(udid)}.{PAIRING_RECORD_EXT}"
+            if stale.exists():
+                stale.unlink()
+                _tunnel_logger.info("Re-pair: removed stale remote pair record %s", stale)
+        except Exception:
+            _tunnel_logger.debug("Re-pair: could not check/remove stale pair record", exc_info=True)
+
+        proxy = None
+        tunnel_ctx = None
+        rsd = None
+        tunnel_svc = None
+        try:
+            # 1. Open a CoreDeviceTunnelProxy tunnel over USB.
+            proxy = await CoreDeviceTunnelProxy.create(lockdown)
+            tunnel_ctx = proxy.start_tcp_tunnel()
+            tunnel_result = await tunnel_ctx.__aenter__()
+
+            # 2. Construct an RSD on the tunnel.
+            rsd = RemoteServiceDiscoveryService((tunnel_result.address, tunnel_result.port))
+            await rsd.connect()
+
+            # 3. This is the step that actually triggers the Trust dialog
+            #    (when no cached record) and persists the RemotePairing file
+            #    to ~/.pymobiledevice3/. RemotePairingProtocol.connect()
+            #    calls _pair() which runs _request_pair_consent() — Trust
+            #    prompt — then save_pair_record().
+            _tunnel_logger.info(
+                "Re-pair: opening CoreDeviceTunnelService over RSD %s:%s — "
+                "Trust prompt should appear on iPhone...",
+                tunnel_result.address, tunnel_result.port,
+            )
+            tunnel_svc = await create_core_device_tunnel_service_using_rsd(rsd, autopair=True)
+            _tunnel_logger.info(
+                "Re-pair: CoreDeviceTunnelService connected for %s — RemotePairing record written",
+                udid,
+            )
             remote_record_regenerated = True
         except Exception as e:
-            _tunnel_logger.exception("Re-pair: tunnel proxy step failed")
+            _tunnel_logger.exception("Re-pair: RemotePairing handshake failed")
+            msg = str(e)
+            if "PairingDialogResponsePending" in msg or "consent" in msg.lower():
+                friendly = "請在 iPhone 解鎖螢幕上按「信任」後重試(timeout 只有幾秒)。"
+            elif "not paired" in msg.lower() or "pairingerror" in msg.lower():
+                friendly = "USB 配對失效,請拔 USB 重插一次並按信任。"
+            else:
+                friendly = f"RemotePairing 握手失敗:{msg}"
             raise HTTPException(
                 status_code=500,
                 detail={
                     "code": "remote_pair_failed",
-                    "message": (
-                        "USB 信任成功,但 RemotePairing 記錄重建失敗 — "
-                        "請確認 LocWarp 以系統管理員身分執行,然後再試一次:" + str(e)
-                    ),
+                    "message": friendly,
                     "udid": udid,
                     "ios_version": ios_version,
                 },
             )
+        finally:
+            # Close everything in reverse order; ignore errors.
+            for closer in (
+                lambda: tunnel_svc and tunnel_svc.close(),
+                lambda: rsd and rsd.close(),
+                lambda: tunnel_ctx and tunnel_ctx.__aexit__(None, None, None),
+            ):
+                try:
+                    r = closer()
+                    if hasattr(r, "__await__"):
+                        await r
+                except Exception:
+                    pass
+            try:
+                if proxy is not None:
+                    proxy.close()
+            except Exception:
+                pass
 
     return {
         "status": "paired",
@@ -421,12 +479,32 @@ async def _tunnel_watchdog() -> None:
             if proc.poll() is None:
                 continue  # still alive
             _tunnel_logger.warning(
-                "Tunnel subprocess exited unexpectedly (code=%s); cleaning up",
+                "Tunnel subprocess exited (code=%s); entering 5s grace period before cleanup",
                 proc.returncode,
             )
+            # Grace window: warn the UI but don't kill the engine yet.
+            # A brief WiFi blip sometimes lets the subprocess self-recover;
+            # if it does (e.g. restarted via /start) we avoid a false disconnect.
+            try:
+                from api.websocket import broadcast
+                await broadcast("tunnel_degraded", {"reason": "subprocess_exited"})
+            except Exception:
+                _tunnel_logger.exception("Failed to emit tunnel_degraded event")
+
+            await asyncio.sleep(5.0)
+
             async with _tunnel.lock:
-                # Double-check under lock; /stop may have already handled it
-                if _tunnel.proc is proc:
+                # Recovered in the meantime — a new proc was spawned.
+                if _tunnel.proc is not proc and _tunnel.proc is not None and _tunnel.proc.poll() is None:
+                    _tunnel_logger.info("Tunnel recovered within grace period; keeping engine alive")
+                    try:
+                        from api.websocket import broadcast
+                        await broadcast("tunnel_recovered", {})
+                    except Exception:
+                        pass
+                    return
+                # Still down — now it's a real disconnect.
+                if _tunnel.proc is proc or _tunnel.proc is None:
                     await _cleanup_wifi_connections()
                     _tunnel.proc = None
                     _tunnel.info = None
@@ -436,7 +514,6 @@ async def _tunnel_watchdog() -> None:
                             info_path.unlink()
                         except OSError:
                             pass
-                    # Fire a WebSocket event so the frontend can show a banner
                     try:
                         from api.websocket import broadcast
                         await broadcast("tunnel_lost", {"reason": "subprocess_exited"})
@@ -584,14 +661,42 @@ async def wifi_tunnel_stop():
         except OSError:
             pass
 
-    # Try to fall back to USB if a device is still plugged in
+    # Try to fall back to USB if a device is still plugged in.
+    # Keep both connect() and engine creation atomic under the tunnel lock —
+    # if engine creation fails, roll back the connection so the device list
+    # doesn't advertise a connected device with no engine behind it.
     try:
         devices = await dm.discover_devices()
         usb_dev = next((d for d in devices if d.connection_type != "Network"), None)
         if usb_dev:
-            await dm.connect(usb_dev.udid)
-            await app_state.create_engine_for_device(usb_dev.udid)
-            _tunnel_logger.info("Switched back to USB connection: %s", usb_dev.udid)
+            try:
+                await dm.connect(usb_dev.udid)
+            except Exception:
+                _tunnel_logger.exception("USB fallback: connect failed for %s", usb_dev.udid)
+                usb_dev = None
+            if usb_dev is not None:
+                try:
+                    await app_state.create_engine_for_device(usb_dev.udid)
+                    _tunnel_logger.info("Switched back to USB connection: %s", usb_dev.udid)
+                except Exception:
+                    _tunnel_logger.exception(
+                        "USB fallback: engine creation failed for %s; rolling back",
+                        usb_dev.udid,
+                    )
+                    try:
+                        await dm.disconnect(usb_dev.udid)
+                    except Exception:
+                        pass
+                    app_state.simulation_engine = None
+                    try:
+                        from api.websocket import broadcast
+                        await broadcast("device_error", {
+                            "udid": usb_dev.udid,
+                            "stage": "usb_fallback",
+                            "error": "USB fallback engine creation failed",
+                        })
+                    except Exception:
+                        pass
     except Exception:
         _tunnel_logger.exception("USB fallback after tunnel stop failed")
 

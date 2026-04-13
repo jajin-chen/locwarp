@@ -464,10 +464,80 @@ class DeviceManager:
                 )
                 raise dvt_exc
 
+    async def _ensure_classic_ddi_mounted(self, conn: _ActiveConnection) -> None:
+        """For iOS <17 devices, make sure the classic Developer Disk Image is
+        mounted so com.apple.dt.simulatelocation is advertised by lockdown.
+        Without DDI, DtSimulateLocation cannot connect and location changes
+        silently fail (reported by iPhone 8 Plus / iOS 16.7 user).
+        """
+        try:
+            from pymobiledevice3.services.mobile_image_mounter import (
+                MobileImageMounterService, auto_mount, AlreadyMountedError,
+            )
+        except ImportError:
+            logger.warning("pymobiledevice3 mobile_image_mounter not available; skipping classic DDI mount")
+            return
+
+        try:
+            mounter = MobileImageMounterService(lockdown=conn.lockdown)
+            try:
+                await mounter.connect()
+                if await mounter.is_image_mounted("Developer"):
+                    logger.debug("Classic DDI already mounted on %s", conn.udid)
+                    return
+            finally:
+                try: await mounter.close()
+                except Exception: pass
+        except Exception:
+            logger.debug("Could not query classic DDI mount status; will attempt to mount", exc_info=True)
+
+        logger.info("Classic DDI not mounted on %s (iOS %s); mounting...", conn.udid, conn.ios_version)
+        try:
+            from api.websocket import broadcast
+            await broadcast("ddi_mounting", {"udid": conn.udid})
+        except Exception: pass
+        mounted = False
+        try:
+            await asyncio.wait_for(auto_mount(conn.lockdown), timeout=120.0)
+            logger.info("Classic DDI mounted successfully for %s", conn.udid)
+            mounted = True
+        except AlreadyMountedError:
+            mounted = True
+        except asyncio.TimeoutError:
+            logger.error("Classic DDI mount timed out after 120s for %s", conn.udid)
+            try:
+                from api.websocket import broadcast
+                await broadcast("ddi_mount_failed", {
+                    "udid": conn.udid,
+                    "error": "Classic DDI download/mount timed out (120s)",
+                })
+            except Exception: pass
+            raise RuntimeError("Classic DDI mount timed out")
+        except Exception as exc:
+            logger.exception("auto_mount (classic) failed for %s", conn.udid)
+            try:
+                from api.websocket import broadcast
+                await broadcast("ddi_mount_failed", {
+                    "udid": conn.udid,
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                })
+            except Exception: pass
+            raise
+        finally:
+            if mounted:
+                try:
+                    from api.websocket import broadcast
+                    await broadcast("ddi_mounted", {"udid": conn.udid})
+                except Exception: pass
+
     async def _create_legacy_location_service(
         self, conn: _ActiveConnection
     ) -> LegacyLocationService:
         """Create a ``LegacyLocationService`` backed by DtSimulateLocation."""
+        try:
+            await self._ensure_classic_ddi_mounted(conn)
+        except Exception:
+            logger.warning("Classic DDI auto-mount failed; DtSimulateLocation may fail", exc_info=True)
         try:
             return LegacyLocationService(conn.lockdown)
         except Exception:

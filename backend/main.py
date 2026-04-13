@@ -111,8 +111,21 @@ class AppState:
         try:
             await loc_service.set(init["lat"], init["lng"])
             logger.info("Initial position set on device: (%.6f, %.6f)", init["lat"], init["lng"])
-        except Exception:
-            logger.exception("Failed to push initial position to device")
+        except Exception as exc:
+            # Don't leave a half-constructed engine behind — the location
+            # service channel is broken; drop the engine so _engine() will
+            # lazy-rebuild on the next movement command instead of reusing
+            # a dead service. Broadcast so the UI knows.
+            logger.exception("Failed to push initial position to device; clearing engine")
+            self.simulation_engine = None
+            try:
+                await broadcast("device_error", {
+                    "udid": udid,
+                    "stage": "initial_position",
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                })
+            except Exception:
+                pass
 
         # Setup reconnect manager
         self.reconnect_manager = ReconnectManager(self.device_manager)

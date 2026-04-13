@@ -117,8 +117,10 @@ class DvtLocationService(LocationService):
             await sim.set(lat, lng)
             self._active = True
             logger.info("DVT location set to (%.6f, %.6f)", lat, lng)
-        except ConnectionTerminatedError:
-            logger.warning("DVT channel closed, reconnecting DVT provider and retrying")
+        except (ConnectionTerminatedError, OSError, EOFError, BrokenPipeError,
+                ConnectionResetError, asyncio.TimeoutError) as exc:
+            logger.warning("DVT channel dropped (%s: %s); reconnecting and retrying",
+                           type(exc).__name__, exc)
             await self._reconnect()
             sim = await self._ensure_instrument()
             await sim.set(lat, lng)
@@ -138,8 +140,10 @@ class DvtLocationService(LocationService):
             await sim.clear()
             self._active = False
             logger.info("DVT simulated location cleared")
-        except ConnectionTerminatedError:
-            logger.warning("DVT channel closed during clear, reconnecting and retrying")
+        except (ConnectionTerminatedError, OSError, EOFError, BrokenPipeError,
+                ConnectionResetError, asyncio.TimeoutError) as exc:
+            logger.warning("DVT channel dropped during clear (%s: %s); reconnecting",
+                           type(exc).__name__, exc)
             await self._reconnect()
             sim = await self._ensure_instrument()
             await sim.clear()
@@ -172,6 +176,15 @@ class LegacyLocationService(LocationService):
             logger.debug("Legacy DtSimulateLocation service initialised")
         return self._service
 
+    def _reset_service(self) -> None:
+        """Drop the cached DtSimulateLocation so the next call reconstructs it."""
+        try:
+            if self._service is not None and hasattr(self._service, "close"):
+                self._service.close()
+        except Exception:
+            logger.debug("Error closing stale DtSimulateLocation", exc_info=True)
+        self._service = None
+
     async def set(self, lat: float, lng: float) -> None:
         """Simulate the device location using the legacy service."""
         try:
@@ -179,6 +192,14 @@ class LegacyLocationService(LocationService):
             svc.set(lat, lng)
             self._active = True
             logger.info("Legacy location set to (%.6f, %.6f)", lat, lng)
+        except (OSError, EOFError, BrokenPipeError, ConnectionResetError) as exc:
+            logger.warning("Legacy location channel dropped (%s: %s); reconnecting and retrying",
+                           type(exc).__name__, exc)
+            self._reset_service()
+            svc = self._ensure_service()
+            svc.set(lat, lng)
+            self._active = True
+            logger.info("Legacy location set to (%.6f, %.6f) after reconnect", lat, lng)
         except Exception:
             logger.exception("Failed to set legacy simulated location")
             raise
@@ -193,6 +214,16 @@ class LegacyLocationService(LocationService):
             svc.clear()
             self._active = False
             logger.info("Legacy simulated location cleared")
+        except (OSError, EOFError, BrokenPipeError, ConnectionResetError) as exc:
+            logger.warning("Legacy clear channel dropped (%s: %s); reconnecting",
+                           type(exc).__name__, exc)
+            self._reset_service()
+            try:
+                svc = self._ensure_service()
+                svc.clear()
+                self._active = False
+            except Exception:
+                logger.exception("Legacy clear failed after reconnect")
         except Exception:
             logger.exception("Failed to clear legacy simulated location")
             raise
