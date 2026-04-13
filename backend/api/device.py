@@ -149,6 +149,111 @@ def _kill_stale_tunnel_processes() -> int:
     return killed
 
 
+@router.post("/wifi/repair")
+async def wifi_repair():
+    """Regenerate the RemotePairing pair record (~/.pymobiledevice3/) using a
+    currently-attached USB device. The iPhone will show a 'Trust This Computer'
+    prompt the first time; after the user taps 信任, a fresh RemotePairing
+    record is written and WiFi Tunnel will work again.
+
+    Flow:
+      1. List USB devices (must have at least one plugged in).
+      2. Open a USB lockdown session with autopair=True — this triggers the
+         Trust prompt if the Apple Lockdown USB record is missing.
+      3. For iOS 17+: open CoreDeviceTunnelProxy.start_tcp_tunnel() briefly.
+         pymobiledevice3 persists the RemotePairing record to
+         ~/.pymobiledevice3/ as a side effect of the RSD handshake.
+    """
+    from pymobiledevice3.lockdown import create_using_usbmux
+    from pymobiledevice3.usbmux import list_devices as mux_list_devices
+    from pymobiledevice3.remote.tunnel_service import CoreDeviceTunnelProxy
+
+    try:
+        raw_devices = await mux_list_devices()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "usbmux_unavailable", "message": f"無法列出 USB 裝置:{e}"},
+        )
+
+    # Prefer a USB-attached device (Network entries won't help us regenerate
+    # the RemotePairing record).
+    usb_dev = next((d for d in raw_devices if getattr(d, "connection_type", "USB") == "USB"), None)
+    if usb_dev is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "repair_needs_usb",
+                "message": "請先用 USB 線連接 iPhone。重新配對需要 USB 觸發『信任這台電腦』提示。",
+            },
+        )
+
+    udid = usb_dev.serial
+    _tunnel_logger.info("Re-pair requested for USB device %s", udid)
+
+    # Step 1: USB lockdown autopair — pops Trust prompt if USB record missing.
+    try:
+        lockdown = await create_using_usbmux(serial=udid, autopair=True)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "trust_failed",
+                "message": f"USB 信任失敗 — 請在 iPhone 解鎖畫面上點「信任」後再試:{e}",
+                "udid": udid,
+            },
+        )
+
+    ios_version = lockdown.all_values.get("ProductVersion", "0.0")
+    name = lockdown.all_values.get("DeviceName", "iPhone")
+
+    # Step 2: iOS 17+ — briefly open a CoreDeviceTunnelProxy. The RSD handshake
+    # re-generates the ~/.pymobiledevice3/ RemotePairing record.
+    try:
+        major = int(ios_version.split(".")[0])
+    except (ValueError, IndexError):
+        major = 0
+
+    remote_record_regenerated = False
+    if major >= 17:
+        try:
+            proxy = await CoreDeviceTunnelProxy.create(lockdown)
+            ctx = proxy.start_tcp_tunnel()
+            tunnel_result = await ctx.__aenter__()
+            _tunnel_logger.info(
+                "Re-pair: opened RSD tunnel for %s at %s:%s (record should now be fresh)",
+                udid, tunnel_result.address, tunnel_result.port,
+            )
+            await ctx.__aexit__(None, None, None)
+            try:
+                proxy.close()
+            except Exception:
+                pass
+            remote_record_regenerated = True
+        except Exception as e:
+            _tunnel_logger.exception("Re-pair: tunnel proxy step failed")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "remote_pair_failed",
+                    "message": (
+                        "USB 信任成功,但 RemotePairing 記錄重建失敗 — "
+                        "請確認 LocWarp 以系統管理員身分執行,然後再試一次:" + str(e)
+                    ),
+                    "udid": udid,
+                    "ios_version": ios_version,
+                },
+            )
+
+    return {
+        "status": "paired",
+        "udid": udid,
+        "name": name,
+        "ios_version": ios_version,
+        "remote_record_regenerated": remote_record_regenerated,
+    }
+
+
 class WifiTunnelStartRequest(BaseModel):
     ip: str
     port: int = 49152

@@ -28,6 +28,10 @@ const ERROR_I18N: Record<string, { zh: string; en: string }> = {
   no_position: { zh: '尚未取得目前位置,請先跳點到一個座標', en: 'No current position — teleport to a coordinate first' },
   tunnel_lost: { zh: 'WiFi Tunnel 連線中斷,請重新建立', en: 'Wi-Fi tunnel dropped — please reconnect' },
   cooldown_active: { zh: '冷卻中,請等待後再跳點', en: 'Cooldown active — wait before teleporting' },
+  repair_needs_usb: { zh: '重新配對需要 USB — 請先用線連接 iPhone', en: 'Re-pair needs USB — please connect the iPhone first' },
+  usbmux_unavailable: { zh: '無法列出 USB 裝置,請確認驅動與 Apple Mobile Device Service 是否正常', en: 'Cannot list USB devices — check iTunes/Apple Mobile Device Service' },
+  trust_failed: { zh: 'USB 信任失敗 — 請在 iPhone 上點「信任」後再試', en: 'USB trust failed — tap Trust on the iPhone and retry' },
+  remote_pair_failed: { zh: 'RemotePairing 記錄重建失敗 — 請以系統管理員身分重啟 LocWarp', en: 'RemotePairing record rebuild failed — restart LocWarp as Administrator' },
 }
 
 function currentLang(): 'zh' | 'en' {
@@ -73,6 +77,7 @@ export const wifiTunnelStartAndConnect = (ip: string, port = 49152, udid?: strin
 export const wifiTunnelStatus = () => request<any>('GET', '/api/device/wifi/tunnel/status')
 export const wifiTunnelDiscover = () => request<{ devices: { ip: string; port: number; host: string; name: string }[] }>('GET', '/api/device/wifi/tunnel/discover')
 export const wifiTunnelStop = () => request<any>('POST', '/api/device/wifi/tunnel/stop')
+export const wifiRepair = () => request<{ status: string; udid: string; name: string; ios_version: string; remote_record_regenerated: boolean }>('POST', '/api/device/wifi/repair')
 
 // Location simulation
 export const teleport = (lat: number, lng: number) =>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { wifiTunnelDiscover } from '../services/api';
+import { wifiTunnelDiscover, wifiRepair } from '../services/api';
 import { useT } from '../i18n';
 
 interface Device {
@@ -49,6 +49,22 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   const [discovering, setDiscovering] = useState(false);
   const [wifiExpanded, setWifiExpanded] = useState(false);
   const [showWifiWarning, setShowWifiWarning] = useState(false);
+  const [showRepairConfirm, setShowRepairConfirm] = useState(false);
+  const [repairState, setRepairState] = useState<'idle' | 'running' | 'success' | 'failed'>('idle');
+  const [repairMessage, setRepairMessage] = useState<string>('');
+
+  const handleRepair = async () => {
+    setRepairState('running');
+    setRepairMessage('');
+    try {
+      const res = await wifiRepair();
+      setRepairState('success');
+      setRepairMessage(`${res.name || 'iPhone'} (iOS ${res.ios_version})`);
+    } catch (err: any) {
+      setRepairState('failed');
+      setRepairMessage(err?.message || 'Unknown error');
+    }
+  };
   const [scanning, setScanning] = useState(false);
   // null = no recent scan; number = device count from most recent scan (flash display)
   const [scanResult, setScanResult] = useState<number | null>(null);
@@ -387,6 +403,26 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                 </button>
               </div>
 
+              {wifiTab === 'ios17plus' && (
+                <button
+                  onClick={() => { setRepairState('idle'); setRepairMessage(''); setShowRepairConfirm(true); }}
+                  title={t('wifi.repair_tooltip')}
+                  style={{
+                    width: '100%', padding: '5px 8px', fontSize: 11, marginBottom: 8,
+                    background: 'rgba(255, 193, 7, 0.08)',
+                    border: '1px solid rgba(255, 193, 7, 0.35)',
+                    borderRadius: 4, color: '#ffc107', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 12a9 9 0 11-6.219-8.56" />
+                    <polyline points="21 3 21 9 15 9" />
+                  </svg>
+                  {t('wifi.repair_button')}
+                </button>
+              )}
+
               {/* Help + Discover buttons row */}
               <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
                 <button
@@ -601,6 +637,116 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                 }}
               >{t('wifi.warning_ok')}</button>
             </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {showRepairConfirm && createPortal(
+        <div
+          onClick={() => { if (repairState !== 'running') setShowRepairConfirm(false); }}
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 100000, padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#1e1e1e', border: '1px solid #444', borderRadius: 10,
+              padding: 24, maxWidth: 460, width: '100%',
+              color: '#e8e8e8',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.75)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 32, height: 32, borderRadius: '50%',
+                background: 'rgba(108, 140, 255, 0.15)', color: '#6c8cff',
+                fontSize: 18, fontWeight: 700, border: '1px solid rgba(108,140,255,0.5)',
+                flexShrink: 0,
+              }}>↻</span>
+              <strong style={{ fontSize: 15 }}>{t('wifi.repair_confirm_title')}</strong>
+            </div>
+
+            {repairState === 'idle' && (
+              <>
+                <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-line', opacity: 0.92 }}>
+                  {t('wifi.repair_confirm_body')}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
+                  <button
+                    onClick={() => setShowRepairConfirm(false)}
+                    style={{ padding: '7px 16px', fontSize: 12, borderRadius: 5,
+                      background: 'transparent', color: '#bbb', border: '1px solid #444', cursor: 'pointer' }}
+                  >{t('wifi.repair_cancel')}</button>
+                  <button
+                    onClick={handleRepair}
+                    style={{ padding: '7px 16px', fontSize: 12, borderRadius: 5,
+                      background: '#6c8cff', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                  >{t('wifi.repair_ok')}</button>
+                </div>
+              </>
+            )}
+
+            {repairState === 'running' && (
+              <div style={{ fontSize: 13, lineHeight: 1.7, textAlign: 'center', padding: '20px 0' }}>
+                <div style={{
+                  width: 32, height: 32, margin: '0 auto 12px',
+                  border: '3px solid rgba(108,140,255,0.25)',
+                  borderTopColor: '#6c8cff', borderRadius: '50%',
+                  animation: 'spin 0.8s linear infinite',
+                }} />
+                <div style={{ color: '#ffc107' }}>{t('wifi.repair_running')}</div>
+                <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+              </div>
+            )}
+
+            {repairState === 'success' && (
+              <>
+                <div style={{ fontSize: 13, lineHeight: 1.7, color: '#4caf50' }}>
+                  ✓ {t('wifi.repair_success')}
+                </div>
+                {repairMessage && (
+                  <div style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>{repairMessage}</div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+                  <button
+                    onClick={() => setShowRepairConfirm(false)}
+                    style={{ padding: '7px 16px', fontSize: 12, borderRadius: 5,
+                      background: '#6c8cff', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                  >{t('wifi.warning_ok')}</button>
+                </div>
+              </>
+            )}
+
+            {repairState === 'failed' && (
+              <>
+                <div style={{ fontSize: 13, lineHeight: 1.7, color: '#ff6b6b' }}>
+                  ✗ {t('wifi.repair_failed')}
+                </div>
+                {repairMessage && (
+                  <div style={{ fontSize: 12, opacity: 0.8, marginTop: 8, padding: 8,
+                    background: 'rgba(255,107,107,0.08)', border: '1px solid rgba(255,107,107,0.3)',
+                    borderRadius: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{repairMessage}</div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
+                  <button
+                    onClick={() => setShowRepairConfirm(false)}
+                    style={{ padding: '7px 16px', fontSize: 12, borderRadius: 5,
+                      background: 'transparent', color: '#bbb', border: '1px solid #444', cursor: 'pointer' }}
+                  >{t('wifi.repair_cancel')}</button>
+                  <button
+                    onClick={handleRepair}
+                    style={{ padding: '7px 16px', fontSize: 12, borderRadius: 5,
+                      background: '#6c8cff', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                  >{t('wifi.repair_ok')}</button>
+                </div>
+              </>
+            )}
           </div>
         </div>,
         document.body,
