@@ -336,10 +336,66 @@ class DeviceManager:
         conn.location_service = loc
         return loc
 
+    async def _ensure_personalized_ddi_mounted(self, conn: _ActiveConnection) -> None:
+        """For iOS 17+ devices, make sure the Personalized Developer Disk Image
+        is mounted. Without the DDI, the DVT service hub won't advertise and
+        DvtProvider will fail with "No such service: com.apple.instruments.dtservicehub".
+
+        If already mounted, this is a no-op. Otherwise it downloads the image
+        from the pymobiledevice3 DDI repository (GitHub) and mounts it. The
+        per-device signing (TSS) is handled internally by pymobiledevice3.
+        """
+        try:
+            from pymobiledevice3.services.mobile_image_mounter import (
+                MobileImageMounterService,
+                auto_mount_personalized,
+                AlreadyMountedError,
+            )
+        except ImportError:
+            logger.warning("pymobiledevice3 mobile_image_mounter not available; skipping DDI mount")
+            return
+
+        # 1. Check whether a Personalized image is already mounted.
+        try:
+            mounter = MobileImageMounterService(lockdown=conn.lockdown)
+            try:
+                await mounter.connect()
+                if await mounter.is_image_mounted("Personalized"):
+                    logger.debug("Personalized DDI already mounted on %s", conn.udid)
+                    return
+            finally:
+                try:
+                    await mounter.close()
+                except Exception:
+                    pass
+        except Exception:
+            logger.warning("Could not query image mount status; will attempt to mount anyway", exc_info=True)
+
+        # 2. Not mounted — download + mount.
+        logger.info("Personalized DDI not mounted on %s; mounting (may download ~20MB)...", conn.udid)
+        try:
+            await auto_mount_personalized(conn.lockdown)
+            logger.info("Personalized DDI mounted successfully for %s", conn.udid)
+        except AlreadyMountedError:
+            logger.info("DDI was mounted concurrently for %s", conn.udid)
+        except Exception:
+            logger.exception("auto_mount_personalized failed for %s", conn.udid)
+            raise
+
     async def _create_dvt_location_service(
         self, conn: _ActiveConnection
     ) -> DvtLocationService:
-        """Spin up a DVT provider and hand it to ``DvtLocationService``."""
+        """Spin up a DVT provider and hand it to ``DvtLocationService``.
+
+        If DVT fails because the Developer Disk Image is not mounted,
+        we try to mount it automatically and retry once.
+        """
+        # Try to mount DDI proactively (fast no-op when already mounted).
+        try:
+            await self._ensure_personalized_ddi_mounted(conn)
+        except Exception:
+            logger.warning("DDI auto-mount failed; DVT may still fail", exc_info=True)
+
         try:
             dvt = DvtProvider(conn.lockdown)
             await dvt.__aenter__()
