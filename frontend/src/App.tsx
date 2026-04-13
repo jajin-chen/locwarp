@@ -49,7 +49,7 @@ const App: React.FC = () => {
     } catch {
       showToast(t('status.restore_failed'))
     }
-  }, [showToast])
+  }, [showToast, t, sim])
   const [wpGenRadius, setWpGenRadius] = useState(300)
   const [wpGenCount, setWpGenCount] = useState(5)
 
