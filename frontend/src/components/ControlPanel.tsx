@@ -721,28 +721,52 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                         />
                       </label>
                     )}
-                    {routesExportAllUrl && savedRoutes.length > 0 && (
-                      <a
-                        className="action-btn"
-                        href={routesExportAllUrl}
-                        download="locwarp-routes.json"
-                        title={t('panel.routes_export_all_tooltip')}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 4,
-                          padding: '4px 10px', fontSize: 11, cursor: 'pointer',
-                          textDecoration: 'none',
-                          color: '#4ecdc4',
-                          background: 'rgba(78, 205, 196, 0.12)',
-                          border: '1px solid rgba(78, 205, 196, 0.35)',
-                        }}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                          <polyline points="7 10 12 15 17 10" />
-                          <line x1="12" y1="15" x2="12" y2="3" />
-                        </svg>
-                        {t('panel.routes_export_all')}
-                      </a>
+                    {routesExportAllUrl && (
+                      savedRoutes.length > 0 ? (
+                        <a
+                          className="action-btn"
+                          href={routesExportAllUrl}
+                          download="locwarp-routes.json"
+                          title={t('panel.routes_export_all_tooltip')}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            padding: '4px 10px', fontSize: 11, cursor: 'pointer',
+                            textDecoration: 'none',
+                            color: '#4ecdc4',
+                            background: 'rgba(78, 205, 196, 0.12)',
+                            border: '1px solid rgba(78, 205, 196, 0.35)',
+                          }}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                          </svg>
+                          {t('panel.routes_export_all')}
+                        </a>
+                      ) : (
+                        <button
+                          className="action-btn"
+                          disabled
+                          title={t('panel.routes_export_all_disabled')}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            padding: '4px 10px', fontSize: 11,
+                            cursor: 'not-allowed',
+                            color: 'rgba(78, 205, 196, 0.45)',
+                            background: 'rgba(78, 205, 196, 0.05)',
+                            border: '1px solid rgba(78, 205, 196, 0.15)',
+                            opacity: 0.55,
+                          }}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                          </svg>
+                          {t('panel.routes_export_all')}
+                        </button>
+                      )
                     )}
                     {onRoutesImportAll && (
                       <label
