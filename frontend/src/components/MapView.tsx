@@ -342,8 +342,7 @@ const MapView: React.FC<MapViewProps> = ({
       const polyline = L.polyline(latlngs, {
         color: '#4285f4',
         weight: 4,
-        opacity: 0.8,
-        dashArray: '8, 8',
+        opacity: 0.85,
       }).addTo(map);
       polylineRef.current = polyline;
     }
@@ -463,7 +462,7 @@ const MapView: React.FC<MapViewProps> = ({
         onMouseDown={(e) => e.stopPropagation()}
         className="anim-fade-slide-up"
         style={{
-          position: 'absolute', left: 12, bottom: 28, zIndex: 850,
+          position: 'absolute', left: 12, bottom: 100, zIndex: 851,
           display: 'flex', alignItems: 'center', gap: 6,
           background: 'rgba(26, 29, 39, 0.82)',
           backdropFilter: 'blur(14px) saturate(140%)',

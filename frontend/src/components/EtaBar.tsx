@@ -45,21 +45,25 @@ const EtaBar: React.FC<EtaBarProps> = ({
       className="eta-bar"
       style={{
         position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
+        top: 10,
+        left: 10,
+        right: 10,
         zIndex: 850,
-        background: 'rgba(15, 17, 23, 0.82)',
-        backdropFilter: 'blur(14px) saturate(140%)',
-        WebkitBackdropFilter: 'blur(14px) saturate(140%)',
+        background: 'rgba(18, 21, 32, 0.72)',
+        backdropFilter: 'blur(24px) saturate(160%)',
+        WebkitBackdropFilter: 'blur(24px) saturate(160%)',
         padding: '7px 18px',
         display: 'flex',
         alignItems: 'center',
+        flexWrap: 'wrap',
+        rowGap: 6,
         gap: 16,
         fontSize: 12,
         color: '#e8eaf0',
-        borderBottom: '1px solid rgba(108, 140, 255, 0.15)',
-        boxShadow: '0 4px 14px rgba(12, 18, 40, 0.3)',
+        border: '1px solid rgba(108, 140, 255, 0.18)',
+        borderRadius: 18,
+        boxShadow:
+          '0 12px 32px rgba(12, 18, 40, 0.45), 0 2px 6px rgba(12, 18, 40, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
         letterSpacing: '-0.005em',
       }}
     >

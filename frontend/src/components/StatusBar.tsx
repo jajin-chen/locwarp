@@ -79,19 +79,26 @@ const StatusBar: React.FC<StatusBarProps> = ({
     <div
       className="status-bar"
       style={{
+        position: 'absolute',
+        bottom: 10,
+        left: 10,
+        right: 10,
+        zIndex: 850,
         display: 'flex',
         alignItems: 'center',
         flexWrap: 'wrap',
-        rowGap: 3,
+        rowGap: 4,
         columnGap: 12,
-        padding: '5px 14px',
+        padding: '6px 16px',
         fontSize: 12,
         color: '#c7cbd9',
-        background: 'rgba(15, 17, 23, 0.85)',
-        backdropFilter: 'blur(12px) saturate(140%)',
-        WebkitBackdropFilter: 'blur(12px) saturate(140%)',
-        borderTop: '1px solid rgba(108, 140, 255, 0.1)',
-        flexShrink: 0,
+        background: 'rgba(18, 21, 32, 0.72)',
+        backdropFilter: 'blur(24px) saturate(160%)',
+        WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+        border: '1px solid rgba(108, 140, 255, 0.18)',
+        borderRadius: 18,
+        boxShadow:
+          '0 14px 36px rgba(12, 18, 40, 0.48), 0 2px 8px rgba(12, 18, 40, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
         letterSpacing: '-0.005em',
       }}
     >
@@ -137,7 +144,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
               )}
             </button>
           </div>
-          <div style={{ width: 1, height: 14, background: '#333' }} />
+          <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.12)' }} />
         </>
       )}
 
@@ -173,7 +180,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
       {/* Restore button */}
       {onRestore && (
         <>
-          <div style={{ width: 1, height: 14, background: '#333' }} />
+          <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.12)' }} />
           <button
             onClick={onRestore}
             title={t('status.restore_tooltip')}
@@ -228,7 +235,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
       {/* Cooldown timer */}
       {cooldownDisplay > 0 && (
         <>
-          <div style={{ width: 1, height: 14, background: '#333' }} />
+          <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.12)' }} />
           <div
             style={{
               display: 'flex',
@@ -253,11 +260,11 @@ const StatusBar: React.FC<StatusBarProps> = ({
       {/* Right cluster: lang toggle · time · version, all inline. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <LangToggle />
-        <div style={{ width: 1, height: 12, background: '#333' }} />
+        <div style={{ width: 1, height: 12, background: 'rgba(255,255,255,0.12)' }} />
         <span style={{ opacity: 0.4, fontSize: 10 }}>
           {new Date().toLocaleTimeString(undefined, { hour12: false })}
         </span>
-        <div style={{ width: 1, height: 12, background: '#333' }} />
+        <div style={{ width: 1, height: 12, background: 'rgba(255,255,255,0.12)' }} />
         <span style={{ fontSize: 10, opacity: 0.45, fontFamily: 'monospace' }}>
           v{APP_VERSION}
         </span>
