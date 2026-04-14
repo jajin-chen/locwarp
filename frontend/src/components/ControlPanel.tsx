@@ -783,8 +783,19 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                             className="action-btn"
                             title={t('panel.route_gpx_export_tooltip')}
                             onClick={(e) => { e.stopPropagation(); onRouteGpxExport(route.id); }}
-                            style={{ padding: '2px 6px', fontSize: 10 }}
+                            style={{
+                              padding: '3px 8px', fontSize: 11, fontWeight: 600,
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              color: '#6c8cff',
+                              background: 'rgba(108, 140, 255, 0.12)',
+                              border: '1px solid rgba(108, 140, 255, 0.35)',
+                            }}
                           >
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                              <polyline points="7 10 12 15 17 10" />
+                              <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
                             GPX
                           </button>
                         )}
