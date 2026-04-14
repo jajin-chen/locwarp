@@ -74,31 +74,43 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   const [contextMenu, setContextMenu] = useState<{ bm: Bookmark; x: number; y: number } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  // Full edit dialog (name + lat + lng) — triggered by context menu "Edit".
+  const [editDialog, setEditDialog] = useState<Bookmark | null>(null);
+  const [editDialogName, setEditDialogName] = useState('');
+  const [editDialogLat, setEditDialogLat] = useState('');
+  const [editDialogLng, setEditDialogLng] = useState('');
   const [showCustomDialog, setShowCustomDialog] = useState(false);
   const [customName, setCustomName] = useState('');
   const [customLat, setCustomLat] = useState('');
   const [customLng, setCustomLng] = useState('');
   const [customCategory, setCustomCategory] = useState(categories[0] || 'Default');
+  const [search, setSearch] = useState('');
 
-  // Close the context menu on any document click outside of it.
-  // Using a document-level listener (instead of a full-screen overlay div)
-  // avoids the bug where a stuck overlay blocks all user interaction.
+  // Close the context menu on ESC, or on any click / right-click that
+  // isn't on the menu itself. Uses pointerdown so it fires before React
+  // click handlers inside the menu.
   useEffect(() => {
     if (!contextMenu) return;
-    const handler = (e: MouseEvent) => {
+    const onOutside = (e: Event) => {
       const target = e.target as Element | null;
       if (target && target.closest?.('[data-bookmark-context-menu]')) return;
       setContextMenu(null);
     };
-    // defer to next tick so the opening right-click doesn't close it instantly
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    // Register on the next tick so the opening right-click's bubbling
+    // doesn't dismiss the menu the moment we render it.
     const id = setTimeout(() => {
-      document.addEventListener('click', handler);
-      document.addEventListener('contextmenu', handler);
+      document.addEventListener('pointerdown', onOutside);
+      document.addEventListener('contextmenu', onOutside);
+      document.addEventListener('keydown', onEsc);
     }, 0);
     return () => {
       clearTimeout(id);
-      document.removeEventListener('click', handler);
-      document.removeEventListener('contextmenu', handler);
+      document.removeEventListener('pointerdown', onOutside);
+      document.removeEventListener('contextmenu', onOutside);
+      document.removeEventListener('keydown', onEsc);
     };
   }, [contextMenu]);
 
@@ -229,6 +241,37 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
           </svg>
         </button>
+      </div>
+
+      {/* Search box — filters by name / coords across all categories */}
+      <div style={{ position: 'relative', marginBottom: 8 }}>
+        <svg
+          width="12" height="12" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2"
+          style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', opacity: 0.4, pointerEvents: 'none' }}
+        >
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input
+          type="text"
+          className="search-input"
+          placeholder={t('bm.search_placeholder')}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ width: '100%', paddingLeft: 26, paddingRight: search ? 24 : 8, fontSize: 12 }}
+        />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            title={t('bm.search_clear')}
+            style={{
+              position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
+              background: 'none', border: 'none', color: '#bbb',
+              cursor: 'pointer', padding: '2px 6px', fontSize: 14, lineHeight: 1,
+            }}
+          >×</button>
+        )}
       </div>
 
       {/* Add bookmark dialog */}
@@ -374,8 +417,61 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
         </div>
       )}
 
-      {/* Bookmark groups */}
-      {Object.entries(bookmarksByCategory).map(([cat, bms]) => (
+      {/* Search mode: flat filtered list, no category grouping */}
+      {search.trim() !== '' && (() => {
+        const q = search.trim().toLowerCase();
+        const matches = bookmarks.filter((bm) => {
+          const name = (bm.name ?? '').toLowerCase();
+          const cat = (bm.category ?? '').toLowerCase();
+          const coord = `${bm.lat.toFixed(5)}, ${bm.lng.toFixed(5)}`;
+          return name.includes(q) || cat.includes(q) || coord.includes(q);
+        });
+        if (matches.length === 0) {
+          return (
+            <div style={{ fontSize: 12, opacity: 0.5, padding: '10px 0', textAlign: 'center' }}>
+              {t('bm.search_no_results')}
+            </div>
+          );
+        }
+        return (
+          <div style={{ paddingLeft: 4 }}>
+            {matches.map((bm) => (
+              <div
+                key={bm.id ?? `${bm.lat}-${bm.lng}`}
+                className="bookmark-item"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '5px 6px', cursor: 'pointer',
+                  borderRadius: 4, fontSize: 12, transition: 'background 0.15s',
+                }}
+                onClick={() => onBookmarkClick(bm)}
+                onContextMenu={(e) => handleContextMenu(e, bm)}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e'; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+              >
+                <div
+                  style={{
+                    width: 8, height: 8, borderRadius: '50%',
+                    background: getCategoryColor(bm.category), flexShrink: 0,
+                  }}
+                  title={displayCat(bm.category)}
+                />
+                <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {bm.name}
+                  </span>
+                  <span style={{ fontSize: 10, opacity: 0.55, fontFamily: 'monospace' }}>
+                    {displayCat(bm.category)} · {bm.lat.toFixed(5)}, {bm.lng.toFixed(5)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* Bookmark groups — only when NOT searching */}
+      {search.trim() === '' && Object.entries(bookmarksByCategory).map(([cat, bms]) => (
         <div key={cat} className="bookmark-group" style={{ marginBottom: 4 }}>
           <div
             style={{
@@ -500,14 +596,15 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
       )}
 
       {/* Context menu (dismissed via document click listener — see useEffect) */}
-      {contextMenu && (
+      {contextMenu && createPortal(
         <>
           <div
             data-bookmark-context-menu
             style={{
               position: 'fixed',
-              left: contextMenu.x,
-              top: contextMenu.y,
+              // Clamp to viewport so the menu never falls off-screen.
+              left: Math.min(contextMenu.x, window.innerWidth - 160),
+              top: Math.min(contextMenu.y, window.innerHeight - 200),
               zIndex: 9999,
               background: '#2a2a2e',
               border: '1px solid #444',
@@ -522,10 +619,11 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
               onMouseEnter={ctxHighlight}
               onMouseLeave={ctxUnhighlight}
               onClick={() => {
-                if (contextMenu.bm.id) {
-                  setEditingId(contextMenu.bm.id);
-                  setEditName(contextMenu.bm.name);
-                }
+                const bm = contextMenu.bm;
+                setEditDialog(bm);
+                setEditDialogName(bm.name);
+                setEditDialogLat(bm.lat.toString());
+                setEditDialogLng(bm.lng.toString());
                 setContextMenu(null);
               }}
             >
@@ -610,7 +708,102 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
               </>
             )}
           </div>
-        </>
+        </>,
+        document.body,
+      )}
+
+      {/* Edit dialog — name + lat + lng */}
+      {editDialog && createPortal(
+        <div
+          onClick={() => setEditDialog(null)}
+          className="anim-fade-in"
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(8, 10, 20, 0.55)',
+            backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+            zIndex: 1000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.stopPropagation()}
+            className="anim-scale-in"
+            style={{
+              background: 'rgba(26, 29, 39, 0.96)',
+              backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+              border: '1px solid rgba(108, 140, 255, 0.2)',
+              borderRadius: 12, padding: 18, width: 320, color: '#e0e0e0',
+              boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05) inset',
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
+              {t('bm.edit')}
+            </div>
+            <input
+              type="text"
+              className="search-input"
+              placeholder={t('bm.name_placeholder')}
+              value={editDialogName}
+              autoFocus
+              onChange={(e) => setEditDialogName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setEditDialog(null);
+              }}
+              style={{ width: '100%', marginBottom: 8 }}
+            />
+            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+              <input
+                type="text"
+                className="search-input"
+                inputMode="decimal"
+                placeholder={t('bm.lat_placeholder')}
+                value={editDialogLat}
+                onChange={(e) => setEditDialogLat(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <input
+                type="text"
+                className="search-input"
+                inputMode="decimal"
+                placeholder={t('bm.lng_placeholder')}
+                value={editDialogLng}
+                onChange={(e) => setEditDialogLng(e.target.value)}
+                style={{ flex: 1 }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                className="action-btn primary"
+                style={{ flex: 1 }}
+                disabled={
+                  !editDialogName.trim() ||
+                  !Number.isFinite(parseFloat(editDialogLat)) ||
+                  !Number.isFinite(parseFloat(editDialogLng))
+                }
+                onClick={() => {
+                  const lat = parseFloat(editDialogLat);
+                  const lng = parseFloat(editDialogLng);
+                  if (!editDialog.id) { setEditDialog(null); return; }
+                  if (!Number.isFinite(lat) || lat < -90 || lat > 90) return;
+                  if (!Number.isFinite(lng) || lng < -180 || lng > 180) return;
+                  // Backend PUT requires the full Bookmark shape, so merge
+                  // the edits over the original to keep category + address.
+                  onBookmarkEdit(editDialog.id, {
+                    ...editDialog,
+                    name: editDialogName.trim(),
+                    lat, lng,
+                  });
+                  setEditDialog(null);
+                }}
+              >{t('generic.save')}</button>
+              <button className="action-btn" onClick={() => setEditDialog(null)}>
+                {t('generic.cancel')}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
       )}
 
       {showCustomDialog && createPortal(

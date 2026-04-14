@@ -31,7 +31,9 @@ export interface SimulationStatus {
   distance_traveled?: number
 }
 
-export function useSimulation(wsMessage: WsMessage | null) {
+export type WsSubscribe = (fn: (m: WsMessage) => void) => () => void
+
+export function useSimulation(subscribe?: WsSubscribe) {
   const [mode, setMode] = useState<SimMode>(SimMode.Teleport)
   const [moveMode, setMoveMode] = useState<MoveMode>(MoveMode.Walking)
   const [status, setStatus] = useState<SimulationStatus>({
@@ -104,10 +106,12 @@ export function useSimulation(wsMessage: WsMessage | null) {
     return () => clearInterval(id)
   }, [pauseEndAt])
 
-  // Process incoming WS messages
+  // Process incoming WS messages via subscribe callback. The old
+  // useState-based approach dropped messages when two arrived in the
+  // same React tick; see useWebSocket.ts for details.
   useEffect(() => {
-    if (!wsMessage) return
-
+    if (!subscribe) return
+    return subscribe((wsMessage) => {
     switch (wsMessage.type) {
       case 'position_update': {
         const { lat, lng } = wsMessage.data
@@ -237,7 +241,8 @@ export function useSimulation(wsMessage: WsMessage | null) {
         break
       }
     }
-  }, [wsMessage])
+    })
+  }, [subscribe])
 
   const clearError = useCallback(() => setError(null), [])
 

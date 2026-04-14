@@ -15,6 +15,7 @@ import JoystickPad from './components/JoystickPad'
 import EtaBar from './components/EtaBar'
 import PauseControl from './components/PauseControl'
 import StatusBar from './components/StatusBar'
+import UpdateChecker from './components/UpdateChecker'
 
 import { SimMode, MoveMode } from './hooks/useSimulation'
 
@@ -27,8 +28,8 @@ const SPEED_MAP: Record<MoveMode, number> = {
 const App: React.FC = () => {
   const t = useT()
   const ws = useWebSocket()
-  const device = useDevice(ws.lastMessage)
-  const sim = useSimulation(ws.lastMessage)
+  const device = useDevice(ws.subscribe)
+  const sim = useSimulation(ws.subscribe)
   const joystick = useJoystick(ws.sendMessage, sim.mode === SimMode.Joystick)
   const bm = useBookmarks()
 
@@ -753,6 +754,8 @@ const App: React.FC = () => {
           onRestore={handleRestore}
           onOpenLog={handleOpenLog}
         />
+
+        <UpdateChecker />
 
         {toastMsg && (
           <div

@@ -21,27 +21,30 @@ export interface WifiScanResult {
   ios_version: string
 }
 
-export function useDevice(wsMessage?: WsMessage | null) {
+export type WsSubscribe = (fn: (m: WsMessage) => void) => () => void
+
+export function useDevice(subscribe?: WsSubscribe) {
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [connectedDevice, setConnectedDevice] = useState<DeviceInfo | null>(null)
 
-  // React to real-time device state broadcasts.
+  // React to real-time device state broadcasts via the subscribe callback.
+  // See useWebSocket.ts for the rationale vs the old useState pattern.
   useEffect(() => {
-    if (!wsMessage) return
-    if (wsMessage.type === 'device_disconnected') {
-      setConnectedDevice(null)
-      setDevices((prev) => prev.map((d) => ({ ...d, is_connected: false })))
-    } else if (wsMessage.type === 'device_reconnected') {
-      // Refresh the device list so the newly-connected device surfaces
-      // without the user needing to click the scan button.
-      listDevices().then((list) => {
-        setDevices(list)
-        const udid = wsMessage.data?.udid
-        const match = udid ? list.find((d) => d.udid === udid) : null
-        setConnectedDevice(match ?? list.find((d) => d.is_connected) ?? null)
-      }).catch(() => {})
-    }
-  }, [wsMessage])
+    if (!subscribe) return
+    return subscribe((msg) => {
+      if (msg.type === 'device_disconnected') {
+        setConnectedDevice(null)
+        setDevices((prev) => prev.map((d) => ({ ...d, is_connected: false })))
+      } else if (msg.type === 'device_reconnected') {
+        listDevices().then((list) => {
+          setDevices(list)
+          const udid = msg.data?.udid
+          const match = udid ? list.find((d) => d.udid === udid) : null
+          setConnectedDevice(match ?? list.find((d) => d.is_connected) ?? null)
+        }).catch(() => {})
+      }
+    })
+  }, [subscribe])
   const [scanning, setScanning] = useState(false)
   const [wifiScanning, setWifiScanning] = useState(false)
   const [wifiDevices, setWifiDevices] = useState<WifiScanResult[]>([])
