@@ -75,7 +75,18 @@ const MapView: React.FC<MapViewProps> = ({
   runtimes,
   devices,
 }) => {
-  const dualMode = !!(devices && devices.length >= 2 && runtimes);
+  // Dual-mode rendering disabled by design: with pre-sync (both devices
+  // teleport to the same start before any group action) and shared random
+  // seed, the two phones always sit at the exact same coordinate, so two
+  // markers and two polylines just overlap and add visual noise. We keep
+  // the dual data plumbing (devices, runtimes) for the dual cleanup effect
+  // below but always render the single-device view (driven by the primary
+  // device's currentPosition / routePath / destination passed in as props).
+  const dualMode = false;
+  // Suppress unused-prop warnings — kept for API compatibility and the
+  // dual-marker cleanup effect that wipes any residual dual markers if a
+  // user upgrades from an earlier 0.2.0 build that had them rendered.
+  void devices; void runtimes;
   const t = useT();
   // The map-init useEffect only runs once, so its click handler captures the
   // first-render `t`. Language switches then don't reach the tooltip hint.

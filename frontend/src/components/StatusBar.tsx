@@ -148,8 +148,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
             key={dev.udid}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '2px 8px 2px 6px',
-              borderLeft: `3px solid ${color}`,
+              padding: '2px 8px',
               borderRadius: 4,
               background: 'rgba(255,255,255,0.04)',
               fontFamily: 'monospace', fontSize: 11,
