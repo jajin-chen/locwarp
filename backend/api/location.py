@@ -429,3 +429,35 @@ async def set_coord_format(req: CoordFormatRequest):
     fmt = _coord_fmt()
     fmt.format = req.format
     return {"format": fmt.format.value}
+
+
+# --- Initial map position (persisted in settings.json) ---
+
+class _InitialPosRequest(BaseModel):
+    lat: float | None = None
+    lng: float | None = None
+
+
+@router.get("/settings/initial-position", tags=["settings"])
+async def get_initial_position():
+    from main import app_state
+    pos = app_state._initial_map_position
+    return {"position": pos}  # {"position": null} or {"position": {"lat","lng"}}
+
+
+@router.put("/settings/initial-position", tags=["settings"])
+async def set_initial_position(req: _InitialPosRequest):
+    """Pass `{lat: null, lng: null}` (or omit) to clear the custom initial
+    map center and fall back to the default on next launch."""
+    from main import app_state
+    if req.lat is None or req.lng is None:
+        app_state._initial_map_position = None
+    else:
+        if not (-90 <= req.lat <= 90) or not (-180 <= req.lng <= 180):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "invalid_coord", "message": "lat must be in [-90, 90], lng in [-180, 180]"},
+            )
+        app_state._initial_map_position = {"lat": float(req.lat), "lng": float(req.lng)}
+    app_state.save_settings()
+    return {"position": app_state._initial_map_position}

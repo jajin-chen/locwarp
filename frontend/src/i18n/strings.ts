@@ -38,6 +38,12 @@ export const STRINGS = {
   'status.open_log_failed': { zh: '無法開啟 log', en: 'Failed to open log' },
   'status.copy_coord': { zh: '複製座標', en: 'Copy coordinates' },
   'status.restore_all': { zh: '全部還原', en: 'Restore all' },
+  'status.set_initial': { zh: '初始位置', en: 'Initial pos' },
+  'status.set_initial_tooltip': { zh: '設定 LocWarp 開啟時地圖預設中心座標 (留空恢復預設)', en: 'Set the default map center on launch (blank to reset to default)' },
+  'status.set_initial_prompt': { zh: '輸入初始位置座標 (格式 lat, lng,例如 25.033, 121.564)。留空清除自訂值。', en: 'Enter initial position as "lat, lng" (e.g. 25.033, 121.564). Leave blank to clear.' },
+  'status.set_initial_invalid': { zh: '座標格式錯誤,請輸入「緯度, 經度」,範圍 lat ±90 / lng ±180', en: 'Invalid format. Use "lat, lng" with lat in ±90 and lng in ±180.' },
+  'status.set_initial_saved': { zh: '已儲存初始位置:{lat}, {lng} (下次開啟生效)', en: 'Initial position saved: {lat}, {lng} (effective next launch)' },
+  'status.set_initial_cleared': { zh: '已清除自訂初始位置,下次開啟回到預設', en: 'Custom initial position cleared. Next launch uses the default.' },
   'status.cooldown_dual_disabled': { zh: '雙裝置模式不支援冷卻保護', en: 'Cooldown protection disabled in dual-device mode' },
 
   // ── Group mode (dual device) ─────────────────

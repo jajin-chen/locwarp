@@ -52,6 +52,9 @@ class AppState:
         self.coord_formatter = CoordinateFormatter()
         self.reconnect_manager = None
         self._last_position = None
+        # User-chosen initial map center (persisted between launches). When
+        # None, the frontend falls back to a hardcoded default.
+        self._initial_map_position: dict | None = None
         self._load_settings()
 
     def _load_settings(self):
@@ -68,6 +71,9 @@ class AppState:
                 cd = data.get("cooldown_enabled")
                 if cd is not None:
                     self.cooldown_timer.enabled = cd
+                imp = data.get("initial_map_position")
+                if isinstance(imp, dict) and "lat" in imp and "lng" in imp:
+                    self._initial_map_position = {"lat": float(imp["lat"]), "lng": float(imp["lng"])}
             except (json.JSONDecodeError, OSError, ValueError, KeyError):
                 logger.warning("Settings file malformed or unreadable; using defaults", exc_info=True)
 
@@ -76,6 +82,7 @@ class AppState:
             "last_position": self._last_position,
             "coord_format": self.coord_formatter.format.value,
             "cooldown_enabled": self.cooldown_timer.enabled,
+            "initial_map_position": self._initial_map_position,
         }
         try:
             SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")

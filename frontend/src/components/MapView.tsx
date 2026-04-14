@@ -177,11 +177,22 @@ const MapView: React.FC<MapViewProps> = ({
 
     mapRef.current = map;
 
+    // Fetch the user-saved initial position from the backend (once, on mount).
+    // If set, pan the map to it. Brief Taipei flash is acceptable.
+    import('../services/api').then(({ getInitialPosition }) => {
+      getInitialPosition().then(({ position }) => {
+        if (!position || !mapRef.current) return;
+        if (prevPositionRef.current) return; // a real device position already arrived
+        mapRef.current.setView([position.lat, position.lng], mapRef.current.getZoom());
+      }).catch(() => { /* default center stays */ });
+    });
+
     return () => {
       map.remove();
       mapRef.current = null;
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Update current position marker — move existing marker instead of recreating.
   // When currentPosition becomes null (e.g. after 一鍵還原) remove the marker.
