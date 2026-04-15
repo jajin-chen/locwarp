@@ -101,7 +101,7 @@ The world is bucketed into 1° x 1° grid cells with a per-region OSRM-coverage 
 - Status bar shows the **backend-reported active speed** (typed-but-not-applied values don't lie about what's running)
 - Orange countdown banner shows on top of the map during pauses
 
-### Connection (iOS 17+)
+### Connection (iOS 16+)
 
 - **USB**: plug in and auto-connect; screen can be locked freely
 - **Wi-Fi Tunnel (USB-free mode)**:
@@ -112,7 +112,7 @@ The world is bucketed into 1° x 1° grid cells with a per-region OSRM-coverage 
 - **Real-time USB hotplug detection**:
   - Unplug detected within ~4 s: drops engine + red banner + right-click menu shows "USB disconnected"
   - Re-plug auto-detected and reconnected, engine rebuilt, **no refresh needed**
-- **Version check on connect**: iOS <17 devices are rejected with an explicit version + upgrade prompt
+- **Version check on connect**: iOS <16 devices are rejected with an explicit version + upgrade prompt
 
 ### Developer Disk Image
 
@@ -184,7 +184,7 @@ Windows needs Apple's USB driver to communicate with iPhone.
 
 On first use, connect the iPhone via USB. When prompted "Trust this computer?", tap **Trust** and enter the passcode. This creates a pair record so that LocWarp can communicate with the device afterwards.
 
-### 3. Enable Developer Mode (iOS 17+)
+### 3. Enable Developer Mode (iOS 16+)
 
 On iPhone: **Settings → Privacy & Security → Developer Mode → Enable**
 
@@ -276,13 +276,13 @@ The installer is self-contained, end users need no Python or Node installed.
 | Backend unreachable after tunnel started | Make sure LocWarp was launched as Administrator |
 | `No such service: com.apple.instruments.dtservicehub` (iOS 17+/26) | LocWarp auto-mounts the Developer Disk Image. If it still fails: (1) Settings → Privacy & Security → **Developer Mode** off, reboot, turn it back on; (2) make sure github.com is reachable (DDI is downloaded from there, ~20 MB); (3) unplug and reconnect the device. Since v0.1.34 LocWarp also falls back to the legacy `com.apple.dt.simulatelocation` service automatically. |
 | DDI download hangs / times out | Check that github.com / raw.githubusercontent.com is reachable, some corporate or campus networks block it. |
-| **Developer Mode option missing** (iOS 17+) | The device must have had a signed app deployed to it before the option appears in Settings. See [Appendix: Enabling Developer Mode on iPhone (Windows)](#appendix-enabling-developer-mode-on-iphone-windows) below. |
+| **Developer Mode option missing** (iOS 16+) | The device must have had a signed app deployed to it before the option appears in Settings. See [Appendix: Enabling Developer Mode on iPhone (Windows)](#appendix-enabling-developer-mode-on-iphone-windows) below. |
 
 ---
 
 ### Appendix: Enabling Developer Mode on iPhone (Windows)
 
-On iOS 17+, **Settings → Privacy & Security → Developer Mode** is hidden by default. Apple only surfaces the toggle after the device has been deployed to by a developer-signed app at least once. Windows users can trigger this by sideloading any self-signed IPA:
+On iOS 16+, **Settings → Privacy & Security → Developer Mode** is hidden by default. Apple only surfaces the toggle after the device has been deployed to by a developer-signed app at least once. Windows users can trigger this by sideloading any self-signed IPA:
 
 1. Install [**Sideloadly**](https://sideloadly.io/).
 2. Obtain an IPA file from a decrypted IPA source such as [**Decrypt IPA Store**](https://decrypt.day/) or [**ARM Converter Decrypted App Store**](https://armconverter.com/decryptedappstore/us). A small file-manager-style app is recommended to keep sideload time short.
