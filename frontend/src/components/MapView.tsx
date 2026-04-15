@@ -147,52 +147,72 @@ const MapView: React.FC<MapViewProps> = ({
       topLeftEl.style.marginTop = '56px';
     }
 
-    // OSM Standard (Mapnik), primary. Uses the a/b/c subdomains so the
-    // browser can parallelise tile fetches across hosts (chromium caps to
-    // ~6 concurrent connections per host). electron/main.js rewrites the
-    // User-Agent for these hosts so tile.osm.org does not reject the
-    // default Chromium UA with HTTP 418.
-    //
-    // Leaflet options tuned for visual sharpness on a location-pin app
-    // where the user rarely scrolls far after initial teleport:
-    //   updateWhenIdle=false        — load tiles during pan, not only on idle
-    //   updateWhenZooming=true      — fetch target-level tiles during the zoom
-    //                                 animation so the user sees sharp tiles
-    //                                 instead of upscaled-and-blurry placeholders
-    //   keepBuffer=4                — keep 4 rows/cols of off-screen tiles
-    //                                 cached so a quick pan back doesn't refetch
-    //   crossOrigin=true            — enables HTTP cache reuse across layers
-    //   detectRetina=true           — on HiDPI / Windows-scaled displays, fetch
-    //                                 one zoom level higher and downscale, so
-    //                                 the base map is physically crisp instead
-    //                                 of pixel-doubled
-    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      subdomains: 'abc', maxZoom: 19,
+    // Tile layer tuning (shared across all providers):
+    //   updateWhenIdle=false    — load during pan, not only on idle
+    //   updateWhenZooming=true  — fetch target-level tiles during zoom so
+    //                             the user sees sharp tiles instead of
+    //                             upscaled-and-blurry placeholders
+    //   keepBuffer=4            — keep 4 rows/cols of off-screen tiles cached
+    //   crossOrigin=true        — enable HTTP cache reuse across layers
+    //   detectRetina=true       — on HiDPI / scaled displays, fetch one zoom
+    //                             higher and downscale so the base map is
+    //                             physically crisp, not pixel-doubled
+    const baseOpts = {
       updateWhenIdle: false,
       updateWhenZooming: true,
       keepBuffer: 4,
       crossOrigin: true,
       detectRetina: true,
+    } as const;
+    // OSM Standard (Mapnik). Uses a/b/c subdomains to parallelise fetches.
+    // electron/main.js rewrites the User-Agent for these hosts so tile.osm.org
+    // does not reject the default Chromium UA with HTTP 418.
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      ...baseOpts,
+      subdomains: 'abc', maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     });
-    // OSM France mirror (same Mapnik style, looser policy) as a fallback
-    // when the main tile server is rate-limited or regionally unreachable.
+    // CartoDB Voyager: OSM data, CARTO-hosted CDN. No OSM rate-limit risk,
+    // built-in @2x retina, 4 subdomains. Use this when OSM feels laggy.
+    const cartoLayer = L.tileLayer(
+      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      {
+        ...baseOpts,
+        subdomains: 'abcd', maxZoom: 20,
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      },
+    );
+    // OSM France mirror (same Mapnik style, looser policy).
     const osmFrLayer = L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+      ...baseOpts,
       subdomains: 'abc', maxZoom: 20,
-      updateWhenIdle: false,
-      updateWhenZooming: true,
-      keepBuffer: 4,
-      crossOrigin: true,
-      detectRetina: true,
       attribution: '&copy; <a href="https://www.openstreetmap.fr/">OSM France</a>',
     });
-    osmLayer.on('tileerror', () => {
-      if (!map.hasLayer(osmFrLayer)) {
-        map.removeLayer(osmLayer);
-        osmFrLayer.addTo(map);
-      }
+    // Restore the user's previous choice so switching persists between launches.
+    const savedLayer = (() => {
+      try { return localStorage.getItem('locwarp.tile_layer') || 'osm'; }
+      catch { return 'osm'; }
+    })();
+    const layers: Record<string, L.TileLayer> = {
+      'OSM': osmLayer,
+      'CartoDB Voyager': cartoLayer,
+      'OSM France': osmFrLayer,
+    };
+    const initialKey =
+      savedLayer === 'carto' ? 'CartoDB Voyager' :
+      savedLayer === 'osmfr' ? 'OSM France' :
+      'OSM';
+    layers[initialKey].addTo(map);
+    L.control.layers(layers, undefined, { position: 'topright', collapsed: true }).addTo(map);
+    map.on('baselayerchange', (e: any) => {
+      try {
+        const key: string =
+          e?.name === 'CartoDB Voyager' ? 'carto' :
+          e?.name === 'OSM France' ? 'osmfr' : 'osm';
+        localStorage.setItem('locwarp.tile_layer', key);
+      } catch { /* storage disabled */ }
     });
-    osmLayer.addTo(map);
 
     // Left-click on the map dismisses any open context menu.
     // If the parent wires `onMapClick` (currently used by the "left-click
