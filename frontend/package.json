@@ -1,6 +1,6 @@
 {
   "name": "locwarp",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "iOS Virtual Location Simulator",
   "author": "keezxc1223",
   "main": "electron/main.js",
@@ -12,7 +12,6 @@
     "dist": "electron-builder --win nsis"
   },
   "dependencies": {
-    "electron-updater": "^6.8.3",
     "leaflet": "^1.9.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -35,7 +34,6 @@
     "directories": {
       "output": "release"
     },
-    "artifactName": "${productName}-Setup-${version}.${ext}",
     "files": [
       "dist/**/*",
       "electron/**/*"
@@ -61,13 +59,6 @@
       "requestedExecutionLevel": "requireAdministrator",
       "icon": "build/icon.ico"
     },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "keezxc1223",
-        "repo": "locwarp"
-      }
-    ],
     "nsis": {
       "oneClick": false,
       "perMachine": true,
