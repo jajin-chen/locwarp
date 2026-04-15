@@ -140,11 +140,16 @@ const MapView: React.FC<MapViewProps> = ({
     });
     const zoomCtrl = L.control.zoom({ position: 'topleft' });
     zoomCtrl.addTo(map);
-    // Nudge the whole topleft control cluster down so it sits below the
-    // EtaBar instead of behind it.
+    // Nudge the top-left and top-right control clusters down so they sit
+    // below the EtaBar (full-width, absolute-positioned at top:0) instead
+    // of being partially covered by it.
     const topLeftEl = (map as any)._controlCorners?.topleft as HTMLElement | undefined;
     if (topLeftEl) {
       topLeftEl.style.marginTop = '56px';
+    }
+    const topRightEl = (map as any)._controlCorners?.topright as HTMLElement | undefined;
+    if (topRightEl) {
+      topRightEl.style.marginTop = '56px';
     }
 
     // Tile layer tuning (shared across all providers):

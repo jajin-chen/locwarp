@@ -75,13 +75,17 @@ class MultiStopNavigator:
         engine.lap_count = 0
         engine.distance_traveled = 0.0
 
-        # Pre-calculate full route path for display
+        # Pre-calculate full route path for display + grand total distance so
+        # the UI can show total-trip ETA (like route_loop does) instead of
+        # the per-leg ETA, which resets at each stop.
         all_wp_tuples = [(wp.lat, wp.lng) for wp in waypoints]
+        full_total_distance = 0.0
         try:
             full_route = await engine.route_service.get_multi_route(
                 all_wp_tuples, profile=osrm_profile,
                 force_straight=straight_line,
             )
+            full_total_distance = float(full_route.get("distance") or 0.0)
             await engine._emit("route_path", {
                 "coords": [{"lat": pt[0], "lng": pt[1]} for pt in full_route["coords"]],
             })
@@ -123,12 +127,20 @@ class MultiStopNavigator:
         engine._user_waypoints = list(waypoints)
         engine._user_waypoint_next = 1  # we already start at waypoints[0]
 
+        # Track how much of the grand total we have already finished so the
+        # offset we hand to _move_along_route reflects the remaining legs
+        # after the current one.
+        completed_distance = 0.0
+
         running = True
         while running and not engine._stop_event.is_set():
             # On each loop pass (only > 1 if loop=True) restart the highlight
             # at waypoint[1] so the UI re-highlights from the top.
             if loop and engine._user_waypoint_next >= len(waypoints):
                 engine._user_waypoint_next = 1
+            # New lap: reset completed distance so the total-ETA countdown
+            # restarts from full trip length.
+            completed_distance = 0.0
             for i in range(len(waypoints) - 1):
                 if engine._stop_event.is_set():
                     break
@@ -152,10 +164,23 @@ class MultiStopNavigator:
                 )
 
                 coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
-                engine.distance_remaining = route_data["distance"]
+                leg_distance = float(route_data.get("distance") or 0.0)
+                engine.distance_remaining = leg_distance
+                # Offset for emitted ETA = meters left in future legs after
+                # this one. When the grand total from get_multi_route exists,
+                # derive future-leg distance from it; otherwise fall back to
+                # 0 so ETA at least reflects the current leg (same as pre-fix).
+                if full_total_distance > 0:
+                    future_legs = max(full_total_distance - completed_distance - leg_distance, 0.0)
+                else:
+                    future_legs = 0.0
+                engine._route_offset_remaining = future_legs
 
                 if len(coords) >= 2:
                     await engine._move_along_route(coords, _pick_profile())
+
+                completed_distance += leg_distance
+                engine._route_offset_remaining = 0.0
 
                 if engine._stop_event.is_set():
                     break
@@ -205,6 +230,7 @@ class MultiStopNavigator:
                 await engine._emit("lap_complete", {"lap": engine.lap_count})
                 logger.info("Multi-stop lap %d complete", engine.lap_count)
 
+        engine._route_offset_remaining = 0.0
         if engine.state == SimulationState.MULTI_STOP:
             engine.state = SimulationState.IDLE
             await engine._emit("multi_stop_complete", {
