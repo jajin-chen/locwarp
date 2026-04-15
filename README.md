@@ -402,7 +402,7 @@ locwarp/
 iOS 17+ 的「設定 → 隱私權與安全性 → 開發者模式」預設**不顯示**。Apple 要求裝置必須曾經被開發者簽署之 App 部署過,該選項才會出現。使用者可依下列流程側載任一自簽 IPA 完成觸發:
 
 1. 安裝 [**Sideloadly**](https://sideloadly.io/)。
-2. 於 [**Decrypt IPA Store**](https://decrypt.day/) 等解密 IPA 網站取得任意 IPA 檔案。建議挑選體積較小的檔案管理類 App 以縮短側載時間。
+2. 於 [**Decrypt IPA Store**](https://decrypt.day/) 或 [**ARM Converter Decrypted App Store**](https://armconverter.com/decryptedappstore/us) 等解密 IPA 網站取得任意 IPA 檔案。建議挑選體積較小的檔案管理類 App 以縮短側載時間。
 3. 將 IPA 拖入 Sideloadly 視窗。
 4. USB 連接 iPhone,於 Sideloadly 輸入個人 Apple ID。
 5. 按下 **Start** 執行側載,等待完成。

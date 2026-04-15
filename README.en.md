@@ -288,7 +288,7 @@ The installer is self-contained, end users need no Python or Node installed.
 On iOS 17+, **Settings → Privacy & Security → Developer Mode** is hidden by default. Apple only surfaces the toggle after the device has been deployed to by a developer-signed app at least once. Windows users can trigger this by sideloading any self-signed IPA:
 
 1. Install [**Sideloadly**](https://sideloadly.io/).
-2. Obtain an IPA file from a decrypted IPA source such as [**Decrypt IPA Store**](https://decrypt.day/). A small file-manager-style app is recommended to keep sideload time short.
+2. Obtain an IPA file from a decrypted IPA source such as [**Decrypt IPA Store**](https://decrypt.day/) or [**ARM Converter Decrypted App Store**](https://armconverter.com/decryptedappstore/us). A small file-manager-style app is recommended to keep sideload time short.
 3. Drag the IPA into the Sideloadly window.
 4. Connect the iPhone via USB and enter your personal Apple ID in Sideloadly.
 5. Press **Start** and wait for the sideload to complete.
