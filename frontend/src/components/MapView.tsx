@@ -183,12 +183,18 @@ const MapView: React.FC<MapViewProps> = ({
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
       },
     );
-    // OSM France mirror (same Mapnik style, looser policy).
-    const osmFrLayer = L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
-      ...baseOpts,
-      subdomains: 'abc', maxZoom: 20,
-      attribution: '&copy; <a href="https://www.openstreetmap.fr/">OSM France</a>',
-    });
+    // ESRI World Imagery — free satellite/aerial imagery, global coverage.
+    // URL template uses {y}/{x} order (ESRI convention), not the usual
+    // {x}/{y}. No API key needed, generous usage limits.
+    const esriSatLayer = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        ...baseOpts,
+        maxZoom: 19,
+        attribution:
+          'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+      },
+    );
     // Restore the user's previous choice so switching persists between launches.
     const savedLayer = (() => {
       try { return localStorage.getItem('locwarp.tile_layer') || 'osm'; }
@@ -197,11 +203,11 @@ const MapView: React.FC<MapViewProps> = ({
     const layers: Record<string, L.TileLayer> = {
       'OSM': osmLayer,
       'CartoDB Voyager': cartoLayer,
-      'OSM France': osmFrLayer,
+      'ESRI 衛星 / Satellite': esriSatLayer,
     };
     const initialKey =
       savedLayer === 'carto' ? 'CartoDB Voyager' :
-      savedLayer === 'osmfr' ? 'OSM France' :
+      savedLayer === 'esri' ? 'ESRI 衛星 / Satellite' :
       'OSM';
     layers[initialKey].addTo(map);
     L.control.layers(layers, undefined, { position: 'topright', collapsed: true }).addTo(map);
@@ -209,7 +215,7 @@ const MapView: React.FC<MapViewProps> = ({
       try {
         const key: string =
           e?.name === 'CartoDB Voyager' ? 'carto' :
-          e?.name === 'OSM France' ? 'osmfr' : 'osm';
+          e?.name === 'ESRI 衛星 / Satellite' ? 'esri' : 'osm';
         localStorage.setItem('locwarp.tile_layer', key);
       } catch { /* storage disabled */ }
     });
