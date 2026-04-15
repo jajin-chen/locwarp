@@ -133,6 +133,15 @@ const UpdateChecker: React.FC = () => {
     setPhase('downloading');
     setPercent(0);
     setErrMsg(null);
+    // electron-updater requires checkForUpdates() to have populated its
+    // internal UpdateInfo before downloadUpdate() works; our GitHub API
+    // sniff up top is independent of that, so kick a check first here.
+    const chk = await updater.check();
+    if (!chk.ok) {
+      setPhase('error');
+      setErrMsg(chk.reason ?? 'check failed');
+      return;
+    }
     const res = await updater.download();
     if (!res.ok) {
       setPhase('error');
