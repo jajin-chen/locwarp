@@ -595,11 +595,36 @@ const App: React.FC = () => {
             bm.createBookmark({ name: b.name, lat: b.lat, lng: b.lng, category_id: cat?.id || 'default' })
           }}
           onBookmarkDelete={(id: string) => bm.deleteBookmark(id)}
-          onBookmarkEdit={(id: string, data: any) => bm.updateBookmark(id, data)}
+          onBookmarkEdit={(id: string, data: any) => {
+            // BookmarkList emits UI-shape patches ({name}, or {name,lat,lng,category}).
+            // Backend PUT /api/bookmarks requires the full Bookmark schema with
+            // category_id (not category name), so merge the patch onto the
+            // original and translate category name -> id before sending.
+            const orig = bm.bookmarks.find(b => b.id === id)
+            if (!orig) return
+            const patch: any = { ...orig }
+            if (data.name != null) patch.name = data.name
+            if (data.lat != null) patch.lat = data.lat
+            if (data.lng != null) patch.lng = data.lng
+            if (data.category != null) {
+              const cat = bm.categories.find(c => c.name === data.category)
+              if (cat) patch.category_id = cat.id
+            }
+            bm.updateBookmark(id, patch)
+          }}
           onCategoryAdd={(name: string) => bm.createCategory({ name, color: '#6c8cff' })}
           onCategoryDelete={(name: string) => {
             const cat = bm.categories.find(c => c.name === name)
             if (cat) bm.deleteCategory(cat.id)
+          }}
+          onCategoryRename={(oldName: string, newName: string) => {
+            const cat = bm.categories.find(c => c.name === oldName)
+            if (!cat) return
+            // Default category is immutable (UI also hides the rename button
+            // for it, but guard here too in case a stale UI ref slips past).
+            if (cat.id === 'default') return
+            // Backend PUT requires the full BookmarkCategory shape, keep color.
+            bm.updateCategory(cat.id, { ...cat, name: newName })
           }}
           onBookmarkImport={handleBookmarkImport}
           bookmarkExportUrl={api.bookmarksExportUrl()}

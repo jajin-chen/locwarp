@@ -282,6 +282,7 @@ export const STRINGS = {
   'bm.no_position': { zh: '目前無可用位置', en: 'No position available' },
   'bm.add_category': { zh: '新增分類', en: 'Add Category' },
   'bm.new_category': { zh: '新增', en: 'New' },
+  'bm.rename_category': { zh: '重新命名分類', en: 'Rename category' },
   'bm.blank': { zh: '空白', en: 'Empty' },
   'bm.empty': { zh: '尚無收藏', en: 'No bookmarks' },
   'bm.search_placeholder': { zh: '搜尋收藏名稱 / 座標', en: 'Search bookmark name or coords' },
