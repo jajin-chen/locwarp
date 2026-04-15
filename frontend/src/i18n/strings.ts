@@ -270,6 +270,7 @@ export const STRINGS = {
   'bm.add_custom_tooltip': { zh: '手動輸入經緯度新增收藏', en: 'Add a bookmark by typing latitude / longitude' },
   'bm.lat_placeholder': { zh: '緯度 lat', en: 'Latitude' },
   'bm.lng_placeholder': { zh: '經度 lng', en: 'Longitude' },
+  'bm.latlng_placeholder': { zh: '緯度 或 貼 緯度,經度', en: 'Latitude (or paste "lat, lng")' },
   'bm.manage_categories': { zh: '管理分類', en: 'Manage Categories' },
   'bm.export': { zh: '匯出', en: 'Export' },
   'bm.export_tooltip': { zh: '匯出所有收藏與分類為 JSON', en: 'Export all bookmarks and categories as JSON' },

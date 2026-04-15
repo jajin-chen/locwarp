@@ -75,6 +75,14 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   const [newCategoryName, setNewCategoryName] = useState('');
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editCategoryName, setEditCategoryName] = useState('');
+  // Split "24.14, 120.65" (or tab/whitespace) into [lat, lng] so a user can
+  // paste a Google-Maps-style pair into just the lat field instead of
+  // splitting it themselves.
+  const trySplitLatLng = (s: string): [string, string] | null => {
+    const m = s.trim().match(/^(-?\d+(?:\.\d+)?)\s*[,\t ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+    return m ? [m[1], m[2]] : null;
+  };
+
   const [contextMenu, setContextMenu] = useState<{ bm: Bookmark; x: number; y: number } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -800,9 +808,14 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                 type="text"
                 className="search-input"
                 inputMode="decimal"
-                placeholder={t('bm.lat_placeholder')}
+                placeholder={t('bm.latlng_placeholder')}
                 value={editDialogLat}
-                onChange={(e) => setEditDialogLat(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const split = trySplitLatLng(v);
+                  if (split) { setEditDialogLat(split[0]); setEditDialogLng(split[1]); }
+                  else setEditDialogLat(v);
+                }}
                 style={{ flex: 1 }}
               />
               <input
@@ -893,9 +906,14 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                 type="text"
                 className="search-input"
                 inputMode="decimal"
-                placeholder={t('bm.lat_placeholder')}
+                placeholder={t('bm.latlng_placeholder')}
                 value={customLat}
-                onChange={(e) => setCustomLat(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const split = trySplitLatLng(v);
+                  if (split) { setCustomLat(split[0]); setCustomLng(split[1]); }
+                  else setCustomLat(v);
+                }}
                 style={{ flex: 1 }}
               />
               <input
