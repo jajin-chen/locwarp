@@ -153,22 +153,26 @@ const MapView: React.FC<MapViewProps> = ({
     // User-Agent for these hosts so tile.osm.org does not reject the
     // default Chromium UA with HTTP 418.
     //
-    // Leaflet options tuned for zoom smoothness:
+    // Leaflet options tuned for visual sharpness on a location-pin app
+    // where the user rarely scrolls far after initial teleport:
     //   updateWhenIdle=false        — load tiles during pan, not only on idle
-    //   updateWhenZooming=false     — do NOT request intermediate tiles while
-    //                                 the zoom animation runs; fetch once the
-    //                                 target level is reached. Saves dozens
-    //                                 of wasted requests per scroll and
-    //                                 keeps OSM under its rate limit.
+    //   updateWhenZooming=true      — fetch target-level tiles during the zoom
+    //                                 animation so the user sees sharp tiles
+    //                                 instead of upscaled-and-blurry placeholders
     //   keepBuffer=4                — keep 4 rows/cols of off-screen tiles
     //                                 cached so a quick pan back doesn't refetch
     //   crossOrigin=true            — enables HTTP cache reuse across layers
+    //   detectRetina=true           — on HiDPI / Windows-scaled displays, fetch
+    //                                 one zoom level higher and downscale, so
+    //                                 the base map is physically crisp instead
+    //                                 of pixel-doubled
     const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       subdomains: 'abc', maxZoom: 19,
       updateWhenIdle: false,
-      updateWhenZooming: false,
+      updateWhenZooming: true,
       keepBuffer: 4,
       crossOrigin: true,
+      detectRetina: true,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     });
     // OSM France mirror (same Mapnik style, looser policy) as a fallback
@@ -176,9 +180,10 @@ const MapView: React.FC<MapViewProps> = ({
     const osmFrLayer = L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
       subdomains: 'abc', maxZoom: 20,
       updateWhenIdle: false,
-      updateWhenZooming: false,
+      updateWhenZooming: true,
       keepBuffer: 4,
       crossOrigin: true,
+      detectRetina: true,
       attribution: '&copy; <a href="https://www.openstreetmap.fr/">OSM France</a>',
     });
     osmLayer.on('tileerror', () => {
