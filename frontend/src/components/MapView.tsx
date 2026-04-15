@@ -130,6 +130,13 @@ const MapView: React.FC<MapViewProps> = ({
       // zoom control below the EtaBar on the left (default top-left
       // would collide with the overlay).
       zoomControl: false,
+      // Snap wheel zoom to integer levels + require a full notch per step,
+      // so one wheel tick = one tile-load batch instead of cascading
+      // intermediate zooms that all fire tile requests and bomb OSM's
+      // rate limiter with black-tile fallout.
+      zoomSnap: 1,
+      wheelPxPerZoomLevel: 120,
+      wheelDebounceTime: 60,
     });
     const zoomCtrl = L.control.zoom({ position: 'topleft' });
     zoomCtrl.addTo(map);
@@ -140,17 +147,38 @@ const MapView: React.FC<MapViewProps> = ({
       topLeftEl.style.marginTop = '56px';
     }
 
-    // OSM Standard (Mapnik). Electron main hooks a compliant User-Agent
-    // for these hosts (see electron/main.js), otherwise the tile.osm.org
-    // endpoint returns HTTP 418 for the default Chromium UA.
-    const osmLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
+    // OSM Standard (Mapnik), primary. Uses the a/b/c subdomains so the
+    // browser can parallelise tile fetches across hosts (chromium caps to
+    // ~6 concurrent connections per host). electron/main.js rewrites the
+    // User-Agent for these hosts so tile.osm.org does not reject the
+    // default Chromium UA with HTTP 418.
+    //
+    // Leaflet options tuned for zoom smoothness:
+    //   updateWhenIdle=false        — load tiles during pan, not only on idle
+    //   updateWhenZooming=false     — do NOT request intermediate tiles while
+    //                                 the zoom animation runs; fetch once the
+    //                                 target level is reached. Saves dozens
+    //                                 of wasted requests per scroll and
+    //                                 keeps OSM under its rate limit.
+    //   keepBuffer=4                — keep 4 rows/cols of off-screen tiles
+    //                                 cached so a quick pan back doesn't refetch
+    //   crossOrigin=true            — enables HTTP cache reuse across layers
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      subdomains: 'abc', maxZoom: 19,
+      updateWhenIdle: false,
+      updateWhenZooming: false,
+      keepBuffer: 4,
+      crossOrigin: true,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     });
-    // OSM France mirror — same Mapnik style, looser policy, used as a fallback
+    // OSM France mirror (same Mapnik style, looser policy) as a fallback
     // when the main tile server is rate-limited or regionally unreachable.
     const osmFrLayer = L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
       subdomains: 'abc', maxZoom: 20,
+      updateWhenIdle: false,
+      updateWhenZooming: false,
+      keepBuffer: 4,
+      crossOrigin: true,
       attribution: '&copy; <a href="https://www.openstreetmap.fr/">OSM France</a>',
     });
     osmLayer.on('tileerror', () => {
