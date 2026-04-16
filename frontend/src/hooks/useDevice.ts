@@ -42,12 +42,26 @@ export function useDevice(subscribe?: WsSubscribe) {
           setDevices((prev) => prev.map((d) => ({ ...d, is_connected: false })))
         } else {
           setDevices((prev) => prev.map((d) => udids.includes(d.udid) ? { ...d, is_connected: false } : d))
-          setConnectedDevice((prev) => (prev && udids.includes(prev.udid)) ? null : prev)
+          // DON'T null out connectedDevice here. The authoritative refresh
+          // below (listDevices) will pick a surviving device to promote
+          // so downstream UI (MapView / StatusBar) doesn't flash
+          // 'No device' in dual-device mode when only one was unplugged.
         }
         // Re-fetch so the sidebar list and metadata stay in sync with the
-        // backend (otherwise the left device panel can show a stale empty
-        // state while a remaining device is still connected).
-        listDevices().then((list) => { setDevices(list) }).catch(() => {})
+        // backend, AND promote a surviving connected device as the new
+        // active one when the old primary was the one unplugged. This
+        // fixes the bug where unplugging A (primary) in dual-device mode
+        // made the UI think no device was connected even though B was
+        // still alive.
+        listDevices().then((list) => {
+          setDevices(list)
+          setConnectedDevice((prev) => {
+            // Keep the current one if it's still connected.
+            if (prev && list.some((d) => d.udid === prev.udid && d.is_connected)) return prev
+            // Otherwise promote the first surviving connected device.
+            return list.find((d) => d.is_connected) ?? null
+          })
+        }).catch(() => {})
       } else if (msg.type === 'device_connected') {
         // Re-fetch list so the newly-connected device appears with correct metadata.
         listDevices().then((list) => {

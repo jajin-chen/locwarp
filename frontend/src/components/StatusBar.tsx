@@ -199,6 +199,20 @@ const StatusBar: React.FC<StatusBarProps> = ({
             title={dev.name}
           >
             <span style={{ color, fontWeight: 700 }}>{letter}</span>
+            {/* Flag icon shared from the reverse-geocode lookup. In dual
+                mode the two devices are kept in sync (same virtual position)
+                so both pills display the same country. */}
+            {countryCode && (
+              <img
+                src={`https://flagcdn.com/w40/${countryCode}.png`}
+                alt={countryCode.toUpperCase()}
+                title={countryCode.toUpperCase()}
+                width={14}
+                height={10}
+                style={{ borderRadius: 2, boxShadow: '0 0 0 1px rgba(255,255,255,0.15)' }}
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+              />
+            )}
             <span>{coord}</span>
             <span style={{ opacity: 0.4 }}>·</span>
             <span>{spd}km/h</span>

@@ -332,11 +332,25 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         break
       }
       case 'device_disconnected': {
-        const isEn = typeof localStorage !== 'undefined' && localStorage.getItem('locwarp.lang') === 'en'
-        setError(isEn
-          ? 'Device disconnected (USB unplugged or tunnel died), please reconnect USB'
-          : '裝置連線中斷(USB 拔除或 Tunnel 死亡),請重新插上 USB')
-        setStatus((prev) => ({ ...prev, running: false, paused: false }))
+        // In dual-device mode we only show the full-screen banner when the
+        // LAST connected device goes away. If another device is still alive
+        // (remaining_count > 0), the sidebar chip already reflects the
+        // per-device state; no need to nag the user. Backward compat: when
+        // the broadcast omits remaining_count we default to 0 (old behaviour).
+        const remaining = typeof wsMessage.data?.remaining_count === 'number'
+          ? wsMessage.data.remaining_count : 0
+        if (remaining === 0) {
+          const isEn = typeof localStorage !== 'undefined' && localStorage.getItem('locwarp.lang') === 'en'
+          setError(isEn
+            ? 'Device disconnected (USB unplugged or tunnel died), please reconnect USB'
+            : '裝置連線中斷(USB 拔除或 Tunnel 死亡),請重新插上 USB')
+          setStatus((prev) => ({ ...prev, running: false, paused: false }))
+        } else {
+          // Clear any stale banner in case a previous lost-all event left it
+          // visible; the fact that at least one device is still connected
+          // means we're back to a healthy state.
+          setError(null)
+        }
         break
       }
       case 'device_reconnected': {

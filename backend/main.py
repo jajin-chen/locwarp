@@ -136,47 +136,100 @@ class AppState:
 
         engine = SimulationEngine(loc_service, event_callback)
         self.simulation_engines[udid] = engine
-        self._primary_udid = udid
+        # Keep the existing primary on additional device connects. If no
+        # primary is set (e.g. fresh install, first device), this udid
+        # becomes primary. Second device plugging in no longer hijacks
+        # the map view away from the first device.
+        if self._primary_udid is None:
+            self._primary_udid = udid
 
-        # Set initial position and push to device
-        init = self.get_initial_position()
-        from models.schemas import Coordinate
-        engine.current_position = Coordinate(
-            lat=init["lat"], lng=init["lng"]
-        )
-
-        # Actually simulate the position on the device
-        try:
-            await loc_service.set(init["lat"], init["lng"])
-            logger.info("Initial position set on device: (%.6f, %.6f)", init["lat"], init["lng"])
-        except Exception as exc:
-            # Don't leave a half-constructed engine behind — the location
-            # service channel is broken; drop the engine so _engine() will
-            # lazy-rebuild on the next movement command instead of reusing
-            # a dead service. Broadcast so the UI knows.
-            logger.exception("Failed to push initial position to device; clearing engine")
-            self.simulation_engines.pop(udid, None)
-            if self._primary_udid == udid:
-                self._primary_udid = next(iter(self.simulation_engines), None)
-            try:
-                await broadcast("device_error", {
-                    "udid": udid,
-                    "stage": "initial_position",
-                    "error": f"{exc.__class__.__name__}: {exc}",
-                })
-            except Exception:
-                pass
+        # DO NOT push any initial location to the device on connect. The
+        # engine's current_position stays None until the user explicitly
+        # teleports / navigates / picks a bookmark. iPhone's real GPS is
+        # left untouched by merely plugging the phone into LocWarp.
+        #
+        # The map UI still shows a default center (Taipei or the user's
+        # `initial_map_position` setting) — that's purely a visual default
+        # for the Leaflet view, not a virtual GPS coordinate.
 
         # Setup reconnect manager
         self.reconnect_manager = ReconnectManager(self.device_manager)
 
-        logger.info("Simulation engine created for device %s", udid)
+        logger.info("Simulation engine created for device %s (no initial location pushed)", udid)
 
 
 app_state = AppState()
 
 
 # ── Lifespan ─────────────────────────────────────────────
+
+async def _auto_sync_new_device_to_primary(new_udid: str) -> None:
+    """Align a freshly-connected second device to whatever the primary
+    device is doing, so dual-device mode behaves as one unit without the
+    user having to explicitly restart actions.
+
+    Behaviour:
+      * No primary yet, or primary is the same as *new_udid* → noop
+      * Primary has a ``current_position`` → teleport new device there
+      * Primary is running navigate / loop / multi_stop / random_walk →
+        replay the same action (with the same args) on the new engine so
+        both devices share the target / waypoints / seed
+      * Primary is idle / paused / teleport-only → only the position
+        sync happens; the user's next action will fan-out to both
+    """
+    import asyncio
+    primary_udid = app_state._primary_udid
+    if primary_udid is None or primary_udid == new_udid:
+        return
+    primary_eng = app_state.simulation_engines.get(primary_udid)
+    new_eng = app_state.simulation_engines.get(new_udid)
+    if primary_eng is None or new_eng is None:
+        return
+
+    pos = primary_eng.current_position
+    if pos is None:
+        # Primary hasn't been given a position yet — nothing to sync.
+        logger.info("Auto-sync: primary %s has no position, skipping %s", primary_udid, new_udid)
+        return
+
+    # 1) Teleport the new device to match the primary's current virtual
+    #    position (keeps the 'one marker' invariant in dual mode).
+    try:
+        await new_eng.teleport(pos.lat, pos.lng)
+        logger.info("Auto-sync: %s teleported to primary %s position (%.6f, %.6f)",
+                    new_udid, primary_udid, pos.lat, pos.lng)
+    except Exception:
+        logger.exception("Auto-sync: teleport failed for %s", new_udid)
+        return
+
+    # 2) If the primary is running a dynamic sim, kick off the same one
+    #    on the new device. `paused` / `idle` / `teleporting` / etc. don't
+    #    need action replay — the user's next command will fan-out.
+    from models.schemas import SimulationState
+    dynamic = {
+        SimulationState.NAVIGATING,
+        SimulationState.LOOPING,
+        SimulationState.MULTI_STOP,
+        SimulationState.RANDOM_WALK,
+    }
+    if primary_eng.state not in dynamic:
+        return
+
+    kind = primary_eng._last_sim_kind
+    args = primary_eng._last_sim_args
+    if not kind or not args:
+        logger.info("Auto-sync: primary %s active but has no replayable last_sim; skipping", primary_udid)
+        return
+
+    method = getattr(new_eng, kind, None)
+    if method is None:
+        logger.warning("Auto-sync: new engine has no method '%s'", kind)
+        return
+
+    logger.info("Auto-sync: replaying %s on %s", kind, new_udid)
+    # Fire-and-forget — the handler runs until stop/disconnect.
+    asyncio.create_task(method(**args))
+
 
 async def _usbmux_presence_watchdog():
     """Poll usbmuxd every 2 s for both directions:
@@ -237,6 +290,22 @@ async def _usbmux_presence_watchdog():
                 logger.warning("usbmux watchdog: device(s) gone → %s", lost_now)
                 for udid in lost_now:
                     miss_counts.pop(udid, None)
+                    # Signal any simulation in flight (random-walk / loop /
+                    # multi-stop) to exit its inner loop cleanly. Without
+                    # this, the handler would keep trying to push positions
+                    # through the now-dead DVT channel, silently log fake
+                    # 'arrived at destination' events, and leave a zombie
+                    # task running against a stale engine reference.
+                    old_eng = app_state.simulation_engines.get(udid)
+                    if old_eng is not None:
+                        try:
+                            old_eng._stop_event.set()
+                            old_eng._pause_event.set()  # unstick anyone awaiting pause_event
+                            active = getattr(old_eng, "_active_task", None)
+                            if active is not None and not active.done():
+                                active.cancel()
+                        except Exception:
+                            logger.debug("watchdog: failed to stop old engine %s", udid, exc_info=True)
                     try:
                         await dm.disconnect(udid)
                     except Exception:
@@ -252,6 +321,11 @@ async def _usbmux_presence_watchdog():
                     await broadcast("device_disconnected", {
                         "udids": lost_now,
                         "reason": "usb_unplugged",
+                        # Remaining connected count AFTER cleanup. Frontend
+                        # suppresses the full-screen banner when > 0 since
+                        # the other device(s) are still usable; only the
+                        # affected chip in the sidebar needs updating.
+                        "remaining_count": len(dm._connections),
                     })
                 except Exception:
                     logger.exception("watchdog: broadcast (disconnected) failed")
@@ -292,6 +366,18 @@ async def _usbmux_presence_watchdog():
                         logger.exception("watchdog: broadcast (connected) failed")
                     logger.info("Auto-connect succeeded for %s", udid)
                     last_reconnect_attempt.pop(udid, None)
+
+                    # Auto-sync the new device to the primary device: if the
+                    # primary has a virtual position set, teleport the new
+                    # device there; if the primary is running a dynamic
+                    # simulation (navigate / loop / multi_stop / random_walk),
+                    # also replay that action on the new device so both move
+                    # together. Dual-device group mode semantics: one marker,
+                    # two phones in lockstep.
+                    try:
+                        await _auto_sync_new_device_to_primary(udid)
+                    except Exception:
+                        logger.exception("Auto-sync of new device %s to primary failed", udid)
                 except Exception:
                     logger.warning(
                         "Auto-connect for %s failed (will retry in %.0fs): likely Trust pending",

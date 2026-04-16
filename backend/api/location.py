@@ -99,28 +99,53 @@ async def _engine(udid: str | None = None):
     )
 
 
-async def _handle_device_lost(exc: Exception) -> "HTTPException":
-    """Clean up after a DeviceLostError: disconnect the stale device from
-    DeviceManager, drop the simulation engine, broadcast an explicit
-    `device_disconnected` WebSocket event so the frontend can banner it.
-    Returns an HTTPException the caller should raise."""
+async def _handle_device_lost(exc: Exception, udid: str | None = None) -> "HTTPException":
+    """Clean up after a DeviceLostError for the SPECIFIC udid that failed.
+
+    Previous behaviour disconnected every currently-connected device, which
+    was a dual-device mode bug: unplug A while B is fine → B also gets
+    torn down. Now the caller passes the udid of the failing action and
+    only that device is cleaned up. When udid is None (legacy callers not
+    yet updated), we fall back to disconnecting all as before to preserve
+    behaviour, but log a warning.
+    """
     from main import app_state
     from api.websocket import broadcast
     import logging as _logging
     _log = _logging.getLogger("locwarp")
 
     dm = app_state.device_manager
-    lost_udids = list(dm._connections.keys())
-    for udid in lost_udids:
+    if udid is not None:
+        lost_udids = [udid] if udid in dm._connections else []
+        if not lost_udids:
+            _log.info("device_lost: udid %s no longer in _connections; nothing to clean", udid)
+    else:
+        _log.warning("device_lost called without udid; falling back to clearing all devices")
+        lost_udids = list(dm._connections.keys())
+
+    for u in lost_udids:
+        # Stop any in-flight simulation on THIS engine so random-walk /
+        # loop / multi-stop handlers exit cleanly instead of flooding a
+        # dead DVT channel with push attempts.
+        old_eng = app_state.simulation_engines.get(u)
+        if old_eng is not None:
+            try:
+                old_eng._stop_event.set()
+                old_eng._pause_event.set()
+                active = getattr(old_eng, "_active_task", None)
+                if active is not None and not active.done():
+                    active.cancel()
+            except Exception:
+                _log.debug("device_lost: failed to stop old engine %s", u, exc_info=True)
         try:
-            await dm.disconnect(udid)
-            _log.info("device_lost cleanup: disconnected %s", udid)
+            await dm.disconnect(u)
+            _log.info("device_lost cleanup: disconnected %s", u)
         except Exception:
-            _log.exception("device_lost cleanup: disconnect failed for %s", udid)
+            _log.exception("device_lost cleanup: disconnect failed for %s", u)
         # Only remove this udid's engine; the legacy `= None` setter clears
         # every engine (bad for dual mode).
-        app_state.simulation_engines.pop(udid, None)
-        if app_state._primary_udid == udid:
+        app_state.simulation_engines.pop(u, None)
+        if app_state._primary_udid == u:
             remaining = next(iter(app_state.simulation_engines.keys()), None)
             app_state._primary_udid = remaining
 
@@ -129,6 +154,7 @@ async def _handle_device_lost(exc: Exception) -> "HTTPException":
             "udids": lost_udids,
             "reason": "device_lost",
             "error": str(exc),
+            "remaining_count": len(dm._connections),
         })
     except Exception:
         _log.exception("Failed to broadcast device_disconnected")
@@ -209,12 +235,15 @@ async def teleport(req: TeleportRequest):
         )
 
     old_pos = engine.current_position
+    # Resolve which udid this action was targeting so device_lost cleanup
+    # can be scoped to JUST that device in dual-device mode.
+    action_udid = getattr(req, "udid", None) or _app_state._primary_udid
     try:
         await engine.teleport(req.lat, req.lng)
     except HTTPException:
         raise
     except DeviceLostError as e:
-        raise (await _handle_device_lost(e))
+        raise (await _handle_device_lost(e, action_udid))
     except Exception as e:
         import traceback, logging
         logging.getLogger("locwarp").error("Teleport failed:\n%s", traceback.format_exc())
@@ -223,7 +252,7 @@ async def teleport(req: TeleportRequest):
         cause = e
         while cause is not None:
             if isinstance(cause, DeviceLostError):
-                raise (await _handle_device_lost(cause))
+                raise (await _handle_device_lost(cause, action_udid))
             cause = cause.__cause__
         raise HTTPException(status_code=500, detail=str(e))
 

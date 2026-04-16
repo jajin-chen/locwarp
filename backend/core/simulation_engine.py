@@ -148,6 +148,11 @@ class SimulationEngine:
         # future legs' distances so the UI shows total-trip ETA, not just
         # current-leg ETA. Reset to 0 outside multi-stop.
         self._route_offset_remaining: float = 0.0
+        # Remember the last action kind + kwargs so a newly-plugged second
+        # device can auto-join and replay the same simulation on itself.
+        # Set by navigate / start_loop / multi_stop / random_walk below.
+        self._last_sim_kind: str | None = None
+        self._last_sim_args: dict | None = None
 
     # ── Public API ───────────────────────────────────────────
 
@@ -188,6 +193,12 @@ class SimulationEngine:
         await self._ensure_stopped()
         self._stop_event.clear()
         self._pause_event.set()
+        self._last_sim_kind = "navigate"
+        self._last_sim_args = dict(
+            dest=dest, mode=mode, speed_kmh=speed_kmh,
+            speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
+            straight_line=straight_line,
+        )
         await self._run_handler(
             self._navigator.navigate_to(
                 dest, mode, speed_kmh=speed_kmh,
@@ -213,6 +224,13 @@ class SimulationEngine:
         await self._ensure_stopped()
         self._stop_event.clear()
         self._pause_event.set()
+        self._last_sim_kind = "start_loop"
+        self._last_sim_args = dict(
+            waypoints=waypoints, mode=mode, speed_kmh=speed_kmh,
+            speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
+            pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
+            straight_line=straight_line,
+        )
         await self._run_handler(
             self._looper.start_loop(
                 waypoints, mode, speed_kmh=speed_kmh,
@@ -256,6 +274,13 @@ class SimulationEngine:
         await self._ensure_stopped()
         self._stop_event.clear()
         self._pause_event.set()
+        self._last_sim_kind = "multi_stop"
+        self._last_sim_args = dict(
+            waypoints=waypoints, mode=mode, stop_duration=stop_duration, loop=loop,
+            speed_kmh=speed_kmh, speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
+            pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
+            straight_line=straight_line,
+        )
         await self._run_handler(
             self._multi_stop.start(
                 waypoints, mode, stop_duration, loop, speed_kmh=speed_kmh,
@@ -284,6 +309,18 @@ class SimulationEngine:
         await self._ensure_stopped()
         self._stop_event.clear()
         self._pause_event.set()
+        # Auto-generate a seed so a newly-joined second device can get the
+        # same random destination sequence. (The caller may override.)
+        import random as _random
+        effective_seed = seed if seed is not None else _random.randint(1, 2**31 - 1)
+        self._last_sim_kind = "random_walk"
+        self._last_sim_args = dict(
+            center=center, radius_m=radius_m, mode=mode,
+            speed_kmh=speed_kmh, speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
+            pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
+            seed=effective_seed, straight_line=straight_line,
+        )
+        seed = effective_seed
         await self._run_handler(
             self._random_walk.start(
                 center, radius_m, mode,

@@ -76,6 +76,10 @@ const App: React.FC = () => {
   // Most recently announced timezone diff so we only toast once per zone
   // change, not on every redundant lookup.
   const lastToastedZoneRef = useRef<string>('')
+  // Last position we successfully looked up reverse-geo/timezone for. Used
+  // to suppress redundant lookups when jitter nudges the coordinate but the
+  // user hasn't actually moved.
+  const lastLookedUpPosRef = useRef<{ lat: number; lng: number } | null>(null)
 
   const showToast = useCallback((msg: string, ms = 2000) => {
     setToastMsg(msg)
@@ -183,14 +187,34 @@ const App: React.FC = () => {
     api.getSavedRoutes().then(setSavedRoutes).catch(() => {})
   }, [])
 
-  // Debounced reverse-geocode + timezone lookup tied to the current virtual
-  // location. Fires 600 ms after the position settles so walk-mode doesn't
-  // blast Nominatim/TimezoneDB with a request per tick.
+  // Reverse-geocode + timezone lookup, tied to the current virtual location
+  // but GATED so it only fires on discrete user-initiated moves (teleport,
+  // bookmark tap, manual coord entry). During active navigate / loop /
+  // multi-stop / random-walk the simulation engine emits a position update
+  // every tick, which used to spam Nominatim + TimezoneDB every second and
+  // contend with the USB DVT channel — contributed to users seeing random
+  // walk 'freeze' (see backend log 2026-04-16 user report).
+  //
+  // Rule: only look up when the sim state is idle / teleporting / disconnected
+  // (i.e. no route animation in flight), AND the position actually moved
+  // >=100m from the last looked-up point.
   useEffect(() => {
     const pos = sim.currentPosition
     if (!pos) return
+    const state = sim.status?.state ?? 'idle'
+    const isQuiescent = state === 'idle' || state === 'teleporting' || state === 'disconnected'
+    if (!isQuiescent) return
+    // Skip redundant lookups when the user stays at the same spot (jitter
+    // within 100m of the last resolved position).
+    const last = lastLookedUpPosRef.current
+    if (last) {
+      const dLat = (pos.lat - last.lat) * 111320
+      const dLng = (pos.lng - last.lng) * 111320 * Math.cos(pos.lat * Math.PI / 180)
+      if (dLat * dLat + dLng * dLng < 100 * 100) return
+    }
     let cancelled = false
     const tid = setTimeout(async () => {
+      lastLookedUpPosRef.current = { lat: pos.lat, lng: pos.lng }
       try {
         const geo = await api.reverseGeocode(pos.lat, pos.lng)
         if (cancelled) return
@@ -228,7 +252,7 @@ const App: React.FC = () => {
       } catch { /* ignore */ }
     }, 600)
     return () => { cancelled = true; clearTimeout(tid) }
-  }, [sim.currentPosition?.lat, sim.currentPosition?.lng])
+  }, [sim.currentPosition?.lat, sim.currentPosition?.lng, sim.status?.state])
 
   // Auto-scan devices when WebSocket (re)connects (e.g. after backend restart)
   useEffect(() => {

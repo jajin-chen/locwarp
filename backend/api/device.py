@@ -406,6 +406,7 @@ async def _cleanup_wifi_connections() -> list[str]:
                 await broadcast("device_disconnected", {
                     "udids": udids,
                     "reason": "wifi_tunnel_stopped",
+                    "remaining_count": len(dm._connections),
                 })
             except Exception:
                 _tunnel_logger.exception("WiFi cleanup: broadcast failed")
