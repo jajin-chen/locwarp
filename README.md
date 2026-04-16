@@ -48,7 +48,7 @@
 >
 > **說明**:上表僅彙整開發者實測與少數社群回饋的結果,**並不保證於所有相同版本的裝置、網路環境或系統組合下皆能正常運作**。iOS 虛擬定位的穩定性高度依賴 iOS 修補版本、pymobiledevice3 對該版本的支援程度、Developer Disk Image 是否成功掛載,以及 Windows 端的驅動、VPN、防火牆、AV 配置。因此「回報可用」僅代表**至少一位使用者在其特定環境下成功運作**,不等同於通用相容性聲明。
 >
-> 未列於上表的 iOS 17+ 版本並非確定不相容,僅表示尚未收到回報。使用前請自行評估風險,若遇到問題、發現 Bug 或確認某版本可用,歡迎至 [Issues](https://github.com/keezxc1223/locwarp/issues) 提出以協助累積相容性資料。
+> 未列於上表的 iOS 16+ 版本並非確定不相容,僅表示尚未收到回報。使用前請自行評估風險,若遇到問題、發現 Bug 或確認某版本可用,歡迎至 [Issues](https://github.com/keezxc1223/locwarp/issues) 提出以協助累積相容性資料。
 
 <p align="center">
   <img src="frontend/build/icon.png" width="128" alt="LocWarp">
@@ -128,23 +128,41 @@
 
 ### 地圖與輔助
 
-- **定位按鈕**:左下角,一鍵將地圖置中到目前虛擬位置
+- **地圖定位按鈕**(左上角):一鍵置中目前虛擬位置
+- **圖層切換**:OSM / CartoDB Voyager / ESRI 衛星(右上角)
+- **當地天氣**:狀態列顯示虛擬位置的當前天氣 + 溫度(Open-Meteo,動態 SVG 圖示:太陽呼吸、雨滴下落、雪花旋轉、雷電閃爍)
+- **國旗與時區**:瞬移後自動顯示當地國旗,跨時區時 toast 提醒時差
+- **地圖釘 / 使用者頭像**(狀態列):
+  - 預設「小藍人」+ 6 組內建角色 PNG(兔兔 / 小狗 / 小貓 / 狐狸 / 男孩 / 女孩)+ 自訂 PNG 上傳
+  - 上傳 PNG 自動透明邊界偵測與去除,長邊縮成 88px,地圖顯示 44px,裸 PNG 透過不加底色
+  - 上傳的自訂圖與目前使用的頭像**分兩個 localStorage 格子存**,切換預設圖不會把使用者上傳的圖洗掉
+  - 點選任一張變 pending(藍框高亮),按**儲存**才套用;取消 / ESC / 按外面都不生效
+  - 切換後當場換地圖釘,不用瞬移才生效
 - **一鍵還原**:狀態列,清除 iPhone 虛擬定位並顯示「正在清除 / 已清除請等待生效」提示
 - **停止 ≠ 還原**:停止只結束移動,虛擬定位保留;清除請按「一鍵還原」
-- **座標收藏 / 分類**:支援自訂座標、JSON 全量匯出 / 匯入(合併,不覆蓋)、右鍵複製名稱與座標
+- **座標收藏 / 分類**:
+  - 自訂座標(一格輸入 `lat, lng`)、JSON 全量匯出 / 匯入(合併,不覆蓋)
+  - 新增時**自動抓取地名**(短名稱)與**國旗**(reverse geocode)
+  - **多選刪除**、**分類顏色自訂**(10 色預設 + HEX 任意色)、搜尋、排序(名稱 / 日期 / 最後使用)
+  - 勾選「在地圖上顯示所有座標」:地圖上會顯示所有收藏的精緻 pin(霓虹玻璃膠囊 + 國旗 + 聚合 Polaroid 卡片)
+  - 編輯座標時座標改變會自動刷新國旗
 - **儲存路線 + GPX 匯入 / 匯出**
-- **路徑點高亮**:多點 / 巡迴 / 導航中,目前目標路徑點以橘色脈動邊框 + ▶ 圖示;已抵達淡化為灰 + ✓;起點以綠色「起點」標籤顯示(地圖標記同步 S/數字編號)
+- **路徑點 + 路徑線**:地鐵站點風格的 S/1/2/3 標 + 動態箭頭流動線,看得出方向感
 - **地址搜尋**(Nominatim)
 - **Cooldown 防偵測**:依跳點距離動態延遲,避免異常偵測
 - **座標格式切換**:DD / DMS / DM
+- **右鍵選單自動防出界**:選單會用 `useLayoutEffect` 測量實際尺寸,超出視窗右 / 底邊緣時自動往內推,不會被切
 
 ### 使用者體驗
 
 - 啟動時 backend race condition 自動重試(最多 ~20 秒緩衝),無需手動重開
 - WebSocket 即時推播位置、進度、ETA、剩餘距離、裝置連線狀態、DDI 掛載進度
+- 斷線自動重連 + banner 自動清除
+- **更新檢查**:啟動時從 GitHub Releases 比對版本,有新版跳對話框(僅提示,不自動下載)
 - **Log 資料夾**按鈕(狀態列):一鍵開啟 `~/.locwarp/logs/` 資料夾,方便將 backend.log 附到 Issue
 - 右下角顯示**目前 App 版本**
 - 介面語言:繁體中文 / English 即時切換
+- **Ko-fi 贊助按鈕**(側邊欄底部):開源作者支持
 - 所有狀態(座標收藏、設定、tunnel 資訊)寫在 `~/.locwarp/`
 
 ---
@@ -171,36 +189,44 @@
 | [React](https://react.dev/) | 18.3 | UI framework |
 | [TypeScript](https://www.typescriptlang.org/) | 5.5 | Type-safe JS |
 | [Vite](https://vitejs.dev/) | 5.4 | Dev server + 生產環境打包(`base: './'` 供 `file://` 載入) |
-| [Leaflet](https://leafletjs.com/) | 1.9 | 互動地圖 |
-| CSS | n/a | 手寫,單一 `styles.css` |
+| [Leaflet](https://leafletjs.com/) | 1.9 | 互動地圖(底圖切換 + 自訂 divIcon 書籤/路徑點標記 + 動畫 polyline) |
+| Inline SVG | n/a | 天氣圖示、書籤 pin、路徑點標、控制按鈕,完全無第三方 icon 套件 |
+| PNG 靜態資產 | n/a | 6 個地圖釘預設頭像(`src/assets/avatars/`),Vite 自動 hash 打包 |
+| CSS | n/a | 手寫,單一 `styles.css`,包含所有 keyframe 動畫 |
 
 ### Backend
 
 | 技術 | 版本 | 用途 |
 | --- | --- | --- |
-| Python | 3.13 | 主 runtime |
+| Python | 3.13 | 主 runtime(v0.2.4 起從 3.12 升級) |
 | [FastAPI](https://fastapi.tiangolo.com/) | 0.110+ | REST API + WebSocket |
 | [uvicorn](https://www.uvicorn.org/) | 0.29+ | ASGI server(`:8777`) |
 | [websockets](https://websockets.readthedocs.io/) | 12+ | 即時位置/狀態推播給前端 |
-| [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) | 9.9+ | iOS 裝置協議(DVT / RemoteServices / lockdown) |
+| [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) | 9.9+ | iOS 裝置協議(DVT / RemoteServices / lockdown / LegacyLocationService) |
 | [pydantic](https://docs.pydantic.dev/) | 2+ | 資料驗證(schemas) |
-| [httpx](https://www.python-httpx.org/) | 0.27+ | OSRM / Nominatim HTTP 呼叫 |
+| [httpx](https://www.python-httpx.org/) | 0.27+ | OSRM / Nominatim / TimezoneDB HTTP 呼叫 |
 | [gpxpy](https://github.com/tkrajina/gpxpy) | 1.6+ | GPX 路線解析 |
 
-### WiFi Tunnel(整合於 backend,v0.2.3+)
+### WiFi Tunnel(整合於 backend,v0.2.3+,iOS 17+ only)
 
 | 技術 | 用途 |
 | --- | --- |
 | pymobiledevice3 `start_tcp_tunnel()` | 建立 RSD tunnel(in-process asyncio task) |
 | pytun-pmd3 | Windows TUN 介面(wintun.dll,已捆入 backend exe) |
 
-### 外部服務(皆免費、無需 API key)
+### 外部服務(全部免費)
 
-| 服務 | 用途 |
-| --- | --- |
-| [OSRM](https://project-osrm.org/)(`router.project-osrm.org`) | 路線規劃(walking / driving profile) |
-| [Nominatim](https://nominatim.openstreetmap.org/) | 地址 → 座標查詢 |
-| [CartoDB Voyager](https://carto.com/) | 地圖底圖 tile(OSM 資料,免費散佈授權) |
+| 服務 | 呼叫端 | 用途 | 需要 API Key |
+| --- | --- | --- | --- |
+| [OSRM](https://project-osrm.org/) | backend | 路線規劃 + `/table` 多點優化(walking / driving profile) | 否 |
+| [Nominatim](https://nominatim.openstreetmap.org/) | backend | 正向 / 反向地理編碼、地名查詢(含 POI 智慧 short_name 選擇) | 否 |
+| [Open-Meteo](https://open-meteo.com/) | **frontend(直連)** | 虛擬位置當地天氣(氣溫 + WMO weather_code);每個用戶自己 IP 各自 10000 req/day | 否 |
+| [TimezoneDB](https://timezonedb.com/) | backend | 座標 → 時區 + GMT 偏移,跨時區 toast 提醒 | 是(內建 Key) |
+| [flagcdn.com](https://flagcdn.com/) | frontend | 國旗 PNG(`w20/{cc}.png`、`w40/{cc}.png`) | 否 |
+| [CartoDB Voyager](https://carto.com/) | frontend tile | 地圖底圖(OSM 資料,免費授權) | 否 |
+| [ESRI World Imagery](https://www.esri.com/) | frontend tile | 衛星圖層(圖層切換) | 否 |
+| OpenStreetMap raster | frontend tile | 標準 OSM 圖層(主要) | 否 |
+| [GitHub Releases](https://github.com/keezxc1223/locwarp/releases) | frontend | 啟動時檢查新版本(純 HTTP,無遙測) | 否 |
 
 ### 打包工具
 
@@ -230,6 +256,10 @@
 - **In-process WiFi tunnel**:backend 自 v0.2.3 起直接在主 event loop 內執行 `start_tcp_tunnel()`,不再 spawn 獨立 helper exe
 - **Runtime 狀態目錄**:一律寫入 `~/.locwarp/`(bookmarks / settings / tunnel info),避免 PyInstaller 的 `_MEIPASS` 臨時目錄問題
 - **Tile referer / OSM 替換**:OSM 的 tile 服務封鎖散佈型應用,已改用 CartoDB(OSM 資料源、CARTO 代管 CDN、免 referer)
+- **雙裝置群組模式**(v0.2.0+):同步瞬移 / 同步移動,primary 不被後插裝置搶走,B 插入時自動同步到 A 的位置並接續 A 正在執行的任務(fanout)
+- **Idle-gated 地理查詢**:reverse geocode + timezone + 天氣僅在 idle / teleport / disconnect 狀態且位置變動 ≥ 100m 才觸發,避免跑動態模式時 HTTP 對 DVT 頻道產生 contention
+- **前端天氣直連**:`lookupWeather()` 直接從 renderer 打 Open-Meteo,每個用戶自己 IP 各自計算配額,不透過 backend proxy 避免全體用戶共享一個來源 IP 爆量
+- **座標國旗自動補全**:新增 / 編輯座標時 reverse geocode 帶出 country_code 並渲染為國旗,座標變動時自動刷新
 
 ---
 

@@ -145,6 +145,26 @@ export const lookupTimezone = (lat: number, lng: number) =>
   request<{ zone: string; gmt_offset_seconds: number; abbreviation: string; timestamp: number } | null>(
     'GET', `/api/geocode/timezone?lat=${lat}&lng=${lng}`,
   )
+
+// Weather — Open-Meteo (free, global, no API key, ~10k req/day per client IP).
+// Called directly from the renderer so each user queries from their own IP
+// and keeps their own quota; we never proxy through the backend.
+export async function lookupWeather(lat: number, lng: number): Promise<{ tempC: number; code: number } | null> {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lng.toFixed(4)}&current=temperature_2m,weather_code`
+    const res = await fetch(url, { cache: 'no-store' })
+    if (!res.ok) return null
+    const data = await res.json()
+    const c = data?.current
+    if (!c) return null
+    const tempC = Number(c.temperature_2m)
+    const code = Number(c.weather_code)
+    if (!Number.isFinite(tempC) || !Number.isFinite(code)) return null
+    return { tempC, code }
+  } catch {
+    return null
+  }
+}
 export const routeOptimize = (waypoints: { lat: number; lng: number }[], profile = 'foot', keep_first = true) =>
   request<{ waypoints: { lat: number; lng: number }[]; total_distance_m: number; total_duration_s: number }>(
     'POST', '/api/geocode/route-optimize', { waypoints, profile, keep_first },

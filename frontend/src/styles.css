@@ -2542,3 +2542,36 @@ input:focus-visible {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.65; transform: scale(1.15); }
 }
+
+/* Flowing arrow / chevron animation for the route polyline (design 6). */
+@keyframes route-flow {
+  to { stroke-dashoffset: -40; }
+}
+.route-flow-dash {
+  animation: route-flow 1.6s linear infinite;
+}
+
+/* Weather icon animations (Set 04 — breathing / light animation). */
+@keyframes wx-sun-rays {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+@keyframes wx-rain-drop {
+  0%   { transform: translateY(-4px); opacity: 0; }
+  30%  { opacity: 1; }
+  100% { transform: translateY(6px); opacity: 0; }
+}
+@keyframes wx-snow-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes wx-bolt-flash {
+  0%, 92%, 100% { opacity: 1; }
+  95%           { opacity: 0.2; }
+}
+.wx-sun-rays { animation: wx-sun-rays 2.4s ease-in-out infinite; transform-origin: center; }
+.wx-rain-drop { animation: wx-rain-drop 1.2s linear infinite; }
+.wx-snow-flake { animation: wx-snow-spin 4s linear infinite; transform-box: fill-box; transform-origin: center; }
+.wx-bolt { animation: wx-bolt-flash 2s linear infinite; }
+.wx-delay-1 { animation-delay: 0.3s; }
+.wx-delay-2 { animation-delay: 0.6s; }
+.wx-delay-3 { animation-delay: 0.9s; }

@@ -108,14 +108,59 @@ class GeocodingService:
 
         try:
             addr = data.get("address") or {}
+            display_name = data.get("display_name", "")
+            short = _pick_short_name(addr, data.get("name") or "", display_name)
             return GeocodingResult(
-                display_name=data.get("display_name", ""),
+                display_name=display_name,
                 lat=float(data["lat"]),
                 lng=float(data["lon"]),
                 type=data.get("type", ""),
                 importance=float(data.get("importance", 0)),
                 country_code=(addr.get("country_code") or "").lower(),
+                short_name=short,
             )
         except (KeyError, ValueError) as exc:
             logger.warning("Failed to parse reverse result: %s", exc)
             return None
+
+
+def _pick_short_name(addr: dict, name: str, display_name: str) -> str:
+    """Pick a human-friendly short label from Nominatim's address details.
+
+    Nominatim's display_name leads with the most granular component first
+    (e.g. house number, then road, then suburb), which means naively taking
+    the first comma-separated segment gives noise like '6' or '6號'. Prefer
+    named POIs / features when present, then the street, then a region.
+    """
+    # Nominatim sometimes sets `name` at the top level for POIs.
+    if name and len(name) > 1:
+        return name.strip()
+    # Address-level POI tags (ordered by how specific they are).
+    poi_keys = (
+        "tourism", "attraction", "building",
+        "amenity", "shop", "leisure", "office",
+        "historic", "public_transport", "railway",
+    )
+    for k in poi_keys:
+        v = addr.get(k)
+        if v and isinstance(v, str) and len(v) > 1:
+            return v.strip()
+    # Fall through to street / area names.
+    for k in ("road", "pedestrian", "footway", "path"):
+        v = addr.get(k)
+        if v:
+            return v.strip()
+    for k in ("neighbourhood", "hamlet", "village", "suburb", "quarter"):
+        v = addr.get(k)
+        if v:
+            return v.strip()
+    for k in ("city_district", "town", "city", "municipality", "county"):
+        v = addr.get(k)
+        if v:
+            return v.strip()
+    # As a last resort, return the first comma segment that looks like a name
+    # (length > 2 and not purely digits / house-number-ish).
+    for seg in (s.strip() for s in display_name.split(",")):
+        if len(seg) > 2 and not seg.replace("號", "").strip().isdigit():
+            return seg
+    return display_name.split(",")[0].strip() if display_name else ""

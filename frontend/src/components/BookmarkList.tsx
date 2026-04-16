@@ -8,6 +8,11 @@ interface Bookmark {
   lat: number;
   lng: number;
   category: string;
+  // ISO 3166-1 alpha-2 (lowercase), optional. Rendered as a small flag
+  // icon next to the bookmark name when present.
+  country_code?: string;
+  created_at?: string;  // ISO timestamp, used by 'date added' sort
+  last_used_at?: string;  // ISO timestamp, used by 'last used' sort
 }
 
 interface Position {
@@ -18,6 +23,9 @@ interface Position {
 interface BookmarkListProps {
   bookmarks: Bookmark[];
   categories: string[];
+  // Stored color per category (name → hex). Overrides the hash-from-name
+  // fallback so renaming a category doesn't re-roll its dot color.
+  categoryColors?: Record<string, string>;
   currentPosition: Position | null;
   onBookmarkClick: (bm: Bookmark) => void;
   onBookmarkAdd: (bm: Bookmark) => void;
@@ -26,9 +34,21 @@ interface BookmarkListProps {
   onCategoryAdd: (name: string) => void;
   onCategoryDelete: (name: string) => void;
   onCategoryRename?: (oldName: string, newName: string) => void;
+  // Persist a new color for a category (works for Default too).
+  onCategoryRecolor?: (name: string, color: string) => void;
+  showOnMap?: boolean;
+  onShowOnMapChange?: (v: boolean) => void;
   onImport?: (file: File) => Promise<void>;
   exportUrl?: string;
 }
+
+// Preset palette for the color picker. Covers warm + cool + neutral so every
+// category can find a visually distinct slot.
+const COLOR_PALETTE = [
+  '#ef4444', '#f97316', '#eab308', '#22c55e',
+  '#14b8a6', '#3b82f6', '#6366f1', '#a855f7',
+  '#ec4899', '#64748b',
+];
 
 const CATEGORY_COLORS: Record<string, string> = {
   Default: '#4285f4',
@@ -52,6 +72,7 @@ function getCategoryColor(name: string): string {
 const BookmarkList: React.FC<BookmarkListProps> = ({
   bookmarks,
   categories,
+  categoryColors,
   currentPosition,
   onBookmarkClick,
   onBookmarkAdd,
@@ -60,9 +81,22 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   onCategoryAdd,
   onCategoryDelete,
   onCategoryRename,
+  onCategoryRecolor,
+  showOnMap = false,
+  onShowOnMapChange,
   onImport,
   exportUrl,
 }) => {
+  // Prefer the stored color (set at creation, editable via color picker). Only
+  // fall back to CATEGORY_COLORS / name hash for legacy categories that have
+  // never had a color assigned.
+  const resolveColor = (name: string): string => {
+    const stored = categoryColors?.[name];
+    if (stored) return stored;
+    return getCategoryColor(name);
+  };
+  // Name of the category whose dot is currently being recolored (shows popover).
+  const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
   const t = useT();
   // Backend may store the built-in default category as the Chinese '預設'.
   // Translate at render time so EN users see "Default" without touching storage.
@@ -97,6 +131,57 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   const [customLng, setCustomLng] = useState('');
   const [customCategory, setCustomCategory] = useState(categories[0] || 'Default');
   const [search, setSearch] = useState('');
+  // Multi-select mode: tick rows and batch-delete. When active, row clicks
+  // toggle selection instead of teleporting.
+  const [multiSelect, setMultiSelect] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const exitMultiSelect = () => {
+    setMultiSelect(false);
+    setSelectedIds(new Set());
+  };
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    const msg = t('bm.delete_confirm').replace('{n}', String(selectedIds.size));
+    if (!window.confirm(msg)) return;
+    const ids = Array.from(selectedIds);
+    await Promise.all(ids.map((id) => {
+      try { return Promise.resolve(onBookmarkDelete(id)); } catch { return Promise.resolve(); }
+    }));
+    exitMultiSelect();
+  };
+  // Sort mode persisted in localStorage so it survives restart.
+  type SortMode = 'default' | 'name' | 'date_added' | 'last_used';
+  const [sortMode, setSortModeRaw] = useState<SortMode>(() => {
+    try {
+      const v = localStorage.getItem('locwarp.bookmark_sort') as SortMode | null;
+      if (v === 'default' || v === 'name' || v === 'date_added' || v === 'last_used') return v;
+    } catch { /* ignore */ }
+    return 'default';
+  });
+  const setSortMode = (m: SortMode) => {
+    setSortModeRaw(m);
+    try { localStorage.setItem('locwarp.bookmark_sort', m); } catch { /* ignore */ }
+  };
+
+  const sortBookmarks = (list: Bookmark[]): Bookmark[] => {
+    if (sortMode === 'default') return list;
+    const copy = [...list];
+    if (sortMode === 'name') {
+      copy.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+    } else if (sortMode === 'date_added') {
+      copy.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    } else if (sortMode === 'last_used') {
+      copy.sort((a, b) => (b.last_used_at || '').localeCompare(a.last_used_at || ''));
+    }
+    return copy;
+  };
 
   // Close the context menu on ESC, or on any click / right-click that
   // isn't on the menu itself. Uses pointerdown so it fires before React
@@ -125,6 +210,28 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
       document.removeEventListener('keydown', onEsc);
     };
   }, [contextMenu]);
+
+  // Dismiss the category color picker on outside click / ESC.
+  useEffect(() => {
+    if (!colorPickerFor) return;
+    const onOutside = (e: Event) => {
+      const t = e.target as Element | null;
+      if (t && t.closest?.('[data-category-color-picker]')) return;
+      setColorPickerFor(null);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setColorPickerFor(null);
+    };
+    const id = setTimeout(() => {
+      document.addEventListener('pointerdown', onOutside);
+      document.addEventListener('keydown', onEsc);
+    }, 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('pointerdown', onOutside);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [colorPickerFor]);
 
   const toggleCategory = (cat: string) => {
     setCollapsed((prev) => ({ ...prev, [cat]: !prev[cat] }));
@@ -173,8 +280,10 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
 
   return (
     <div>
-      {/* Header with add / manage buttons */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+      {/* Header with add / manage buttons. flex-wrap so extra buttons drop
+          to a new row on narrow library panels instead of pushing the gear
+          off-screen. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 8 }}>
         <button
           className="action-btn"
           onClick={() => setShowAddDialog(!showAddDialog)}
@@ -207,29 +316,27 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             className="action-btn"
             href={exportUrl}
             download="bookmarks.json"
-            style={{ padding: '3px 8px', fontSize: 12, marginLeft: 'auto', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+            style={{ padding: '3px 6px', fontSize: 12, marginLeft: 'auto', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
             title={t('bm.export_tooltip')}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            {t('bm.export')}
           </a>
         )}
         {onImport && (
           <label
             className="action-btn"
-            style={{ padding: '3px 8px', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: exportUrl ? 0 : 'auto' }}
+            style={{ padding: '3px 6px', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', marginLeft: exportUrl ? 0 : 'auto' }}
             title={t('bm.import_tooltip')}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
               <polyline points="17 8 12 3 7 8" />
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
-            {t('bm.import')}
             <input
               type="file"
               accept="application/json,.json"
@@ -244,8 +351,26 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
         )}
         <button
           className="action-btn"
+          onClick={() => {
+            if (multiSelect) exitMultiSelect();
+            else setMultiSelect(true);
+          }}
+          style={{
+            padding: '3px 6px', fontSize: 12, display: 'inline-flex', alignItems: 'center',
+            background: multiSelect ? 'rgba(108,140,255,0.2)' : undefined,
+            borderColor: multiSelect ? 'rgba(108,140,255,0.6)' : undefined,
+          }}
+          title={multiSelect ? t('bm.exit_multi_select') : t('bm.multi_select_tooltip')}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="9 11 12 14 22 4" />
+            <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+          </svg>
+        </button>
+        <button
+          className="action-btn"
           onClick={() => setShowCategoryMgr(!showCategoryMgr)}
-          style={{ padding: '3px 8px', fontSize: 12, marginLeft: (exportUrl || onImport) ? 0 : 'auto' }}
+          style={{ padding: '3px 8px', fontSize: 12 }}
           title={t('bm.manage_categories')}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -284,6 +409,91 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             }}
           >×</button>
         )}
+      </div>
+
+      {/* Show-all-on-map toggle */}
+      {onShowOnMapChange && (
+        <label
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, marginTop: 8,
+            fontSize: 11, color: '#bbb', cursor: 'pointer', userSelect: 'none',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={showOnMap}
+            onChange={(e) => onShowOnMapChange(e.target.checked)}
+            style={{ margin: 0 }}
+          />
+          <span>{t('bm.show_on_map')}</span>
+        </label>
+      )}
+
+      {/* Multi-select toolbar — batch actions (delete / select-all). */}
+      {multiSelect && (
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, marginTop: 8,
+            padding: '6px 8px', borderRadius: 4,
+            background: 'rgba(108,140,255,0.12)',
+            border: '1px solid rgba(108,140,255,0.35)',
+            fontSize: 11,
+          }}
+        >
+          <button
+            className="action-btn"
+            onClick={() => {
+              const allIds = bookmarks.map((b) => b.id).filter((x): x is string => !!x);
+              if (selectedIds.size === allIds.length) {
+                setSelectedIds(new Set());
+              } else {
+                setSelectedIds(new Set(allIds));
+              }
+            }}
+            style={{ padding: '2px 6px', fontSize: 11 }}
+          >
+            {selectedIds.size === bookmarks.length && bookmarks.length > 0
+              ? t('bm.deselect_all')
+              : t('bm.select_all')}
+          </button>
+          <span style={{ opacity: 0.7, marginLeft: 'auto' }}>
+            {selectedIds.size} / {bookmarks.length}
+          </span>
+          <button
+            className="action-btn"
+            onClick={handleBulkDelete}
+            disabled={selectedIds.size === 0}
+            style={{
+              padding: '2px 8px', fontSize: 11,
+              color: selectedIds.size === 0 ? '#888' : '#ff6b6b',
+              borderColor: selectedIds.size === 0 ? undefined : 'rgba(255,107,107,0.4)',
+              cursor: selectedIds.size === 0 ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {t('bm.delete_selected').replace('{n}', String(selectedIds.size))}
+          </button>
+        </div>
+      )}
+
+      {/* Sort control — choose how the bookmark list is ordered. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: 11, color: '#bbb' }}>
+        <span style={{ opacity: 0.7 }}>{t('bm.sort_label')}</span>
+        <select
+          value={sortMode}
+          onChange={(e) => setSortMode(e.target.value as SortMode)}
+          style={{
+            flex: 1, background: '#1e1e22', color: '#e0e0e0',
+            border: '1px solid rgba(255,255,255,0.12)', borderRadius: 4,
+            padding: '3px 6px', fontSize: 11,
+          }}
+        >
+          {/* Explicit inline colors so the popup list is readable on
+              Windows native select dropdown (which defaults to white bg). */}
+          <option value="default" style={{ background: '#1e1e22', color: '#e0e0e0' }}>{t('bm.sort_default')}</option>
+          <option value="name" style={{ background: '#1e1e22', color: '#e0e0e0' }}>{t('bm.sort_name')}</option>
+          <option value="date_added" style={{ background: '#1e1e22', color: '#e0e0e0' }}>{t('bm.sort_date_added')}</option>
+          <option value="last_used" style={{ background: '#1e1e22', color: '#e0e0e0' }}>{t('bm.sort_last_used')}</option>
+        </select>
       </div>
 
       {/* Add bookmark dialog */}
@@ -366,17 +576,86 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                 gap: 6,
                 padding: '4px 0',
                 fontSize: 12,
+                position: 'relative',
               }}
             >
-              <div
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!onCategoryRecolor) return;
+                  setColorPickerFor((prev) => (prev === cat ? null : cat));
+                }}
+                title={t('bm.recolor_tooltip')}
                 style={{
-                  width: 8,
-                  height: 8,
+                  width: 14,
+                  height: 14,
                   borderRadius: '50%',
-                  background: getCategoryColor(cat),
+                  background: resolveColor(cat),
+                  border: '1.5px solid rgba(255,255,255,0.15)',
+                  padding: 0,
+                  cursor: onCategoryRecolor ? 'pointer' : 'default',
                   flexShrink: 0,
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.3)',
                 }}
               />
+              {colorPickerFor === cat && onCategoryRecolor && (
+                <div
+                  data-category-color-picker
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute',
+                    top: 22, left: 0, zIndex: 50,
+                    background: '#1e1e22',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: 6,
+                    padding: 6,
+                    boxShadow: '0 6px 18px rgba(0,0,0,0.5)',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(5, 22px)',
+                    gap: 4,
+                  }}
+                >
+                  {COLOR_PALETTE.map((c) => {
+                    const selected = resolveColor(cat).toLowerCase() === c.toLowerCase();
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCategoryRecolor(cat, c);
+                          setColorPickerFor(null);
+                        }}
+                        style={{
+                          width: 22, height: 22, borderRadius: '50%',
+                          background: c,
+                          border: selected
+                            ? '2px solid #fff'
+                            : '1.5px solid rgba(255,255,255,0.12)',
+                          cursor: 'pointer', padding: 0,
+                          transition: 'transform 0.1s',
+                        }}
+                        title={c}
+                      />
+                    );
+                  })}
+                  <input
+                    type="color"
+                    value={resolveColor(cat)}
+                    onChange={(e) => onCategoryRecolor(cat, e.target.value)}
+                    title={t('bm.recolor_custom')}
+                    style={{
+                      gridColumn: '1 / span 5',
+                      width: '100%', height: 22,
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: 4, padding: 0, marginTop: 2,
+                      background: '#1e1e22',
+                      cursor: 'pointer',
+                    }}
+                  />
+                </div>
+              )}
               {editingCategory === cat ? (
                 <input
                   type="text"
@@ -471,12 +750,12 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
       {/* Search mode: flat filtered list, no category grouping */}
       {search.trim() !== '' && (() => {
         const q = search.trim().toLowerCase();
-        const matches = bookmarks.filter((bm) => {
+        const matches = sortBookmarks(bookmarks.filter((bm) => {
           const name = (bm.name ?? '').toLowerCase();
           const cat = (bm.category ?? '').toLowerCase();
           const coord = `${bm.lat.toFixed(5)}, ${bm.lng.toFixed(5)}`;
           return name.includes(q) || cat.includes(q) || coord.includes(q);
-        });
+        }));
         if (matches.length === 0) {
           return (
             <div style={{ fontSize: 12, opacity: 0.5, padding: '10px 0', textAlign: 'center' }}>
@@ -486,37 +765,71 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
         }
         return (
           <div style={{ paddingLeft: 4 }}>
-            {matches.map((bm) => (
-              <div
-                key={bm.id ?? `${bm.lat}-${bm.lng}`}
-                className="bookmark-item"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '5px 6px', cursor: 'pointer',
-                  borderRadius: 4, fontSize: 12, transition: 'background 0.15s',
-                }}
-                onClick={() => onBookmarkClick(bm)}
-                onContextMenu={(e) => handleContextMenu(e, bm)}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
-              >
+            {matches.map((bm) => {
+              const isSelected = bm.id ? selectedIds.has(bm.id) : false;
+              return (
                 <div
+                  key={bm.id ?? `${bm.lat}-${bm.lng}`}
+                  className="bookmark-item"
                   style={{
-                    width: 8, height: 8, borderRadius: '50%',
-                    background: getCategoryColor(bm.category), flexShrink: 0,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '5px 6px', cursor: 'pointer',
+                    borderRadius: 4, fontSize: 12, transition: 'background 0.15s',
+                    background: multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent',
                   }}
-                  title={displayCat(bm.category)}
-                />
-                <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {bm.name}
-                  </span>
-                  <span style={{ fontSize: 10, opacity: 0.55, fontFamily: 'monospace' }}>
-                    {displayCat(bm.category)} · {bm.lat.toFixed(5)}, {bm.lng.toFixed(5)}
-                  </span>
+                  onClick={() => {
+                    if (multiSelect) {
+                      if (bm.id) toggleSelected(bm.id);
+                    } else {
+                      onBookmarkClick(bm);
+                    }
+                  }}
+                  onContextMenu={(e) => { if (!multiSelect) handleContextMenu(e, bm); else e.preventDefault(); }}
+                  onMouseEnter={(e) => {
+                    if (!(multiSelect && isSelected)) (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.background = multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent';
+                  }}
+                >
+                  {multiSelect && (
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => { if (bm.id) toggleSelected(bm.id); }}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ margin: 0, flexShrink: 0 }}
+                    />
+                  )}
+                  <div
+                    style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      background: resolveColor(bm.category), flexShrink: 0,
+                    }}
+                    title={displayCat(bm.category)}
+                  />
+                  {bm.country_code && (
+                    <img
+                      src={`https://flagcdn.com/w20/${bm.country_code}.png`}
+                      alt={bm.country_code.toUpperCase()}
+                      title={bm.country_code.toUpperCase()}
+                      width={14}
+                      height={10}
+                      style={{ borderRadius: 2, flexShrink: 0, boxShadow: '0 0 0 1px rgba(255,255,255,0.12)' }}
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  )}
+                  <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {bm.name}
+                    </span>
+                    <span style={{ fontSize: 10, opacity: 0.55, fontFamily: 'monospace' }}>
+                      {displayCat(bm.category)} · {bm.lat.toFixed(5)}, {bm.lng.toFixed(5)}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         );
       })()}
@@ -556,7 +869,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                 width: 8,
                 height: 8,
                 borderRadius: '50%',
-                background: getCategoryColor(cat),
+                background: resolveColor(cat),
                 flexShrink: 0,
               }}
             />
@@ -571,70 +884,100 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
               {bms.length === 0 && (
                 <div style={{ fontSize: 11, opacity: 0.4, padding: '4px 0' }}>{t('bm.blank')}</div>
               )}
-              {bms.map((bm) => (
-                <div
-                  key={bm.id ?? `${bm.lat}-${bm.lng}`}
-                  className="bookmark-item"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '5px 6px',
-                    cursor: 'pointer',
-                    borderRadius: 4,
-                    fontSize: 12,
-                    transition: 'background 0.15s',
-                  }}
-                  onClick={() => onBookmarkClick(bm)}
-                  onContextMenu={(e) => handleContextMenu(e, bm)}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-                  }}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    style={{ opacity: 0.5, flexShrink: 0 }}
+              {sortBookmarks(bms).map((bm) => {
+                const isSelected = bm.id ? selectedIds.has(bm.id) : false;
+                return (
+                  <div
+                    key={bm.id ?? `${bm.lat}-${bm.lng}`}
+                    className="bookmark-item"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '5px 6px',
+                      cursor: 'pointer',
+                      borderRadius: 4,
+                      fontSize: 12,
+                      transition: 'background 0.15s',
+                      background: multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent',
+                    }}
+                    onClick={() => {
+                      if (multiSelect) {
+                        if (bm.id) toggleSelected(bm.id);
+                      } else {
+                        onBookmarkClick(bm);
+                      }
+                    }}
+                    onContextMenu={(e) => { if (!multiSelect) handleContextMenu(e, bm); else e.preventDefault(); }}
+                    onMouseEnter={(e) => {
+                      if (!(multiSelect && isSelected)) (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.background = multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent';
+                    }}
                   >
-                    <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
-                  </svg>
-                  {editingId === bm.id ? (
-                    <input
-                      type="text"
-                      className="search-input"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && bm.id) {
-                          onBookmarkEdit(bm.id, { name: editName });
-                          setEditingId(null);
-                        }
-                        if (e.key === 'Escape') setEditingId(null);
-                      }}
-                      onBlur={() => setEditingId(null)}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ flex: 1, padding: '2px 4px', fontSize: 11 }}
-                      autoFocus
-                    />
-                  ) : (
-                    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {bm.name}
-                      </span>
-                      <span style={{ fontSize: 10, opacity: 0.55, fontFamily: 'monospace' }}>
-                        {bm.lat.toFixed(5)}, {bm.lng.toFixed(5)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              ))}
+                    {multiSelect && (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => { if (bm.id) toggleSelected(bm.id); }}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ margin: 0, flexShrink: 0 }}
+                      />
+                    )}
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      style={{ opacity: 0.5, flexShrink: 0 }}
+                    >
+                      <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
+                    </svg>
+                    {bm.country_code && (
+                      <img
+                        src={`https://flagcdn.com/w20/${bm.country_code}.png`}
+                        alt={bm.country_code.toUpperCase()}
+                        title={bm.country_code.toUpperCase()}
+                        width={14}
+                        height={10}
+                        style={{ borderRadius: 2, flexShrink: 0, boxShadow: '0 0 0 1px rgba(255,255,255,0.12)' }}
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    )}
+                    {editingId === bm.id ? (
+                      <input
+                        type="text"
+                        className="search-input"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && bm.id) {
+                            onBookmarkEdit(bm.id, { name: editName });
+                            setEditingId(null);
+                          }
+                          if (e.key === 'Escape') setEditingId(null);
+                        }}
+                        onBlur={() => setEditingId(null)}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ flex: 1, padding: '2px 4px', fontSize: 11 }}
+                        autoFocus
+                      />
+                    ) : (
+                      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {bm.name}
+                        </span>
+                        <span style={{ fontSize: 10, opacity: 0.55, fontFamily: 'monospace' }}>
+                          {bm.lat.toFixed(5)}, {bm.lng.toFixed(5)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -749,7 +1092,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                           width: 6,
                           height: 6,
                           borderRadius: '50%',
-                          background: getCategoryColor(cat),
+                          background: resolveColor(cat),
                           marginRight: 6,
                         }}
                       />
@@ -803,31 +1146,31 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
               }}
               style={{ width: '100%', marginBottom: 8 }}
             />
-            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-              <input
-                type="text"
-                className="search-input"
-                inputMode="decimal"
-                placeholder={t('bm.latlng_placeholder')}
-                value={editDialogLat}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  const split = trySplitLatLng(v);
-                  if (split) { setEditDialogLat(split[0]); setEditDialogLng(split[1]); }
-                  else setEditDialogLat(v);
-                }}
-                style={{ flex: 1 }}
-              />
-              <input
-                type="text"
-                className="search-input"
-                inputMode="decimal"
-                placeholder={t('bm.lng_placeholder')}
-                value={editDialogLng}
-                onChange={(e) => setEditDialogLng(e.target.value)}
-                style={{ flex: 1 }}
-              />
-            </div>
+            {/* Single 'lat, lng' field — paste or type the whole pair here.
+                The trySplitLatLng helper also accepts tab/space separators. */}
+            <input
+              type="text"
+              className="search-input"
+              inputMode="decimal"
+              placeholder={t('bm.latlng_single_placeholder')}
+              value={
+                editDialogLat && editDialogLng
+                  ? `${editDialogLat}, ${editDialogLng}`
+                  : editDialogLat || editDialogLng
+              }
+              onChange={(e) => {
+                const v = e.target.value;
+                const split = trySplitLatLng(v);
+                if (split) { setEditDialogLat(split[0]); setEditDialogLng(split[1]); }
+                else {
+                  // User is still typing the lat part; keep raw text in lat
+                  // and clear lng until a valid pair is detected.
+                  setEditDialogLat(v);
+                  setEditDialogLng('');
+                }
+              }}
+              style={{ width: '100%', marginBottom: 12 }}
+            />
             <div style={{ display: 'flex', gap: 6 }}>
               <button
                 className="action-btn primary"
@@ -901,31 +1244,25 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
               }}
               style={{ width: '100%', marginBottom: 8 }}
             />
-            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-              <input
-                type="text"
-                className="search-input"
-                inputMode="decimal"
-                placeholder={t('bm.latlng_placeholder')}
-                value={customLat}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  const split = trySplitLatLng(v);
-                  if (split) { setCustomLat(split[0]); setCustomLng(split[1]); }
-                  else setCustomLat(v);
-                }}
-                style={{ flex: 1 }}
-              />
-              <input
-                type="text"
-                className="search-input"
-                inputMode="decimal"
-                placeholder={t('bm.lng_placeholder')}
-                value={customLng}
-                onChange={(e) => setCustomLng(e.target.value)}
-                style={{ flex: 1 }}
-              />
-            </div>
+            {/* Single 'lat, lng' field. Paste or type the whole pair. */}
+            <input
+              type="text"
+              className="search-input"
+              inputMode="decimal"
+              placeholder={t('bm.latlng_single_placeholder')}
+              value={
+                customLat && customLng
+                  ? `${customLat}, ${customLng}`
+                  : customLat || customLng
+              }
+              onChange={(e) => {
+                const v = e.target.value;
+                const split = trySplitLatLng(v);
+                if (split) { setCustomLat(split[0]); setCustomLng(split[1]); }
+                else { setCustomLat(v); setCustomLng(''); }
+              }}
+              style={{ width: '100%', marginBottom: 8 }}
+            />
             <select
               value={customCategory}
               onChange={(e) => setCustomCategory(e.target.value)}

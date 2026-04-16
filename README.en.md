@@ -48,7 +48,7 @@
 >
 > **Note**: The table above aggregates developer-tested results and a handful of community reports. It **does not guarantee that every device on the same iOS version, network environment, or system configuration will work**. iOS virtual location stability depends on the exact iOS patch revision, pymobiledevice3's support for that revision, whether the Developer Disk Image mounts successfully, and the Windows host's driver / VPN / firewall / AV stack. "Reported" therefore means **at least one user succeeded in their specific environment**, it is not a universal compatibility claim.
 >
-> iOS 17+ versions not listed are not confirmed incompatible; they simply have not been reported yet. Please evaluate the risk before use. If you encounter issues, spot bugs, or confirm a version works, please open an [Issue](https://github.com/keezxc1223/locwarp/issues) so we can build up compatibility data.
+> iOS 16+ versions not listed are not confirmed incompatible; they simply have not been reported yet. Please evaluate the risk before use. If you encounter issues, spot bugs, or confirm a version works, please open an [Issue](https://github.com/keezxc1223/locwarp/issues) so we can build up compatibility data.
 
 <p align="center">
   <img src="frontend/build/icon.png" width="128" alt="LocWarp">
@@ -129,23 +129,41 @@ The world is bucketed into 1° x 1° grid cells with a per-region OSRM-coverage 
 
 ### Map & Utilities
 
-- **Recenter button** (bottom-left): centers the map on the current virtual position
+- **Recenter button** (top-left): centers the map on the current virtual position
+- **Tile layer switcher**: OSM / CartoDB Voyager / ESRI Satellite (top-right)
+- **Local weather**: status bar shows current weather + temp for the virtual location (Open-Meteo, animated SVG icons: breathing sun, falling rain, spinning snow, flashing lightning)
+- **Country flag & timezone**: flag appears automatically after teleport; a toast warns about time-zone diff when moving across zones
+- **Map pin / user avatar** (status bar):
+  - Default blue-dot + 6 bundled character PNGs (rabbit / dog / cat / fox / boy / girl) + custom PNG upload
+  - Uploaded PNG gets its transparent borders auto-trimmed, longest side capped at 88px, rendered at 44px on the map, bare passthrough with no added background
+  - Uploaded image and the active avatar are stored in **two separate localStorage slots**, so picking a preset never wipes a previously uploaded PNG
+  - Click a thumbnail to stage the change (blue highlight), hit **Save** to apply; cancel / X / clicking outside discards
+  - Applies instantly on save, no teleport required to refresh the marker
 - **One-click Restore** (status bar): clears the iPhone's virtual location, with "Clearing…" then "Cleared, please wait for it to take effect" toasts
 - **Stop ≠ Restore**: Stop only halts movement; the simulated location stays put. Use Restore to actually clear it.
-- **Bookmarks & categories**: custom-coordinate entries, JSON full export / import (merge, no overwrite), right-click "Copy name & coords"
+- **Bookmarks & categories**:
+  - Custom coords (single-field `lat, lng` input), JSON full export / import (merge, no overwrite)
+  - Auto-fills **place name** (short) and **country flag** on add (reverse geocode)
+  - **Multi-select delete**, **per-category color picker** (10 presets + arbitrary HEX), search, sort (name / date / last-used)
+  - "Show all on map" toggle: renders every bookmark as a neon-glass capsule pin (with flag) plus Polaroid-style cluster cards when they overlap
+  - Editing coordinates re-fetches the country flag automatically
 - **Saved routes** with **GPX import / export**
-- **Waypoint progress highlight**: during multi-stop / loop / navigate, the current target waypoint pulses orange with a ▶ icon; passed waypoints fade to grey + ✓; the start waypoint is rendered as a green "Start" tag (map markers match: S badge / numbered)
+- **Waypoint + route line**: subway-station style S/1/2/3 markers + animated flowing-arrow polyline for clear direction sense
 - **Address search** (Nominatim)
 - **Cooldown anti-detection**: dynamic delay based on teleport distance
 - **Coordinate format switching**: DD / DMS / DM
+- **Right-click menu auto-clamps**: `useLayoutEffect` measures the real menu size and nudges it inward when it would overflow the right / bottom edge
 
 ### UX
 
 - Auto-retry on startup races (up to ~20 s window), no manual relaunch required
 - Real-time WebSocket push for position, progress, ETA, remaining distance, device connection state, DDI mount progress
+- Auto-reconnect on disconnect + banner auto-dismiss
+- **Update check**: at startup, compares against the latest GitHub Release and shows a dialog if a newer version exists (prompt only, never auto-downloads)
 - **Open Log Folder** button (status bar): opens `~/.locwarp/logs/` so you can attach `backend.log` to bug reports
 - Current app version shown in the bottom-right corner
 - UI language: 繁體中文 / English, switchable on the fly
+- **Ko-fi donate button** (sidebar bottom): support the open-source author
 - All state (bookmarks, settings, tunnel info) lives in `~/.locwarp/`
 
 ---
@@ -164,13 +182,84 @@ The world is bucketed into 1° x 1° grid cells with a per-region OSRM-coverage 
                                               └──────────────────┘
 ```
 
-### Stack
+### Frontend
 
-- **Frontend**: Electron 30, React 18.3, TypeScript 5.5, Vite 5.4, Leaflet 1.9
-- **Backend**: Python 3.13, FastAPI, uvicorn, websockets
-- **iOS control**: [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (DVT / RemoteServices / lockdown)
-- **Wi-Fi Tunnel**: runs in-process inside the backend event loop (v0.2.3+; previously a standalone Python 3.13 helper)
-- **External services**: [OSRM](https://project-osrm.org/) (routing), [Nominatim](https://nominatim.openstreetmap.org/) (geocoding), [CartoDB Voyager](https://carto.com/) (map tiles)
+| Tech | Version | Purpose |
+| --- | --- | --- |
+| [Electron](https://www.electronjs.org/) | 30 | Desktop shell: window management, spawn backend, tile referer injection |
+| [React](https://react.dev/) | 18.3 | UI framework |
+| [TypeScript](https://www.typescriptlang.org/) | 5.5 | Type-safe JS |
+| [Vite](https://vitejs.dev/) | 5.4 | Dev server + production bundling (`base: './'` for `file://` loading) |
+| [Leaflet](https://leafletjs.com/) | 1.9 | Interactive map (tile switcher + custom divIcon bookmark/waypoint markers + animated polyline) |
+| Inline SVG | n/a | Weather icons, bookmark pins, waypoint markers, controls. Zero third-party icon sets. |
+| CSS | n/a | Hand-written `styles.css`, includes all keyframe animations |
+
+### Backend
+
+| Tech | Version | Purpose |
+| --- | --- | --- |
+| Python | 3.13 | Runtime (upgraded from 3.12 in v0.2.4) |
+| [FastAPI](https://fastapi.tiangolo.com/) | 0.110+ | REST API + WebSocket |
+| [uvicorn](https://www.uvicorn.org/) | 0.29+ | ASGI server (`:8777`) |
+| [websockets](https://websockets.readthedocs.io/) | 12+ | Real-time position / status push to frontend |
+| [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) | 9.9+ | iOS device protocols (DVT / RemoteServices / lockdown / LegacyLocationService) |
+| [pydantic](https://docs.pydantic.dev/) | 2+ | Request / response validation (schemas) |
+| [httpx](https://www.python-httpx.org/) | 0.27+ | OSRM / Nominatim / TimezoneDB HTTP calls |
+| [gpxpy](https://github.com/tkrajina/gpxpy) | 1.6+ | GPX route parsing |
+
+### Wi-Fi Tunnel (integrated into backend, v0.2.3+, iOS 17+ only)
+
+| Tech | Purpose |
+| --- | --- |
+| pymobiledevice3 `start_tcp_tunnel()` | Establishes RSD tunnel (in-process asyncio task) |
+| pytun-pmd3 | Windows TUN interface (wintun.dll, bundled into backend exe) |
+
+### External Services (all free)
+
+| Service | Caller | Purpose | Key required |
+| --- | --- | --- | --- |
+| [OSRM](https://project-osrm.org/) | backend | Routing + `/table` multi-stop optimization (walking / driving profiles) | No |
+| [Nominatim](https://nominatim.openstreetmap.org/) | backend | Forward / reverse geocoding, place-name lookup (with POI-aware short_name picker) | No |
+| [Open-Meteo](https://open-meteo.com/) | **frontend (direct)** | Current weather at virtual location (temp + WMO weather_code); each user has their own 10,000 req/day per IP | No |
+| [TimezoneDB](https://timezonedb.com/) | backend | Coords → timezone + GMT offset, cross-zone toast | Yes (bundled) |
+| [flagcdn.com](https://flagcdn.com/) | frontend | Country flag PNGs (`w20/{cc}.png`, `w40/{cc}.png`) | No |
+| [CartoDB Voyager](https://carto.com/) | frontend tile | Map tiles (OSM data, redistributable license) | No |
+| [ESRI World Imagery](https://www.esri.com/) | frontend tile | Satellite layer (tile switcher) | No |
+| OpenStreetMap raster | frontend tile | Default OSM layer | No |
+| [GitHub Releases](https://github.com/keezxc1223/locwarp/releases) | frontend | Startup version check (plain HTTP, no telemetry) | No |
+
+### Packaging
+
+| Tool | Purpose |
+| --- | --- |
+| [PyInstaller](https://pyinstaller.org/) | Python → single exe (backend, includes in-process tunnel) |
+| [electron-builder](https://www.electron.build/) | Electron → NSIS installer |
+| NSIS | Windows installer format |
+
+### Core modules (backend/core/)
+
+| Module | Responsibility |
+| --- | --- |
+| `simulation_engine.py` | Central controller: state transitions, task lifecycle, `_move_along_route()` movement loop, `EtaTracker` |
+| `device_manager.py` | Device discovery, USB / Wi-Fi Tunnel connection management |
+| `navigator.py` | Single-destination OSRM navigation |
+| `route_loop.py` | Closed-route infinite loop |
+| `multi_stop.py` | Multi-point sequential with dwell |
+| `random_walk.py` | Random walk inside a radius |
+| `joystick.py` | Real-time direction / magnitude control |
+| `teleport.py` / `restore.py` | Teleport / clear virtual location |
+
+### Key design decisions
+
+- **WebSocket position push**: backend emits `position_update` per tick (`update_interval` is speed-profile-derived); frontend updates map cursor + ETA bar live
+- **Speed resolution**: `config.resolve_speed_profile(mode, speed_kmh, speed_min_kmh, speed_max_kmh)` unifies "mode default / fixed custom / random range" inputs; priority `range > fixed > default`
+- **In-process Wi-Fi tunnel**: since v0.2.3 the backend runs `start_tcp_tunnel()` on its own event loop instead of spawning a helper exe
+- **Runtime state directory**: everything goes to `~/.locwarp/` (bookmarks / settings / tunnel info) to avoid PyInstaller's `_MEIPASS` temp-dir issues
+- **Tile referer / OSM swap**: OSM blocks distributable apps on their public tiles, so CartoDB (OSM data hosted on CARTO's CDN, no referer needed) is the default
+- **Dual-device group mode** (v0.2.0+): synchronized teleport / movement, primary is never hijacked by a late-plugged device, late joiner (B) syncs to A's position and auto-resumes whatever sim A is running (fanout)
+- **Idle-gated geocoding**: reverse geocode + timezone + weather lookups only fire when state is idle / teleport / disconnect AND position moved ≥ 100m; prevents HTTP contending with the DVT channel during active sim
+- **Frontend-direct weather**: `lookupWeather()` calls Open-Meteo from the renderer so each user consumes their own IP's quota, never proxied through backend (would share one source IP across all users)
+- **Auto country flag**: bookmark add / edit triggers reverse geocode to populate `country_code`; re-fetched automatically when coordinates change
 
 ---
 

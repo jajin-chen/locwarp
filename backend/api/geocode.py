@@ -1,3 +1,6 @@
+import logging
+
+import httpx
 from fastapi import APIRouter, HTTPException
 
 from models.schemas import (
@@ -16,6 +19,7 @@ from services.geo_extras import (
 )
 
 router = APIRouter(prefix="/api/geocode", tags=["geocode"])
+logger = logging.getLogger("locwarp")
 
 geocoding_service = GeocodingService()
 
@@ -34,6 +38,82 @@ async def reverse_geocode(lat: float, lng: float):
 async def timezone_lookup(lat: float, lng: float):
     """Return IANA timezone + UTC offset for a coordinate (TimezoneDB)."""
     return await get_timezone(lat, lng)
+
+
+@router.get("/real-location")
+async def real_location():
+    """Resolve the user's real public IP to city-level coordinates.
+
+    Runs on the backend (not the Electron renderer) so we bypass CORS and
+    TLS-cert issues that killed the renderer-direct version. Tries three
+    free providers in sequence and returns the first one that gives us a
+    valid lat/lng.
+
+    Returns: {"lat": float, "lng": float, "city": str, "country": str}
+    Raises 502 if every provider fails.
+    """
+    providers = [
+        # (name, url, extractor)
+        (
+            "ipwho.is",
+            "https://ipwho.is/?fields=success,latitude,longitude,city,region,country",
+            lambda d: None
+            if d.get("success") is False
+            else (
+                float(d["latitude"]),
+                float(d["longitude"]),
+                str(d.get("city") or d.get("region") or ""),
+                str(d.get("country") or ""),
+            )
+            if d.get("latitude") is not None and d.get("longitude") is not None
+            else None,
+        ),
+        (
+            "ip-api.com",
+            "http://ip-api.com/json/?fields=status,lat,lon,city,regionName,country",
+            lambda d: (
+                float(d["lat"]),
+                float(d["lon"]),
+                str(d.get("city") or d.get("regionName") or ""),
+                str(d.get("country") or ""),
+            )
+            if d.get("status") == "success"
+            else None,
+        ),
+        (
+            "ipapi.co",
+            "https://ipapi.co/json/",
+            lambda d: (
+                float(d["latitude"]),
+                float(d["longitude"]),
+                str(d.get("city") or d.get("region") or ""),
+                str(d.get("country_name") or d.get("country") or ""),
+            )
+            if d.get("latitude") is not None and d.get("longitude") is not None
+            else None,
+        ),
+    ]
+
+    last_err: str = ""
+    async with httpx.AsyncClient(timeout=httpx.Timeout(6.0, connect=3.0)) as client:
+        for name, url, extract in providers:
+            try:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+                result = extract(data)
+                if result is None:
+                    last_err = f"{name} returned no location"
+                    continue
+                lat, lng, city, country = result
+                logger.info("real-location resolved via %s: %.4f, %.4f (%s)", name, lat, lng, city)
+                return {"lat": lat, "lng": lng, "city": city, "country": country}
+            except Exception as exc:
+                last_err = f"{name}: {exc}"
+                logger.info("real-location provider %s failed: %s", name, exc)
+                continue
+
+    raise HTTPException(status_code=502, detail=f"All IP geolocation providers failed ({last_err})")
 
 
 @router.post("/route-optimize", response_model=RouteOptimizeResponse)

@@ -79,6 +79,7 @@ interface ControlPanelProps {
   onNavigate: (lat: number, lng: number) => void;
   bookmarks: Bookmark[];
   bookmarkCategories: string[];
+  bookmarkCategoryColors?: Record<string, string>;
   onBookmarkClick: (bm: Bookmark) => void;
   onBookmarkAdd: (bm: Bookmark) => void;
   onBookmarkDelete: (id: string) => void;
@@ -86,6 +87,9 @@ interface ControlPanelProps {
   onCategoryAdd: (name: string) => void;
   onCategoryDelete: (name: string) => void;
   onCategoryRename?: (oldName: string, newName: string) => void;
+  onCategoryRecolor?: (name: string, color: string) => void;
+  bookmarkShowOnMap?: boolean;
+  onBookmarkShowOnMapChange?: (v: boolean) => void;
   onBookmarkImport?: (file: File) => Promise<void>;
   bookmarkExportUrl?: string;
   savedRoutes: SavedRoute[];
@@ -206,6 +210,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onNavigate,
   bookmarks,
   bookmarkCategories,
+  bookmarkCategoryColors,
   onBookmarkClick,
   onBookmarkAdd,
   onBookmarkDelete,
@@ -213,6 +218,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onCategoryAdd,
   onCategoryDelete,
   onCategoryRename,
+  onCategoryRecolor,
+  bookmarkShowOnMap,
+  onBookmarkShowOnMapChange,
   onBookmarkImport,
   bookmarkExportUrl,
   savedRoutes,
@@ -635,7 +643,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         <button
           className="action-btn"
           style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '8px' }}
-          onClick={(e) => { e.stopPropagation(); setLibraryOpen(true); }}
+          onClick={(e) => { e.stopPropagation(); setLibraryOpen((o) => !o); }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
@@ -645,6 +653,26 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             ({bookmarks.length} / {savedRoutes.length})
           </span>
         </button>
+      </div>
+
+      {/* Ko-fi support button pinned at the bottom of the sidebar. */}
+      <div className="section" style={{ marginTop: 'auto', paddingTop: 12 }}>
+        <a
+          href="https://ko-fi.com/haoooooo"
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            textDecoration: 'none',
+          }}
+          title="Buy Me a Coffee at ko-fi.com"
+        >
+          <img
+            src="https://storage.ko-fi.com/cdn/kofi2.png?v=3"
+            alt="Buy Me a Coffee at ko-fi.com"
+            style={{ height: 34, maxWidth: '100%' }}
+          />
+        </a>
       </div>
 
       {libraryOpen && createPortal(
@@ -699,6 +727,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 <BookmarkList
                   bookmarks={bookmarks}
                   categories={bookmarkCategories}
+                  categoryColors={bookmarkCategoryColors}
                   currentPosition={currentPosition}
                   onBookmarkClick={(b) => { onBookmarkClick(b); setLibraryOpen(false); }}
                   onBookmarkAdd={onBookmarkAdd}
@@ -707,6 +736,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   onCategoryAdd={onCategoryAdd}
                   onCategoryDelete={onCategoryDelete}
                   onCategoryRename={onCategoryRename}
+                  onCategoryRecolor={onCategoryRecolor}
+                  showOnMap={bookmarkShowOnMap}
+                  onShowOnMapChange={onBookmarkShowOnMapChange}
                   onImport={onBookmarkImport}
                   exportUrl={bookmarkExportUrl}
                 />

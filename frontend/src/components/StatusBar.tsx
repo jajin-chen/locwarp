@@ -6,6 +6,7 @@ import type { DeviceInfo } from '../hooks/useDevice';
 import { useT } from '../i18n';
 import LangToggle from './LangToggle';
 import pkg from '../../package.json';
+import { WeatherIcon, categorize, labelKeyFor } from './WeatherIcon';
 
 const DEVICE_COLORS = ['#4285f4', '#ff9800'];
 const DEVICE_LETTERS = ['A', 'B'];
@@ -29,12 +30,16 @@ interface StatusBarProps {
   onToggleCooldown: (enabled: boolean) => void;
   onRestore?: () => void;
   onOpenLog?: () => void;
+  onOpenAvatarPicker?: () => void;
   // Group mode: when two devices are connected, cooldown toggle is force-off
   // and displays a different tooltip. Does not modify the saved setting.
   dualDevice?: boolean;
   runtimes?: RuntimesMap;
   devices?: DeviceInfo[];
   countryCode?: string;  // ISO 3166-1 alpha-2 lowercase, for flag icon
+  // Weather at the current virtual location (Open-Meteo). null = unknown.
+  weatherCode?: number | null;
+  tempC?: number | null;
 }
 
 function stateToMode(state: string): SimMode | null {
@@ -78,10 +83,13 @@ const StatusBar: React.FC<StatusBarProps> = ({
   onToggleCooldown,
   onRestore,
   onOpenLog,
+  onOpenAvatarPicker,
   dualDevice = false,
   runtimes,
   devices,
   countryCode = '',
+  weatherCode = null,
+  tempC = null,
 }) => {
   const t = useT();
   const [cooldownDisplay, setCooldownDisplay] = useState(cooldown);
@@ -222,6 +230,31 @@ const StatusBar: React.FC<StatusBarProps> = ({
         );
       })}
       {dualDevice && <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.12)' }} />}
+
+      {/* Weather chip (single-device; dual mode uses its own pills). Shows
+          current conditions at the virtual location with an animated icon. */}
+      {!dualDevice && currentPosition && weatherCode != null && tempC != null && (() => {
+        const cat = categorize(weatherCode);
+        if (!cat) return null;
+        const labelKey = labelKeyFor(cat);
+        const label = labelKey ? t(labelKey) : '';
+        return (
+          <div
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '3px 8px', borderRadius: 999,
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              fontSize: 11, fontFamily: 'monospace',
+            }}
+            title={`${label} · ${tempC.toFixed(1)}°C`}
+          >
+            <WeatherIcon cat={cat} size={14} />
+            <span>{Math.round(tempC)}°C</span>
+            <span style={{ opacity: 0.75 }}>{label}</span>
+          </div>
+        );
+      })()}
 
       {/* Current coordinates (single-device mode only) */}
       {!dualDevice && currentPosition && (
@@ -390,6 +423,31 @@ const StatusBar: React.FC<StatusBarProps> = ({
             </svg>
             {t('status.set_initial')}
           </button>
+          {/* 地圖釘 / 使用者頭像 — opens the avatar picker panel */}
+          {onOpenAvatarPicker && (
+            <button
+              onClick={onOpenAvatarPicker}
+              title={t('status.avatar_tooltip')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '2px 8px',
+                fontSize: 12,
+                background: 'rgba(108, 140, 255, 0.12)',
+                border: '1px solid rgba(108, 140, 255, 0.4)',
+                color: '#6c8cff',
+                borderRadius: 4,
+                cursor: 'pointer',
+              }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                <circle cx="12" cy="10" r="3" />
+              </svg>
+              {t('status.avatar')}
+            </button>
+          )}
         </>
       )}
 

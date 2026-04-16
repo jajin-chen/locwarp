@@ -168,6 +168,10 @@ class Bookmark(BaseModel):
     category_id: str = "default"
     created_at: str = ""
     last_used_at: str = ""
+    # ISO 3166-1 alpha-2 (lowercase), populated at add time via reverse
+    # geocode. Used to render a flag next to the bookmark. Empty = unknown
+    # (legacy bookmarks or offline-added); UI simply skips the flag.
+    country_code: str = ""
 
 
 class BookmarkMoveRequest(BaseModel):
@@ -206,6 +210,9 @@ class GeocodingResult(BaseModel):
     type: str = ""
     importance: float = 0.0
     country_code: str = ""  # ISO 3166-1 alpha-2 (lowercase), for flag lookup
+    # Short, human-friendly name for UI (bookmark auto-name, POI label).
+    # Picks the best available tag from Nominatim's address details.
+    short_name: str = ""
 
 
 class TimezoneInfo(BaseModel):

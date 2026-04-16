@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { useT } from '../i18n';
 import { reverseGeocode } from '../services/api';
 import L from 'leaflet';
@@ -39,14 +39,31 @@ interface MapViewProps {
   showWaypointOption?: boolean;
   deviceConnected?: boolean;
   onShowToast?: (msg: string) => void;
+  // HTML snippet to paint into the current-position divIcon. Lets the parent
+  // swap the "blue person" for one of the preset characters or a user-
+  // uploaded PNG. Empty / undefined = fall back to the built-in default.
+  userAvatarHtml?: string;
   // Group mode: when runtimes + devices are present and 2+ devices connected,
   // render per-device markers/polylines/circles. Single-device rendering is
   // still driven by the legacy currentPosition/destination/routePath props.
   runtimes?: RuntimesMap;
   devices?: DeviceInfo[];
+  // Optional bookmark list to render as small clickable markers. When
+  // enabled, clicking a marker calls onTeleport at that coordinate.
+  bookmarkPins?: Array<{ id?: string; name: string; lat: number; lng: number; country_code?: string }>;
+  showBookmarkPins?: boolean;
 }
 
 const DEVICE_COLORS = ['#4285f4', '#ff9800'];
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 const DEVICE_LETTERS = ['A', 'B'];
 
 function haversineM(a: Position, b: Position): number {
@@ -73,8 +90,11 @@ const MapView: React.FC<MapViewProps> = ({
   showWaypointOption,
   deviceConnected = true,
   onShowToast,
+  userAvatarHtml,
   runtimes,
   devices,
+  bookmarkPins,
+  showBookmarkPins,
 }) => {
   // Dual-mode rendering disabled by design: with pre-sync (both devices
   // teleport to the same start before any group action) and shared random
@@ -104,7 +124,16 @@ const MapView: React.FC<MapViewProps> = ({
   const prevPositionRef = useRef<Position | null>(null);
   const destMarkerRef = useRef<L.Marker | null>(null);
   const waypointMarkersRef = useRef<L.Marker[]>([]);
+  const bookmarkMarkersRef = useRef<L.Marker[]>([]);
   const polylineRef = useRef<L.Polyline | null>(null);
+  // Second polyline layered on top for the flowing-arrow animation (design 6).
+  const polylineArrowRef = useRef<L.Polyline | null>(null);
+  // Recenter-on-user-position button. We mount it as a real Leaflet control
+  // (not absolutely-positioned React JSX) so Leaflet's own .leaflet-top
+  // .leaflet-left layout pins it to the same x as the zoom buttons, with the
+  // standard 10px gap. Any other approach leaves it a few px off.
+  const recenterBtnRef = useRef<HTMLButtonElement | null>(null);
+  const recenterHandlerRef = useRef<() => void>(() => {});
   // clickMarkerRef removed — left-click no longer drops a pin.
   const radiusCircleRef = useRef<L.Circle | null>(null);
 
@@ -115,6 +144,32 @@ const MapView: React.FC<MapViewProps> = ({
     lat: 0,
     lng: 0,
   });
+  // DOM ref + clamped position state. Separate states for "click point" and
+  // "where the menu is actually painted" — the paint position is set ONCE
+  // per open via useLayoutEffect after measuring the real rendered size.
+  // Critical: the layout effect's deps do NOT include contextMenuPos itself,
+  // otherwise the setState triggers the effect again and we get an infinite
+  // reposition loop (that was v0.2.38's bug).
+  const contextMenuElRef = useRef<HTMLDivElement | null>(null);
+  const [contextMenuPos, setContextMenuPos] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!contextMenu.visible) {
+      if (contextMenuPos !== null) setContextMenuPos(null);
+      return;
+    }
+    const el = contextMenuElRef.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    const margin = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // Clamp: prefer opening rightward / downward, but if that overflows,
+    // push the menu back in so it never clips the viewport edge.
+    const left = Math.max(margin, Math.min(contextMenu.x, vw - width - margin));
+    const top  = Math.max(margin, Math.min(contextMenu.y, vh - height - margin));
+    setContextMenuPos({ left, top });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextMenu.visible, contextMenu.x, contextMenu.y]);
 
   // Reverse-geocode state for the context menu header row. Reset whenever
   // the menu closes or the right-click target changes, so a stale address
@@ -160,6 +215,40 @@ const MapView: React.FC<MapViewProps> = ({
     const topRightEl = (map as any)._controlCorners?.topright as HTMLElement | undefined;
     if (topRightEl) {
       topRightEl.style.marginTop = '56px';
+    }
+
+    // Recenter button as a second leaflet-bar in the topleft corner. This
+    // way Leaflet's layout (margin-left: 10px on each control + 10px gap
+    // between stacked controls) handles positioning — guarantees same x as
+    // the zoom +/- buttons with a natural gap below them.
+    if (topLeftEl) {
+      const wrapper = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+      const btn = L.DomUtil.create('button', '', wrapper) as HTMLButtonElement;
+      btn.type = 'button';
+      btn.title = tRef.current('map.recenter');
+      btn.setAttribute('role', 'button');
+      btn.style.cssText = [
+        'width: 30px', 'height: 30px', 'display: flex',
+        'align-items: center', 'justify-content: center',
+        'padding: 0', 'margin: 0', 'cursor: pointer',
+        'background: var(--bg-surface, #2a2f3a)',
+        'color: #fff', 'border: none', 'border-radius: 0',
+      ].join(';');
+      btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3" />
+        <line x1="12" y1="2" x2="12" y2="5" />
+        <line x1="12" y1="19" x2="12" y2="22" />
+        <line x1="2" y1="12" x2="5" y2="12" />
+        <line x1="19" y1="12" x2="22" y2="12" />
+      </svg>`;
+      L.DomEvent.disableClickPropagation(wrapper);
+      L.DomEvent.on(btn, 'click', (e: Event) => {
+        e.preventDefault();
+        if (btn.disabled) return;
+        recenterHandlerRef.current();
+      });
+      topLeftEl.appendChild(wrapper);
+      recenterBtnRef.current = btn;
     }
 
     // Tile layer tuning (shared across all providers):
@@ -323,19 +412,28 @@ const MapView: React.FC<MapViewProps> = ({
 
     const latlng: L.LatLngExpression = [currentPosition.lat, currentPosition.lng];
 
+    // If the avatar HTML changed since the marker was created, drop the
+    // old marker so the recreate branch below paints with the new icon at
+    // the current position — without this the user has to teleport again
+    // to see their newly-saved avatar.
+    const currentAvatar = userAvatarHtml ?? '';
+    if (currentMarkerRef.current && lastAvatarHtmlRef.current !== currentAvatar) {
+      try { (currentMarkerRef.current as any).remove(); } catch { /* ignore */ }
+      currentMarkerRef.current = null;
+    }
+
     if (currentMarkerRef.current) {
-      // Just move the existing marker — no flicker
+      // Just move the existing marker — no flicker. No tooltip update: the
+      // marker is non-interactive (see below) and the coordinate readout
+      // lives in the bottom status bar.
       (currentMarkerRef.current as any).setLatLng(latlng);
-      (currentMarkerRef.current as any).setTooltipContent(
-        `${currentPosition.lat.toFixed(6)}, ${currentPosition.lng.toFixed(6)}`
-      );
     } else {
-      // First time: create the marker
-      const personIcon = L.divIcon({
-        className: 'current-pos-marker',
-        html: `<div class="pos-pulse-ring"></div>
-          <div class="pos-pulse-ring pos-pulse-ring-2"></div>
-          <svg width="44" height="44" viewBox="0 0 44 44" class="pos-icon">
+      // First time: create the marker. User-supplied avatar HTML (if any)
+      // replaces the default blue-person SVG. The pulse rings stay so the
+      // marker still reads as a "live" position indicator.
+      const avatarInner = userAvatarHtml && userAvatarHtml.length > 0
+        ? userAvatarHtml
+        : `<svg width="44" height="44" viewBox="0 0 44 44" class="pos-icon">
             <defs>
               <radialGradient id="posGlow" cx="50%" cy="50%" r="50%">
                 <stop offset="0%" stop-color="#4285f4" stop-opacity="0.3"/>
@@ -351,22 +449,28 @@ const MapView: React.FC<MapViewProps> = ({
             <circle cx="22" cy="18" r="3.5" fill="#ffffff" opacity="0.95"/>
             <path d="M15.5 28.5c0-3.6 2.9-6.5 6.5-6.5s6.5 2.9 6.5 6.5" fill="#ffffff" opacity="0.95" stroke="none"/>
             <circle cx="22" cy="22" r="11" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.8"/>
-          </svg>`,
+          </svg>`;
+      const personIcon = L.divIcon({
+        className: 'current-pos-marker',
+        html: `<div class="pos-pulse-ring"></div>
+          <div class="pos-pulse-ring pos-pulse-ring-2"></div>
+          ${avatarInner}`,
         iconSize: [44, 44],
         iconAnchor: [22, 22],
       });
 
+      // Non-interactive: no click handlers wired and no coord tooltip. The
+      // blue person marker is pure UI — clicks should pass through to the
+      // map / markers beneath it (bookmark pins etc.), and the coordinate
+      // readout already lives in the bottom status bar.
       const marker = L.marker(latlng, {
         icon: personIcon,
         zIndexOffset: 1000,
+        interactive: false,
       }).addTo(map);
 
-      marker.bindTooltip(
-        `${currentPosition.lat.toFixed(6)}, ${currentPosition.lng.toFixed(6)}`,
-        { direction: 'top', offset: [0, -20] }
-      );
-
       currentMarkerRef.current = marker as any;
+      lastAvatarHtmlRef.current = currentAvatar;
     }
 
     // Only auto-center on first position or teleport (large jump > 500m)
@@ -382,7 +486,7 @@ const MapView: React.FC<MapViewProps> = ({
       }
     }
     prevPositionRef.current = currentPosition;
-  }, [currentPosition, dualMode]);
+  }, [currentPosition, dualMode, userAvatarHtml]);
 
   // Update destination marker
   const destSigRef = useRef<string | null>(null);
@@ -456,43 +560,237 @@ const MapView: React.FC<MapViewProps> = ({
     waypointMarkersRef.current = [];
 
     waypoints.forEach((wp) => {
-      // index 0 is the implicit start point; show it as "S" in green so the
-      // map matches the side panel ("起點 / Start"), and number the rest 1..N.
+      // index 0 is the implicit start point; S + green, numbered + orange.
+      // Design: subway-station style — thick ring + short stem + ground
+      // shadow. Chosen by user (from route-marker-designs.html, pick 07).
       const isStart = wp.index === 0;
       const label = isStart ? 'S' : String(wp.index);
-      const fillTop = isStart ? '#66bb6a' : '#ffb74d';
-      const fillBot = isStart ? '#43a047' : '#ff9800';
-      const textFill = isStart ? '#1b5e20' : '#e65100';
+      const ringColor = isStart ? '#43a047' : '#ff9800';
+      const ringGlow  = isStart ? 'rgba(67,160,71,0.32)' : 'rgba(255,152,0,0.3)';
+      const textColor = isStart ? '#1b5e20' : '#e65100';
+      const stemStart = isStart ? '#43a047' : '#ff9800';
+      const stemEnd   = isStart ? 'rgba(67,160,71,0)' : 'rgba(255,152,0,0)';
       const wpIcon = L.divIcon({
         className: 'waypoint-marker',
-        html: `<svg width="32" height="44" viewBox="0 0 32 44">
-          <defs>
-            <filter id="wpShadow${wp.index}" x="-20%" y="-10%" width="140%" height="130%">
-              <feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#000" flood-opacity="0.35"/>
-            </filter>
-            <linearGradient id="wpGrad${wp.index}" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="${fillTop}"/>
-              <stop offset="100%" stop-color="${fillBot}"/>
-            </linearGradient>
-          </defs>
-          <ellipse cx="16" cy="41" rx="5" ry="1.8" fill="#000" opacity="0.15"/>
-          <path d="M16 2C8.8 2 3 7.8 3 15c0 10 13 26 13 26s13-16 13-26C29 7.8 23.2 2 16 2z"
-                fill="url(#wpGrad${wp.index})" filter="url(#wpShadow${wp.index})"/>
-          <circle cx="16" cy="15" r="8" fill="#ffffff" opacity="0.95"/>
-          <text x="16" y="19" text-anchor="middle" fill="${textFill}" font-size="12" font-weight="700" font-family="system-ui">${label}</text>
-        </svg>`,
-        iconSize: [32, 44],
-        iconAnchor: [16, 41],
+        html: `<div style="
+          position:relative;width:100%;height:100%;
+          display:flex;flex-direction:column;align-items:center;justify-content:flex-end;
+          pointer-events:none;">
+          <div style="
+            width:28px;height:28px;border-radius:50%;
+            border:4px solid ${ringColor};background:#fff;
+            display:flex;align-items:center;justify-content:center;
+            color:${textColor};font-weight:800;font-size:13px;
+            font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+            box-shadow:0 0 0 2px ${ringGlow}, 0 3px 8px rgba(0,0,0,0.4);
+            pointer-events:auto;cursor:pointer;
+          ">${label}</div>
+          <div style="
+            width:2px;height:10px;margin-top:-1px;
+            background:linear-gradient(180deg, ${stemStart}, ${stemEnd});
+          "></div>
+          <div style="
+            width:12px;height:3px;margin-top:-1px;
+            background:rgba(0,0,0,0.5);border-radius:50%;filter:blur(1px);
+          "></div>
+        </div>`,
+        iconSize: [40, 46],
+        // Anchor = bottom-center of the ground shadow = exact (lat, lng).
+        iconAnchor: [20, 46],
       });
 
       const marker = L.marker([wp.lat, wp.lng], { icon: wpIcon }).addTo(map);
       marker.bindTooltip(
         isStart ? tRef.current('panel.waypoint_start') : tRef.current('panel.waypoint_num', { n: wp.index }),
-        { direction: 'top', offset: [0, -14] },
+        { direction: 'top', offset: [0, -28] },
       );
       waypointMarkersRef.current.push(marker);
     });
   }, [waypoints]);
+
+  // Render/clear small bookmark pins on the map when the user toggles
+  // 'show all bookmarks on map'. Each pin is clickable and teleports to
+  // that bookmark's position.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    bookmarkMarkersRef.current.forEach((m) => m.remove());
+    bookmarkMarkersRef.current = [];
+    if (!showBookmarkPins || !bookmarkPins || bookmarkPins.length === 0) return;
+
+    // Cluster bookmarks that fall within ~40 px of each other at the current
+    // zoom. One teardrop pin represents the group; clicking a cluster opens a
+    // popup list the user can tap to choose which exact bookmark to jump to.
+    // This stops a dozen pins stacking into what looks like a single dot when
+    // the user zooms out to see all of Taiwan.
+    const rebuild = () => {
+      bookmarkMarkersRef.current.forEach((m) => m.remove());
+      bookmarkMarkersRef.current = [];
+      const clusters: Array<{ x: number; y: number; members: typeof bookmarkPins }> = [];
+      const THRESHOLD_PX = 40;
+      for (const bm of bookmarkPins!) {
+        const pt = map.latLngToLayerPoint([bm.lat, bm.lng]);
+        let matched = false;
+        for (const c of clusters) {
+          const dx = c.x - pt.x, dy = c.y - pt.y;
+          if (dx * dx + dy * dy <= THRESHOLD_PX * THRESHOLD_PX) {
+            c.members.push(bm);
+            // Update cluster centre as running average (cheap approximation).
+            c.x = (c.x * (c.members.length - 1) + pt.x) / c.members.length;
+            c.y = (c.y * (c.members.length - 1) + pt.y) / c.members.length;
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) {
+          clusters.push({ x: pt.x, y: pt.y, members: [bm] });
+        }
+      }
+
+      clusters.forEach((c) => {
+        if (c.members.length === 1) {
+          const bm = c.members[0];
+          const flagHtml = bm.country_code
+            ? `<img src="https://flagcdn.com/w20/${bm.country_code}.png" style="width:18px;height:12px;border-radius:2px;flex-shrink:0;display:inline-block;vertical-align:middle;" alt="" />`
+            : '';
+          // Design 5 — Neon glass bubble. Frosted capsule with purple glow,
+          // flag + name inside, tiny pointing nub underneath pinning the
+          // coordinate. Max width 180px, name truncates with ellipsis.
+          const icon = L.divIcon({
+            className: 'bookmark-pin',
+            // Outer div fills the Leaflet divIcon container, flex column
+            // bottom-center so the glowing dot at the bottom sits exactly
+            // on the (lat, lng) coordinate (matches iconAnchor below).
+            html: `<div style="width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;pointer-events:none;">
+              <div style="
+                padding:5px 12px 5px 6px;
+                border-radius:100px;
+                background:linear-gradient(135deg, rgba(255,255,255,0.88), rgba(255,255,255,0.68));
+                color:#0e0f10;
+                font-size:12px;font-weight:600;line-height:1.2;
+                box-shadow:
+                  0 0 0 1px rgba(99,102,241,0.45),
+                  0 0 14px rgba(99,102,241,0.4),
+                  0 3px 8px rgba(0,0,0,0.15);
+                display:inline-flex;align-items:center;gap:6px;
+                max-width:180px;white-space:nowrap;overflow:hidden;
+                backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+                pointer-events:auto;cursor:pointer;
+              ">${flagHtml}<span style="overflow:hidden;text-overflow:ellipsis;max-width:140px;">${escapeHtml(bm.name)}</span></div>
+              <div style="
+                width:10px;height:10px;margin-top:-5px;
+                background:linear-gradient(135deg, rgba(255,255,255,0.88), rgba(255,255,255,0.68));
+                transform:rotate(45deg);
+                box-shadow:2px 2px 6px rgba(99,102,241,0.3);
+                border-right:1px solid rgba(99,102,241,0.45);
+                border-bottom:1px solid rgba(99,102,241,0.45);
+              "></div>
+              <div style="width:5px;height:5px;border-radius:50%;background:rgba(99,102,241,0.7);margin-top:-3px;box-shadow:0 0 8px rgba(99,102,241,0.9);"></div>
+            </div>`,
+            iconSize: [200, 56],
+            // Anchor = bottom-center of the icon = the glowing dot = exact
+            // (lat, lng) coordinate. Previously the flex-inline column was
+            // sitting at top-left so the whole pin rendered above-left of
+            // the real point.
+            iconAnchor: [100, 56],
+          });
+          const marker = L.marker([bm.lat, bm.lng], {
+            icon,
+            pane: 'markerPane',
+            // Sit above the blue person marker (zIndexOffset 1000) so the
+            // pin stays clickable when the user is standing on it.
+            zIndexOffset: 2000,
+          });
+          marker.on('click', () => onTeleport(bm.lat, bm.lng));
+          marker.addTo(map);
+          bookmarkMarkersRef.current.push(marker);
+        } else {
+          // Design 4 — Polaroid stack cluster. Three overlapping mini cards
+          // with rotation, top one shows the count. Click = open list popup.
+          const count = c.members.length;
+          const icon = L.divIcon({
+            className: 'bookmark-cluster-pin',
+            html: `<div style="position:relative;width:52px;height:46px;pointer-events:none;">
+              <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-8deg) translate(-4px, 3px);width:38px;height:32px;background:#fff;border:1px solid #c8ccd4;box-shadow:0 2px 6px rgba(0,0,0,0.3);"></div>
+              <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(6deg) translate(4px, -2px);width:38px;height:32px;background:#fff;border:1px solid #c8ccd4;box-shadow:0 2px 6px rgba(0,0,0,0.3);"></div>
+              <div style="
+                position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+                width:38px;height:32px;background:#fff;border:1px solid #c8ccd4;
+                box-shadow:0 2px 8px rgba(0,0,0,0.35);
+                display:flex;align-items:center;justify-content:center;
+                font-weight:700;font-size:15px;color:#2d3748;
+                pointer-events:auto;cursor:pointer;
+              ">${count}</div>
+              <div style="
+                position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) translate(0, -14px);
+                width:14px;height:3px;background:rgba(253,216,53,0.85);border-radius:1px;
+                box-shadow:0 1px 2px rgba(0,0,0,0.2);
+                z-index:3;
+              "></div>
+            </div>`,
+            iconSize: [52, 46],
+            iconAnchor: [26, 23],
+          });
+          const clusterLat = c.members.reduce((s, m) => s + m.lat, 0) / count;
+          const clusterLng = c.members.reduce((s, m) => s + m.lng, 0) / count;
+          const marker = L.marker([clusterLat, clusterLng], {
+            icon,
+            pane: 'markerPane',
+            // Above blue person so the cluster card is always clickable.
+            zIndexOffset: 2000,
+          });
+          // Click on a cluster opens a popup with a clickable list so the
+          // user can pick which specific bookmark to teleport to. Solves the
+          // 'zoom out to see whole country, markers overlap into one dot'
+          // usability issue.
+          const listHtml = c.members.map((bm) => {
+            const flag = bm.country_code
+              ? `<img src="https://flagcdn.com/w20/${bm.country_code}.png" style="width:14px;height:10px;border-radius:1px;vertical-align:middle;margin-right:6px;" />`
+              : '';
+            return `<div
+              class="bm-cluster-row"
+              data-lat="${bm.lat}" data-lng="${bm.lng}"
+              style="display:flex;align-items:center;gap:4px;padding:6px 8px;cursor:pointer;border-radius:4px;color:#e8e8ea;font-size:12px;transition:background 0.1s;"
+              onmouseenter="this.style.background='rgba(255,255,255,0.08)'"
+              onmouseleave="this.style.background='transparent'"
+            >${flag}<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(bm.name)}</span></div>`;
+          }).join('');
+          const popup = L.popup({
+            className: 'bookmark-cluster-popup',
+            maxWidth: 240,
+            offset: [0, -12],
+          }).setContent(`
+            <div style="background:rgba(26,29,39,0.96);backdrop-filter:blur(12px);border:1px solid rgba(108,140,255,0.25);border-radius:8px;padding:6px;min-width:180px;max-height:280px;overflow-y:auto;">
+              <div style="padding:4px 8px;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#9ac0ff;">${count} ${escapeHtml(count === 1 ? 'bookmark' : 'bookmarks')}</div>
+              ${listHtml}
+            </div>
+          `);
+          marker.bindPopup(popup);
+          marker.on('popupopen', () => {
+            document.querySelectorAll('.bm-cluster-row').forEach((el) => {
+              el.addEventListener('click', () => {
+                const lat = parseFloat((el as HTMLElement).dataset.lat || '');
+                const lng = parseFloat((el as HTMLElement).dataset.lng || '');
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                  map.closePopup();
+                  onTeleport(lat, lng);
+                }
+              });
+            });
+          });
+          marker.addTo(map);
+          bookmarkMarkersRef.current.push(marker);
+        }
+      });
+    };
+    rebuild();
+
+    // Rebuild clusters when the zoom level changes — what's 'overlapping'
+    // at world-scale is not overlapping at street-scale.
+    const onZoom = () => rebuild();
+    map.on('zoomend', onZoom);
+    return () => { map.off('zoomend', onZoom); };
+  }, [bookmarkPins, showBookmarkPins, onTeleport]);
 
   // Update route polyline
   useEffect(() => {
@@ -503,17 +801,36 @@ const MapView: React.FC<MapViewProps> = ({
       polylineRef.current.remove();
       polylineRef.current = null;
     }
+    if (polylineArrowRef.current) {
+      polylineArrowRef.current.remove();
+      polylineArrowRef.current = null;
+    }
 
     if (dualMode) return;
 
     if (routePath.length > 1) {
       const latlngs: L.LatLngExpression[] = routePath.map((p) => [p.lat, p.lng]);
-      const polyline = L.polyline(latlngs, {
-        color: '#4285f4',
-        weight: 4,
-        opacity: 0.85,
+      // Design 6 (chosen): flowing arrows. Base solid line + animated white
+      // dash overlay that flows from start to end so the user can tell the
+      // travel direction at a glance.
+      const base = L.polyline(latlngs, {
+        color: '#3a66c5',
+        weight: 7,
+        opacity: 0.9,
+        lineCap: 'round',
+        lineJoin: 'round',
       }).addTo(map);
-      polylineRef.current = polyline;
+      polylineRef.current = base;
+
+      const arrows = L.polyline(latlngs, {
+        color: '#ffffff',
+        weight: 3,
+        opacity: 0.95,
+        dashArray: '2 38',
+        lineCap: 'round',
+        className: 'route-flow-dash',
+      }).addTo(map);
+      polylineArrowRef.current = arrows;
     }
   }, [routePath, dualMode]);
 
@@ -734,6 +1051,25 @@ const MapView: React.FC<MapViewProps> = ({
     });
   }, [currentPosition]);
 
+  // Keep the DOM recenter button's handler + disabled state in sync with
+  // React state without re-creating the button on every render.
+  useEffect(() => {
+    recenterHandlerRef.current = recenter;
+    const btn = recenterBtnRef.current;
+    if (!btn) return;
+    btn.disabled = !currentPosition;
+    btn.style.background = currentPosition ? '#6c8cff' : 'var(--bg-surface, #2a2f3a)';
+    btn.style.cursor = currentPosition ? 'pointer' : 'not-allowed';
+    btn.style.opacity = currentPosition ? '1' : '0.55';
+  }, [recenter, currentPosition]);
+
+  // Track the last avatar HTML we painted so the position-update effect
+  // below can detect "avatar changed, need to rebuild marker even though
+  // the position didn't change". Without this the new avatar only shows
+  // up after the next teleport.
+  const lastAvatarHtmlRef = useRef<string>('');
+
+
   // Coordinate-input overlay (replaces the sidebar's two-field coord input).
   // Accepts any of: "25.04, 121.51", "25.04,121.51", or "25.04 121.51".
   const [coordInput, setCoordInput] = useState('');
@@ -759,40 +1095,6 @@ const MapView: React.FC<MapViewProps> = ({
   return (
     <div className="map-container" style={{ position: 'relative', flex: 1 }}>
       <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
-
-      {/* Recenter on user position — left side, below the zoom control. */}
-      <button
-        onClick={recenter}
-        disabled={!currentPosition}
-        title={t('map.recenter')}
-        style={{
-          position: 'absolute',
-          left: 10,
-          top: 132,  // just below the (shifted-down) zoom control
-          zIndex: 800,
-          width: 30,
-          height: 30,
-          borderRadius: 4,
-          border: '1px solid rgba(0,0,0,0.25)',
-          background: currentPosition ? '#6c8cff' : '#3a4050',
-          color: '#fff',
-          cursor: currentPosition ? 'pointer' : 'not-allowed',
-          boxShadow: '0 2px 6px rgba(0,0,0,0.35)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: 0,
-          opacity: currentPosition ? 1 : 0.55,
-        }}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="3" />
-          <line x1="12" y1="2" x2="12" y2="5" />
-          <line x1="12" y1="19" x2="12" y2="22" />
-          <line x1="2" y1="12" x2="5" y2="12" />
-          <line x1="19" y1="12" x2="22" y2="12" />
-        </svg>
-      </button>
 
       {/* Coord input overlay — bottom-left, above the map's status footer.
           Takes a single "lat, lng" string; Enter or the teleport button goes.
@@ -869,11 +1171,18 @@ const MapView: React.FC<MapViewProps> = ({
 
       {contextMenu.visible && (
         <div
+          ref={contextMenuElRef}
           className="context-menu anim-scale-in-tl"
           style={{
             position: 'fixed',
-            left: contextMenu.x,
-            top: contextMenu.y,
+            // First paint renders at the click point but invisible; the
+            // layout-effect below measures the actual rendered size and
+            // clamps left/top into the viewport, then flips visibility on.
+            // Because the layout effect runs synchronously before the
+            // browser paints, the user never sees the unclamped position.
+            left: contextMenuPos ? contextMenuPos.left : contextMenu.x,
+            top: contextMenuPos ? contextMenuPos.top : contextMenu.y,
+            visibility: contextMenuPos ? 'visible' : 'hidden',
             zIndex: 1000,
             background: 'rgba(26, 29, 39, 0.95)',
             backdropFilter: 'blur(10px)',
@@ -883,6 +1192,9 @@ const MapView: React.FC<MapViewProps> = ({
             padding: '4px 0',
             boxShadow: '0 10px 32px rgba(12, 18, 40, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04) inset',
             minWidth: 180,
+            maxWidth: 'calc(100vw - 16px)',
+            maxHeight: 'calc(100vh - 16px)',
+            overflow: 'auto',
           }}
           onClick={(e) => e.stopPropagation()}
         >

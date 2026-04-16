@@ -6,6 +6,8 @@ import { useDevice } from './hooks/useDevice'
 import { useSimulation } from './hooks/useSimulation'
 import { useJoystick } from './hooks/useJoystick'
 import { useBookmarks } from './hooks/useBookmarks'
+import UserAvatarPicker from './components/UserAvatarPicker'
+import { UserAvatar, avatarToHtml, loadAvatar, saveAvatar, loadCustomPng, saveCustomPng } from './userAvatars'
 import * as api from './services/api'
 
 import MapView from './components/MapView'
@@ -66,12 +68,41 @@ const App: React.FC = () => {
   const [cooldownEnabled, setCooldownEnabled] = useState(false)
   const [randomWalkRadius, setRandomWalkRadius] = useState(500)
   const [clickToAddWaypoint, setClickToAddWaypoint] = useState(false)
+  const [showBookmarkPins, setShowBookmarkPinsRaw] = useState<boolean>(() => {
+    try { return localStorage.getItem('locwarp.show_bookmark_pins') === '1' } catch { return false }
+  })
+  const setShowBookmarkPins = (v: boolean) => {
+    setShowBookmarkPinsRaw(v)
+    try { localStorage.setItem('locwarp.show_bookmark_pins', v ? '1' : '0') } catch { /* ignore */ }
+  }
   const [toastMsg, setToastMsg] = useState<string | null>(null)
+  // Active avatar selection + persistent custom-PNG slot. Stored in two
+  // separate localStorage keys so picking a preset doesn't drop the user's
+  // uploaded image.
+  const [userAvatar, setUserAvatar] = useState<UserAvatar>(() => loadAvatar())
+  const [customPng, setCustomPng] = useState<string | null>(() => loadCustomPng())
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
+  const handleAvatarSave = useCallback((next: UserAvatar, nextCustom: string | null) => {
+    setUserAvatar(next)
+    saveAvatar(next)
+    setCustomPng(nextCustom)
+    saveCustomPng(nextCustom)
+  }, [])
   // Reverse-geo-derived state used by the status bar: country-code flag and
   // (later) timezone tag. Populated debounced from sim.currentPosition so we
   // don't hit Nominatim/Photon every position_update tick.
-  const [locMeta, setLocMeta] = useState<{ countryCode: string; timezoneZone: string | null; gmtOffsetSeconds: number | null }>({
+  const [locMeta, setLocMeta] = useState<{
+    countryCode: string;
+    timezoneZone: string | null;
+    gmtOffsetSeconds: number | null;
+    // Weather at the current virtual location. Fetched from Open-Meteo when
+    // the position moves >=100m and the sim is quiescent (same gate as
+    // reverse-geocode + timezone). Null = unknown / not yet fetched.
+    weatherCode: number | null;
+    tempC: number | null;
+  }>({
     countryCode: '', timezoneZone: null, gmtOffsetSeconds: null,
+    weatherCode: null, tempC: null,
   })
   // Most recently announced timezone diff so we only toast once per zone
   // change, not on every redundant lookup.
@@ -187,6 +218,7 @@ const App: React.FC = () => {
     api.getSavedRoutes().then(setSavedRoutes).catch(() => {})
   }, [])
 
+
   // Reverse-geocode + timezone lookup, tied to the current virtual location
   // but GATED so it only fires on discrete user-initiated moves (teleport,
   // bookmark tap, manual coord entry). During active navigate / loop /
@@ -249,6 +281,13 @@ const App: React.FC = () => {
           } catch { /* keep IANA id */ }
           showToast(t('toast.timezone_diff').replace('{zone}', zoneLabel).replace('{hours}', String(diffH)).replace('{time}', `${hh}:${mm}`))
         }
+      } catch { /* ignore */ }
+      try {
+        const wx = await api.lookupWeather(pos.lat, pos.lng)
+        if (cancelled || !wx) return
+        setLocMeta((prev) => prev.weatherCode === wx.code && prev.tempC === wx.tempC
+          ? prev
+          : { ...prev, weatherCode: wx.code, tempC: wx.tempC })
       } catch { /* ignore */ }
     }, 600)
     return () => { cancelled = true; clearTimeout(tid) }
@@ -333,7 +372,10 @@ const App: React.FC = () => {
     }
   }, [sim, device, t, showToast])
 
-  const [addBmDialog, setAddBmDialog] = useState<{ lat: number; lng: number; name: string; category: string } | null>(null)
+  const [addBmDialog, setAddBmDialog] = useState<{
+    lat: number; lng: number; name: string; category: string;
+    countryCode?: string; nameResolving?: boolean;
+  } | null>(null)
 
   const handleAddBookmark = useCallback((lat: number, lng: number) => {
     setAddBmDialog({
@@ -341,8 +383,38 @@ const App: React.FC = () => {
       lng,
       name: '',
       category: bm.categories[0]?.name || t('bm.default'),
+      nameResolving: true,
     })
-  }, [bm.categories])
+    // Reverse-geocode asynchronously to pre-fill the name + remember country.
+    // User can still overwrite the suggestion. If the call fails we just leave
+    // the field blank as before.
+    ;(async () => {
+      try {
+        const geo = await api.reverseGeocode(lat, lng)
+        if (!geo) {
+          setAddBmDialog((prev) => prev ? { ...prev, nameResolving: false } : prev)
+          return
+        }
+        const cc = String(geo.country_code ?? '').toLowerCase()
+        // Backend now returns a clean `short_name` picked from POI / road /
+        // area tags (ignoring noisy house-number leading segments like "6").
+        // Fall back to first display_name segment only if short_name absent.
+        const short = String(geo.short_name || '').trim()
+          || String(geo.display_name || '').split(',')[0]?.trim()
+          || ''
+        setAddBmDialog((prev) => {
+          if (!prev) return prev
+          // Don't overwrite anything the user already typed.
+          if (prev.name && prev.name.length > 0) {
+            return { ...prev, countryCode: cc, nameResolving: false }
+          }
+          return { ...prev, name: short, countryCode: cc, nameResolving: false }
+        })
+      } catch {
+        setAddBmDialog((prev) => prev ? { ...prev, nameResolving: false } : prev)
+      }
+    })()
+  }, [bm.categories, t])
 
   const submitAddBookmark = useCallback(() => {
     if (!addBmDialog || !addBmDialog.name.trim()) return
@@ -352,7 +424,8 @@ const App: React.FC = () => {
       lat: addBmDialog.lat,
       lng: addBmDialog.lng,
       category_id: cat?.id || 'default',
-    })
+      country_code: addBmDialog.countryCode || '',
+    } as any)
     setAddBmDialog(null)
   }, [addBmDialog, bm])
 
@@ -686,18 +759,43 @@ const App: React.FC = () => {
           waypointProgress={sim.waypointProgress}
           onTeleport={handleTeleport}
           onNavigate={handleNavigate}
-          bookmarks={bm.bookmarks.map(b => ({
+          bookmarks={bm.bookmarks.map((b: any) => ({
             id: b.id,
             name: b.name,
             lat: b.lat,
             lng: b.lng,
             category: bm.categories.find(c => c.id === b.category_id)?.name || t('bm.default'),
+            country_code: b.country_code || '',
+            created_at: b.created_at || '',
+            last_used_at: b.last_used_at || '',
           }))}
           bookmarkCategories={bm.categories.map(c => c.name)}
+          bookmarkCategoryColors={Object.fromEntries(bm.categories.map(c => [c.name, c.color || '']))}
           onBookmarkClick={(b: any) => handleTeleport(b.lat, b.lng)}
           onBookmarkAdd={(b: any) => {
             const cat = bm.categories.find(c => c.name === b.category)
-            bm.createBookmark({ name: b.name, lat: b.lat, lng: b.lng, category_id: cat?.id || 'default' })
+            // Reverse-geocode first so custom-coordinate bookmarks also get a
+            // country flag. If lookup fails or takes too long, save without
+            // one so the user isn't blocked.
+            ;(async () => {
+              let cc = ''
+              try {
+                const geo = await Promise.race([
+                  api.reverseGeocode(b.lat, b.lng),
+                  new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+                ])
+                if (geo && (geo as any).country_code) {
+                  cc = String((geo as any).country_code).toLowerCase()
+                }
+              } catch { /* ignore */ }
+              bm.createBookmark({
+                name: b.name,
+                lat: b.lat,
+                lng: b.lng,
+                category_id: cat?.id || 'default',
+                country_code: cc,
+              } as any)
+            })()
           }}
           onBookmarkDelete={(id: string) => bm.deleteBookmark(id)}
           onBookmarkEdit={(id: string, data: any) => {
@@ -705,9 +803,15 @@ const App: React.FC = () => {
             // Backend PUT /api/bookmarks requires the full Bookmark schema with
             // category_id (not category name), so merge the patch onto the
             // original and translate category name -> id before sending.
+            //
+            // If orig is missing (bm.bookmarks briefly out of sync with a
+            // background refresh), fall back to the patch data — the edit
+            // dialog supplies a full bookmark via spread so we still have the
+            // fields we need. This prevents the silent-noop save the user saw
+            // after running Fix Flags.
             const orig = bm.bookmarks.find(b => b.id === id)
-            if (!orig) return
-            const patch: any = { ...orig }
+            const base: any = orig ? { ...orig } : { ...data, id }
+            const patch: any = base
             if (data.name != null) patch.name = data.name
             if (data.lat != null) patch.lat = data.lat
             if (data.lng != null) patch.lng = data.lng
@@ -715,9 +819,49 @@ const App: React.FC = () => {
               const cat = bm.categories.find(c => c.name === data.category)
               if (cat) patch.category_id = cat.id
             }
+            // Flag-backfill-on-save: trigger reverse-geocode whenever we'd
+            // benefit from a fresh country_code — i.e. coords moved (stale),
+            // OR the bookmark never had a flag to begin with (legacy entry
+            // from before the feature shipped). Runs in the background so
+            // the save itself feels instant.
+            const refLat = orig ? orig.lat : base.lat
+            const refLng = orig ? orig.lng : base.lng
+            const coordsChanged =
+              (data.lat != null && data.lat !== refLat) ||
+              (data.lng != null && data.lng !== refLng)
+            const flagMissing = !base.country_code
+            const needsGeocode = coordsChanged || flagMissing
+            if (coordsChanged) {
+              // Coordinates moved — clear the stale flag so UI doesn't show
+              // the wrong country while the async lookup is in flight.
+              patch.country_code = ''
+            }
+            if (needsGeocode) {
+              ;(async () => {
+                try {
+                  const geo = await Promise.race([
+                    api.reverseGeocode(patch.lat, patch.lng),
+                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+                  ])
+                  const cc = geo && (geo as any).country_code
+                    ? String((geo as any).country_code).toLowerCase()
+                    : ''
+                  if (cc) {
+                    await bm.updateBookmark(id, { ...patch, country_code: cc } as any)
+                  }
+                } catch { /* ignore */ }
+              })()
+            }
             bm.updateBookmark(id, patch)
           }}
-          onCategoryAdd={(name: string) => bm.createCategory({ name, color: '#6c8cff' })}
+          onCategoryAdd={(name: string) => {
+            // Pick a random preset color at creation so different categories
+            // start visually distinct; the color is persisted and stays put
+            // across rename (was previously hashed from name → jumped on rename).
+            const palette = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#6366f1', '#a855f7', '#ec4899', '#64748b']
+            const color = palette[Math.floor(Math.random() * palette.length)]
+            bm.createCategory({ name, color })
+          }}
           onCategoryDelete={(name: string) => {
             const cat = bm.categories.find(c => c.name === name)
             if (cat) bm.deleteCategory(cat.id)
@@ -731,6 +875,13 @@ const App: React.FC = () => {
             // Backend PUT requires the full BookmarkCategory shape, keep color.
             bm.updateCategory(cat.id, { ...cat, name: newName })
           }}
+          onCategoryRecolor={(name: string, color: string) => {
+            const cat = bm.categories.find(c => c.name === name)
+            if (!cat) return
+            bm.updateCategory(cat.id, { ...cat, color })
+          }}
+          bookmarkShowOnMap={showBookmarkPins}
+          onBookmarkShowOnMapChange={setShowBookmarkPins}
           onBookmarkImport={handleBookmarkImport}
           bookmarkExportUrl={api.bookmarksExportUrl()}
           savedRoutes={savedRoutes.map(r => ({ id: r.id, name: r.name, waypoints: r.waypoints ?? [] }))}
@@ -983,7 +1134,21 @@ const App: React.FC = () => {
           showWaypointOption={sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop || sim.mode === SimMode.Navigate}
           deviceConnected={device.connectedDevice !== null}
           onShowToast={showToast}
+          userAvatarHtml={avatarToHtml(userAvatar, customPng)}
+          bookmarkPins={bm.bookmarks.map((b: any) => ({
+            id: b.id, name: b.name, lat: b.lat, lng: b.lng, country_code: b.country_code || '',
+          }))}
+          showBookmarkPins={showBookmarkPins}
         />
+        {avatarPickerOpen && (
+          <UserAvatarPicker
+            avatar={userAvatar}
+            customPng={customPng}
+            onSave={handleAvatarSave}
+            onClose={() => setAvatarPickerOpen(false)}
+            onShowToast={showToast}
+          />
+        )}
         {sim.mode === SimMode.Joystick && (
           <JoystickPad
             direction={joystick.direction}
@@ -1009,19 +1174,42 @@ const App: React.FC = () => {
             <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 8 }}>
               {addBmDialog.lat.toFixed(5)}, {addBmDialog.lng.toFixed(5)}
             </div>
-            <input
-              type="text"
-              className="search-input"
-              placeholder={t('bm.name_placeholder')}
-              autoFocus
-              value={addBmDialog.name}
-              onChange={(e) => setAddBmDialog({ ...addBmDialog, name: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submitAddBookmark()
-                if (e.key === 'Escape') setAddBmDialog(null)
-              }}
-              style={{ width: '100%', marginBottom: 8 }}
-            />
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <input
+                type="text"
+                className="search-input"
+                placeholder={addBmDialog.nameResolving ? t('bm.name_resolving') : t('bm.name_placeholder')}
+                autoFocus
+                value={addBmDialog.name}
+                onChange={(e) => setAddBmDialog({ ...addBmDialog, name: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') submitAddBookmark()
+                  if (e.key === 'Escape') setAddBmDialog(null)
+                }}
+                style={{ width: '100%', paddingRight: addBmDialog.nameResolving ? 30 : 8 }}
+              />
+              {addBmDialog.nameResolving && (
+                <span style={{
+                  position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                  fontSize: 10, color: '#9ac0ff', fontFamily: 'monospace',
+                  animation: 'pulse 1.2s ease-in-out infinite',
+                }}>
+                  {t('bm.name_resolving_short')}
+                </span>
+              )}
+              {addBmDialog.countryCode && !addBmDialog.nameResolving && (
+                <img
+                  src={`https://flagcdn.com/w20/${addBmDialog.countryCode}.png`}
+                  alt={addBmDialog.countryCode.toUpperCase()}
+                  width={16}
+                  height={12}
+                  style={{
+                    position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                    borderRadius: 2, boxShadow: '0 0 0 1px rgba(255,255,255,0.15)',
+                  }}
+                />
+              )}
+            </div>
             <select
               value={addBmDialog.category}
               onChange={(e) => setAddBmDialog({ ...addBmDialog, category: e.target.value })}
@@ -1076,6 +1264,9 @@ const App: React.FC = () => {
           onOpenLog={handleOpenLog}
           dualDevice={device.connectedDevices.length >= 2}
           countryCode={locMeta.countryCode}
+          weatherCode={locMeta.weatherCode}
+          tempC={locMeta.tempC}
+          onOpenAvatarPicker={() => setAvatarPickerOpen((v) => !v)}
         />
 
         <UpdateChecker />

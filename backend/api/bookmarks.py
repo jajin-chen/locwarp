@@ -31,6 +31,7 @@ async def create_bookmark(bookmark: Bookmark):
         lng=bookmark.lng,
         address=bookmark.address,
         category_id=bookmark.category_id,
+        country_code=bookmark.country_code,
     )
 
 
@@ -44,6 +45,7 @@ async def update_bookmark(bookmark_id: str, bookmark: Bookmark):
         lng=bookmark.lng,
         address=bookmark.address,
         category_id=bookmark.category_id,
+        country_code=bookmark.country_code,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Bookmark not found")

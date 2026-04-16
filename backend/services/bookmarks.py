@@ -152,6 +152,7 @@ class BookmarkManager:
         lng: float,
         address: str = "",
         category_id: str = "default",
+        country_code: str = "",
     ) -> Bookmark:
         """Create a new bookmark."""
         # Validate category
@@ -168,6 +169,7 @@ class BookmarkManager:
             category_id=category_id,
             created_at=now,
             last_used_at=now,
+            country_code=country_code.lower(),
         )
         self.store.bookmarks.append(bm)
         self._save()
@@ -179,7 +181,7 @@ class BookmarkManager:
         if bm is None:
             return None
 
-        allowed = {"name", "lat", "lng", "address", "category_id", "last_used_at"}
+        allowed = {"name", "lat", "lng", "address", "category_id", "last_used_at", "country_code"}
         for key, value in kwargs.items():
             if key in allowed and value is not None:
                 setattr(bm, key, value)
