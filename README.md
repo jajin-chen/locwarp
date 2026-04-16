@@ -9,11 +9,11 @@
 
 <p align="center">
   <a href="https://ko-fi.com/haoooooo" target="_blank">
-    <img src="https://img.shields.io/badge/%E8%AB%8B%E6%88%91%E5%96%9D%E6%9D%AF%E5%92%96%E5%95%A1-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white&labelColor=F59E0B" alt="請我喝杯咖啡">
+    <img src="https://storage.ko-fi.com/cdn/kofi2.png?v=3" alt="Buy Me a Coffee at ko-fi.com" height="40">
   </a>
 </p>
 
-> 如果 LocWarp 有幫到你, 歡迎[請我喝杯咖啡](https://ko-fi.com/haoooooo)支持持續更新 ☕
+> 如果 LocWarp 有幫到你, 歡迎[請我喝杯咖啡](https://ko-fi.com/haoooooo)支持 ☕
 
 > ### 專案性質聲明
 >

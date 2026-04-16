@@ -9,11 +9,11 @@
 
 <p align="center">
   <a href="https://ko-fi.com/haoooooo" target="_blank">
-    <img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white&labelColor=F59E0B" alt="Buy me a coffee">
+    <img src="https://storage.ko-fi.com/cdn/kofi2.png?v=3" alt="Buy Me a Coffee at ko-fi.com" height="40">
   </a>
 </p>
 
-> If LocWarp has been useful to you, [buy me a coffee](https://ko-fi.com/haoooooo) to keep updates coming ☕
+> If LocWarp has been useful to you, [buy me a coffee](https://ko-fi.com/haoooooo) ☕
 
 > ### Project Nature
 >
