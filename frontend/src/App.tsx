@@ -53,7 +53,11 @@ const App: React.FC = () => {
   const t = useT()
   const ws = useWebSocket()
   const device = useDevice(ws.subscribe)
-  const sim = useSimulation(ws.subscribe)
+  // Pass primary-device udid into useSimulation so its legacy single-device
+  // setters only react to the primary's WS events in dual-device mode,
+  // stopping the map marker from ping-ponging between both devices'
+  // independently-jittered positions.
+  const sim = useSimulation(ws.subscribe, device.primaryDevice?.udid)
   const joystick = useJoystick(ws.sendMessage, sim.mode === SimMode.Joystick)
   const bm = useBookmarks()
 

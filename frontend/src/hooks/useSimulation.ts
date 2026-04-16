@@ -93,7 +93,14 @@ export function summarizeResults<T>(
   return { ok, failed }
 }
 
-export function useSimulation(subscribe?: WsSubscribe) {
+export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | null) {
+  // In dual-device mode every position_update carries a udid. Without a
+  // filter, the legacy single-device setters below run for BOTH devices
+  // and the global currentPosition ping-pongs between each device's
+  // independently jittered coordinate, making the marker look stuttery.
+  // Keep a ref so WS handler reads the latest primary synchronously.
+  const primaryUdidRef = useRef<string | null>(primaryUdid ?? null)
+  useEffect(() => { primaryUdidRef.current = primaryUdid ?? null }, [primaryUdid])
   const [mode, _setMode] = useState<SimMode>(SimMode.Teleport)
   const [moveMode, setMoveMode] = useState<MoveMode>(MoveMode.Walking)
   const [status, setStatus] = useState<SimulationStatus>({
@@ -235,6 +242,14 @@ export function useSimulation(subscribe?: WsSubscribe) {
           }
           break
       }
+    }
+    // Dual-device filter: when a primary is set, only let events tagged
+    // with the primary's udid update the global (single-device) state.
+    // Untagged events still flow through (used by legacy test paths).
+    const msgUdid: string | undefined = wsMessage.data?.udid
+    const primary = primaryUdidRef.current
+    if (primary && msgUdid && msgUdid !== primary) {
+      return
     }
     switch (wsMessage.type) {
       case 'position_update': {
