@@ -159,15 +159,16 @@ const MapView: React.FC<MapViewProps> = ({
     //                             upscaled-and-blurry placeholders
     //   keepBuffer=4            — keep 4 rows/cols of off-screen tiles cached
     //   crossOrigin=true        — enable HTTP cache reuse across layers
-    //   detectRetina=true       — on HiDPI / scaled displays, fetch one zoom
-    //                             higher and downscale so the base map is
-    //                             physically crisp, not pixel-doubled
+    //
+    // detectRetina intentionally NOT enabled: its "fetch zoom+1, display at
+    // half size" approach makes every label on the map physically smaller,
+    // which users reported as hard to read on HiDPI screens. Slightly
+    // softer raster is the lesser evil versus unreadable labels.
     const baseOpts = {
       updateWhenIdle: false,
       updateWhenZooming: true,
       keepBuffer: 4,
       crossOrigin: true,
-      detectRetina: true,
     } as const;
     // OSM Standard (Mapnik). Uses a/b/c subdomains to parallelise fetches.
     // electron/main.js rewrites the User-Agent for these hosts so tile.osm.org
