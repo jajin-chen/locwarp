@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useT } from './i18n'
 import { useWebSocket } from './hooks/useWebSocket'
@@ -67,6 +67,15 @@ const App: React.FC = () => {
   const [randomWalkRadius, setRandomWalkRadius] = useState(500)
   const [clickToAddWaypoint, setClickToAddWaypoint] = useState(false)
   const [toastMsg, setToastMsg] = useState<string | null>(null)
+  // Reverse-geo-derived state used by the status bar: country-code flag and
+  // (later) timezone tag. Populated debounced from sim.currentPosition so we
+  // don't hit Nominatim/Photon every position_update tick.
+  const [locMeta, setLocMeta] = useState<{ countryCode: string; timezoneZone: string | null; gmtOffsetSeconds: number | null }>({
+    countryCode: '', timezoneZone: null, gmtOffsetSeconds: null,
+  })
+  // Most recently announced timezone diff so we only toast once per zone
+  // change, not on every redundant lookup.
+  const lastToastedZoneRef = useRef<string>('')
 
   const showToast = useCallback((msg: string, ms = 2000) => {
     setToastMsg(msg)
@@ -173,6 +182,53 @@ const App: React.FC = () => {
   useEffect(() => {
     api.getSavedRoutes().then(setSavedRoutes).catch(() => {})
   }, [])
+
+  // Debounced reverse-geocode + timezone lookup tied to the current virtual
+  // location. Fires 600 ms after the position settles so walk-mode doesn't
+  // blast Nominatim/TimezoneDB with a request per tick.
+  useEffect(() => {
+    const pos = sim.currentPosition
+    if (!pos) return
+    let cancelled = false
+    const tid = setTimeout(async () => {
+      try {
+        const geo = await api.reverseGeocode(pos.lat, pos.lng)
+        if (cancelled) return
+        const cc = String(geo?.country_code ?? '').toLowerCase()
+        setLocMeta((prev) => prev.countryCode === cc ? prev : { ...prev, countryCode: cc })
+      } catch { /* offline / rate-limited — keep previous */ }
+      try {
+        const tz = await api.lookupTimezone(pos.lat, pos.lng)
+        if (cancelled || !tz) return
+        setLocMeta((prev) => ({ ...prev, timezoneZone: tz.zone, gmtOffsetSeconds: tz.gmt_offset_seconds }))
+        // Compare against the user's local timezone offset. JS's
+        // getTimezoneOffset returns minutes with INVERTED sign (UTC+8 → -480),
+        // so negate it and convert to seconds before comparing.
+        const localOffsetSec = -new Date().getTimezoneOffset() * 60
+        const diffSec = Math.abs(tz.gmt_offset_seconds - localOffsetSec)
+        if (diffSec >= 3600 && lastToastedZoneRef.current !== tz.zone) {
+          lastToastedZoneRef.current = tz.zone
+          const diffH = Math.round(diffSec / 3600)
+          // Show the destination's current wall time for context.
+          const destNow = new Date(tz.timestamp * 1000)
+          const hh = String(destNow.getUTCHours()).padStart(2, '0')
+          const mm = String(destNow.getUTCMinutes()).padStart(2, '0')
+          // Localize the zone name via Intl so 'America/New_York' becomes
+          // '北美東部夏令時間' for zh users / 'Eastern Daylight Time' for en.
+          // Fall back to the raw IANA id if the runtime can't resolve it.
+          let zoneLabel = tz.zone
+          try {
+            const lang = (typeof localStorage !== 'undefined' && localStorage.getItem('locwarp.lang') === 'en') ? 'en' : 'zh-TW'
+            const parts = new Intl.DateTimeFormat(lang, { timeZone: tz.zone, timeZoneName: 'long' }).formatToParts(destNow)
+            const named = parts.find((p) => p.type === 'timeZoneName')?.value
+            if (named) zoneLabel = named
+          } catch { /* keep IANA id */ }
+          showToast(t('toast.timezone_diff').replace('{zone}', zoneLabel).replace('{hours}', String(diffH)).replace('{time}', `${hh}:${mm}`))
+        }
+      } catch { /* ignore */ }
+    }, 600)
+    return () => { cancelled = true; clearTimeout(tid) }
+  }, [sim.currentPosition?.lat, sim.currentPosition?.lng])
 
   // Auto-scan devices when WebSocket (re)connects (e.g. after backend restart)
   useEffect(() => {
@@ -775,6 +831,28 @@ const App: React.FC = () => {
                     onClick={handleClearWaypoints}
                     disabled={sim.status?.running}
                   >{t('generic.clear')}</button>
+                  {sim.waypoints.length >= 3 && (
+                    <button
+                      className="action-btn"
+                      style={{ flex: 1 }}
+                      onClick={async () => {
+                        try {
+                          const res = await api.routeOptimize(
+                            sim.waypoints.map((w: any) => ({ lat: w.lat, lng: w.lng })),
+                            'foot', true,
+                          )
+                          if (res?.waypoints?.length) {
+                            sim.setWaypoints(res.waypoints)
+                            showToast(t('toast.route_optimized').replace('{min}', String(Math.round(res.total_duration_s / 60))))
+                          }
+                        } catch (err: any) {
+                          showToast(err?.message || t('toast.route_optimize_failed'))
+                        }
+                      }}
+                      disabled={sim.status?.running}
+                      title={t('panel.waypoints_optimize_tooltip')}
+                    >{t('panel.waypoints_optimize')}</button>
+                  )}
                 </div>
               )}
             </div>
@@ -973,6 +1051,7 @@ const App: React.FC = () => {
           onRestore={handleRestore}
           onOpenLog={handleOpenLog}
           dualDevice={device.connectedDevices.length >= 2}
+          countryCode={locMeta.countryCode}
         />
 
         <UpdateChecker />

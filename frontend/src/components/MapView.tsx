@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useT } from '../i18n';
+import { reverseGeocode } from '../services/api';
 import L from 'leaflet';
 
 interface Position {
@@ -115,8 +116,17 @@ const MapView: React.FC<MapViewProps> = ({
     lng: 0,
   });
 
+  // Reverse-geocode state for the context menu header row. Reset whenever
+  // the menu closes or the right-click target changes, so a stale address
+  // from a previous click never leaks into a new lookup.
+  const [reverseGeo, setReverseGeo] = useState<{
+    loading: boolean; address: string | null; error: string | null;
+    key: string; // lat|lng the result belongs to
+  }>({ loading: false, address: null, error: null, key: '' });
+
   const closeContextMenu = useCallback(() => {
     setContextMenu((prev) => ({ ...prev, visible: false }));
+    setReverseGeo({ loading: false, address: null, error: null, key: '' });
   }, []);
 
   // Initialize map
@@ -880,6 +890,7 @@ const MapView: React.FC<MapViewProps> = ({
                 Not clickable; shows the exact lat/lng of the right-click
                 target directly instead of making the user click through. */}
           <div
+            className="context-menu-item"
             style={{
               padding: '8px 16px 6px',
               color: '#9ac0ff',
@@ -887,17 +898,62 @@ const MapView: React.FC<MapViewProps> = ({
               fontFamily: 'monospace',
               display: 'flex',
               alignItems: 'center',
-              userSelect: 'text',
-              cursor: 'default',
+              cursor: 'pointer',
+              gap: 4,
             }}
-            onClick={(e) => e.stopPropagation()}
+            title={t('map.whats_here_tooltip')}
+            onMouseEnter={highlightItem}
+            onMouseLeave={unhighlightItem}
+            onClick={async (e) => {
+              e.stopPropagation();
+              const key = `${contextMenu.lat.toFixed(6)}|${contextMenu.lng.toFixed(6)}`;
+              if (reverseGeo.loading && reverseGeo.key === key) return;
+              if (reverseGeo.address && reverseGeo.key === key) return;
+              setReverseGeo({ loading: true, address: null, error: null, key });
+              try {
+                const res = await reverseGeocode(contextMenu.lat, contextMenu.lng);
+                const name = res?.display_name || res?.address || null;
+                if (name) {
+                  setReverseGeo({ loading: false, address: name, error: null, key });
+                } else {
+                  setReverseGeo({ loading: false, address: null, error: t('map.whats_here_empty'), key });
+                }
+              } catch (err: any) {
+                setReverseGeo({ loading: false, address: null, error: err?.message || 'error', key });
+              }
+            }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, opacity: 0.7 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 4, opacity: 0.8 }}>
               <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
               <circle cx="12" cy="10" r="3" />
             </svg>
-            {contextMenu.lat.toFixed(6)}, {contextMenu.lng.toFixed(6)}
+            <span style={{ flex: 1 }}>{contextMenu.lat.toFixed(6)}, {contextMenu.lng.toFixed(6)}</span>
+            <span style={{ fontSize: 10, opacity: 0.7, fontFamily: 'inherit' }}>
+              {reverseGeo.loading && reverseGeo.key === `${contextMenu.lat.toFixed(6)}|${contextMenu.lng.toFixed(6)}`
+                ? t('map.whats_here_loading')
+                : t('map.whats_here')}
+            </span>
           </div>
+          {/* Reverse-geocode result or error, shown only after the user taps
+              the header row. Wraps + selectable so the user can copy the
+              address. Max width is clipped by .context-menu parent. */}
+          {reverseGeo.key === `${contextMenu.lat.toFixed(6)}|${contextMenu.lng.toFixed(6)}` &&
+           (reverseGeo.address || reverseGeo.error) && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                padding: '2px 16px 8px',
+                color: reverseGeo.error ? '#ff8a80' : '#d0d0d0',
+                fontSize: 11.5,
+                lineHeight: 1.5,
+                userSelect: 'text',
+                cursor: 'text',
+                wordBreak: 'break-word',
+              }}
+            >
+              {reverseGeo.address ?? reverseGeo.error}
+            </div>
+          )}
           <div style={{ height: 1, background: '#444', margin: '2px 0 4px' }} />
 
           {/* 2 + 3. Teleport / Navigate (device-gated). */}
@@ -1021,6 +1077,7 @@ const MapView: React.FC<MapViewProps> = ({
               </div>
             </>
           )}
+
         </div>
       )}
     </div>

@@ -34,6 +34,7 @@ interface StatusBarProps {
   dualDevice?: boolean;
   runtimes?: RuntimesMap;
   devices?: DeviceInfo[];
+  countryCode?: string;  // ISO 3166-1 alpha-2 lowercase, for flag icon
 }
 
 function stateToMode(state: string): SimMode | null {
@@ -80,6 +81,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
   dualDevice = false,
   runtimes,
   devices,
+  countryCode = '',
 }) => {
   const t = useT();
   const [cooldownDisplay, setCooldownDisplay] = useState(cooldown);
@@ -211,11 +213,23 @@ const StatusBar: React.FC<StatusBarProps> = ({
       {!dualDevice && currentPosition && (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'monospace', fontSize: 11 }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5 }}>
-              <circle cx="12" cy="12" r="10" />
-              <line x1="2" y1="12" x2="22" y2="12" />
-              <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-            </svg>
+            {countryCode ? (
+              <img
+                src={`https://flagcdn.com/w40/${countryCode}.png`}
+                alt={countryCode.toUpperCase()}
+                title={countryCode.toUpperCase()}
+                width={18}
+                height={12}
+                style={{ borderRadius: 2, boxShadow: '0 0 0 1px rgba(255,255,255,0.15)' }}
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+              />
+            ) : (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5 }}>
+                <circle cx="12" cy="12" r="10" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+              </svg>
+            )}
             <span>{currentPosition.lat.toFixed(6)}, {currentPosition.lng.toFixed(6)}</span>
             <button
               onClick={() => {

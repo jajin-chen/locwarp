@@ -180,6 +180,13 @@ export const STRINGS = {
   'map.click_use_right': { zh: '請用右鍵「瞬移到這裡」', en: 'Right-click to "Teleport here"' },
   'map.device_disconnected': { zh: 'USB 已斷開,請重新插入', en: 'USB disconnected, please reconnect' },
   'map.teleport_here': { zh: '瞬移到這裡', en: 'Teleport here' },
+  'map.whats_here': { zh: '這是哪裡?', en: "What's here?" },
+  'map.whats_here_tooltip': { zh: '點擊查詢此座標的地址', en: 'Click to look up this address' },
+  'map.whats_here_loading': { zh: '查詢中...', en: 'Looking up…' },
+  'map.whats_here_empty': { zh: '找不到對應地址', en: 'No address found' },
+  'map.nearby_here': { zh: '附近有什麼?', en: "What's around here?" },
+  'map.nearby_title': { zh: '附近 POI · 點擊瞬移', en: 'Nearby POIs · click to teleport' },
+  'map.nearby_empty': { zh: '附近沒有已標註的 POI', en: 'No mapped POIs nearby' },
   'map.navigate_here': { zh: '導航到這裡', en: 'Navigate here' },
   'map.add_waypoint': { zh: '添加路徑點', en: 'Add waypoint' },
   'map.add_bookmark': { zh: '加入座標收藏', en: 'Add to bookmarks' },
@@ -259,6 +266,11 @@ export const STRINGS = {
 
   // ── Toasts extra ─────────────────────────────
   'toast.no_position_random': { zh: '尚未取得目前位置,無法產生隨機路徑點', en: 'No current position, cannot generate random waypoints' },
+  'toast.timezone_diff': { zh: '已進入 {zone} 時區(時差 {hours} 小時,當地 {time})', en: 'Now in {zone} (offset {hours}h, local {time})' },
+  'toast.route_optimized': { zh: '路線已最佳化(總時長約 {min} 分)', en: 'Route optimized ({min} min total)' },
+  'toast.route_optimize_failed': { zh: '路線最佳化失敗', en: 'Route optimize failed' },
+  'panel.waypoints_optimize': { zh: '最佳順序', en: 'Optimize' },
+  'panel.waypoints_optimize_tooltip': { zh: '用 OSRM Table 重新排序路徑點,最小化總移動時間', en: 'Reorder waypoints with OSRM Table to minimize total travel time' },
   'toast.no_waypoints': { zh: '尚未設定路徑點,請在地圖上右鍵添加或使用隨機產生', en: 'No waypoints set, right-click the map to add, or use Random generate' },
   'toast.pause_countdown': { zh: '到點暫停中 · 剩餘 {n}s', en: 'Paused at waypoint · {n}s left' },
 

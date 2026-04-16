@@ -205,3 +205,33 @@ class GeocodingResult(BaseModel):
     lng: float
     type: str = ""
     importance: float = 0.0
+    country_code: str = ""  # ISO 3166-1 alpha-2 (lowercase), for flag lookup
+
+
+class TimezoneInfo(BaseModel):
+    zone: str  # IANA zone, e.g. 'Asia/Taipei'
+    gmt_offset_seconds: int  # offset vs UTC in seconds (positive = east)
+    abbreviation: str = ""  # e.g. 'CST', 'EDT'
+    timestamp: int = 0  # unix timestamp at the zone's current wall time
+
+
+class NearbyPoi(BaseModel):
+    id: str
+    name: str
+    category: str  # 'amenity', 'shop', 'tourism', etc.
+    subcategory: str  # 'restaurant', 'cafe', ...
+    lat: float
+    lng: float
+    distance_m: float
+
+
+class RouteOptimizeRequest(BaseModel):
+    waypoints: list[Coordinate]
+    profile: str = "foot"  # 'foot' or 'car'
+    keep_first: bool = True  # first waypoint is the fixed start
+
+
+class RouteOptimizeResponse(BaseModel):
+    waypoints: list[Coordinate]
+    total_distance_m: float
+    total_duration_s: float

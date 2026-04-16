@@ -18,6 +18,7 @@ dist-py/
 build-py/
 frontend/release/
 frontend/release-tmp/
+frontend/release-tmp*/
 *.spec.bak
 
 # ── Runtime state ───────────────────────────────────

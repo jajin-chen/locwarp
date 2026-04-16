@@ -141,6 +141,14 @@ export const setCoordFormat = (format: string) =>
 export const searchAddress = (q: string) => request<any[]>('GET', `/api/geocode/search?q=${encodeURIComponent(q)}`)
 export const reverseGeocode = (lat: number, lng: number) =>
   request<any>('GET', `/api/geocode/reverse?lat=${lat}&lng=${lng}`)
+export const lookupTimezone = (lat: number, lng: number) =>
+  request<{ zone: string; gmt_offset_seconds: number; abbreviation: string; timestamp: number } | null>(
+    'GET', `/api/geocode/timezone?lat=${lat}&lng=${lng}`,
+  )
+export const routeOptimize = (waypoints: { lat: number; lng: number }[], profile = 'foot', keep_first = true) =>
+  request<{ waypoints: { lat: number; lng: number }[]; total_distance_m: number; total_duration_s: number }>(
+    'POST', '/api/geocode/route-optimize', { waypoints, profile, keep_first },
+  )
 
 // Bookmarks
 export const getBookmarks = () => request<any>('GET', '/api/bookmarks')

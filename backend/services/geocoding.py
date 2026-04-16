@@ -88,6 +88,7 @@ class GeocodingService:
             "lat": lat,
             "lon": lng,
             "format": "json",
+            "addressdetails": 1,  # needed so response includes address.country_code
         }
 
         logger.debug("Nominatim reverse: %.6f, %.6f", lat, lng)
@@ -106,12 +107,14 @@ class GeocodingService:
             return None
 
         try:
+            addr = data.get("address") or {}
             return GeocodingResult(
                 display_name=data.get("display_name", ""),
                 lat=float(data["lat"]),
                 lng=float(data["lon"]),
                 type=data.get("type", ""),
                 importance=float(data.get("importance", 0)),
+                country_code=(addr.get("country_code") or "").lower(),
             )
         except (KeyError, ValueError) as exc:
             logger.warning("Failed to parse reverse result: %s", exc)
