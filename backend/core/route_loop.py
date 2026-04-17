@@ -65,10 +65,25 @@ class RouteLooper:
         if len(coords) < 2:
             raise ValueError("OSRM returned an empty route for the loop")
 
+        # Resume support: when we're taking over a loop from a peer
+        # engine that just disconnected, jump straight to the segment
+        # they were on and inherit their lap count instead of starting
+        # the closed-loop traversal at coords[0] (which would teleport
+        # the iPhone back to waypoints[0]).
+        resume_snap = engine._resume_snapshot if engine._resume_snapshot and engine._resume_snapshot.get("kind") == "start_loop" else None
+        engine._resume_snapshot = None
+
         engine.state = SimulationState.LOOPING
-        engine.lap_count = 0
         engine.total_segments = len(coords) - 1
-        engine.segment_index = 0
+        if resume_snap:
+            engine.lap_count = int(resume_snap.get("lap_count", 0))
+            resume_seg = max(0, min(int(resume_snap.get("segment_index", 0)), len(coords) - 1))
+            resume_uwn = int(resume_snap.get("user_waypoint_next", 1))
+        else:
+            engine.lap_count = 0
+            resume_seg = 0
+            resume_uwn = 1 if len(waypoints) > 1 else 0
+        engine.segment_index = resume_seg
 
         await engine._emit("route_path", {
             "coords": [{"lat": c.lat, "lng": c.lng} for c in coords],
@@ -78,20 +93,27 @@ class RouteLooper:
             "waypoints": [{"lat": wp.lat, "lng": wp.lng} for wp in waypoints],
         })
 
-        logger.info("Starting route loop with %d waypoints [%s]", len(waypoints), profile_name)
+        logger.info("Starting route loop with %d waypoints [%s]%s",
+                    len(waypoints), profile_name,
+                    f" (resuming at segment {resume_seg}, lap {engine.lap_count})" if resume_snap else "")
 
+        first_iteration = True
         # Loop until stopped
         while not engine._stop_event.is_set():
             engine.distance_traveled = 0.0
             engine.distance_remaining = route_data["distance"]
-            engine.segment_index = 0
+            engine.segment_index = resume_seg if first_iteration else 0
 
             # Tell _move_along_route which user-facing waypoints to track for
             # waypoint_progress emission (we close the loop on the road but
             # the UI only shows the named waypoints the user entered).
             engine._user_waypoints = list(waypoints)
-            # Restart highlight from waypoint[1] each lap so UI re-pulses.
-            engine._user_waypoint_next = 1 if len(waypoints) > 1 else 0
+            # Restart highlight from waypoint[1] each lap so UI re-pulses,
+            # except on the first lap of a resume where we inherit the
+            # previous engine's progress.
+            engine._user_waypoint_next = (
+                resume_uwn if first_iteration else (1 if len(waypoints) > 1 else 0)
+            )
 
             # If the user has applied a speed mid-flight, honor it on
             # subsequent laps; otherwise re-pick speed each lap so a range
@@ -102,7 +124,23 @@ class RouteLooper:
                 speed_profile = resolve_speed_profile(
                     profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
                 )
-            await engine._move_along_route(coords, speed_profile)
+
+            # On the first iteration of a resume, splice the iPhone's
+            # actual current position onto the front of the remaining
+            # coords so _move_along_route's first emit lands on the
+            # device's existing GPS reading instead of teleporting it
+            # back to coords[resume_seg].
+            if first_iteration and resume_seg > 0:
+                cur = engine.current_position
+                tail = coords[resume_seg:]
+                if cur is not None:
+                    traversal = [Coordinate(lat=cur.lat, lng=cur.lng)] + tail
+                else:
+                    traversal = tail
+                await engine._move_along_route(traversal, speed_profile)
+            else:
+                await engine._move_along_route(coords, speed_profile)
+            first_iteration = False
 
             # Check if we were stopped during the route
             if engine._stop_event.is_set():

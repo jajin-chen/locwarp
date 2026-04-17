@@ -62,6 +62,14 @@ class RandomWalkHandler:
         profile_name = mode.value
         osrm_profile = "foot" if mode in (MovementMode.WALKING, MovementMode.RUNNING) else "car"
 
+        # Resume support: when this engine is taking over a random
+        # walk from a peer that just disconnected, advance the rng
+        # past the destinations the peer already consumed so the next
+        # pick continues their sequence instead of restarting from the
+        # very first destination.
+        resume_snap = engine._resume_snapshot if engine._resume_snapshot and engine._resume_snapshot.get("kind") == "random_walk" else None
+        engine._resume_snapshot = None
+
         engine.state = SimulationState.RANDOM_WALK
         engine.distance_traveled = 0.0
         engine.lap_count = 0
@@ -73,11 +81,13 @@ class RandomWalkHandler:
         })
 
         logger.info(
-            "Random walk started: center=(%.6f,%.6f), radius=%.0fm [%s]",
+            "Random walk started: center=(%.6f,%.6f), radius=%.0fm [%s]%s",
             center.lat, center.lng, radius_m, profile_name,
+            f" (resuming from walk_count={resume_snap.get('random_walk_count', 0)})" if resume_snap else "",
         )
 
-        walk_count = 0
+        walk_count = int(resume_snap.get("random_walk_count", 0)) if resume_snap else 0
+        engine._random_walk_count = walk_count
         consecutive_errors = 0
         max_consecutive_errors = 5
         # Connection errors get a much higher retry budget so the walk
@@ -89,6 +99,14 @@ class RandomWalkHandler:
         # the frontend and therefore pick the exact same sequence of
         # destinations. Unseeded → use the global random for a fresh walk.
         rng: random.Random | None = random.Random(seed) if seed is not None else None
+        # On resume, fast-forward the rng past the legs the peer already
+        # finished so the next destination matches what the peer would
+        # have picked next.
+        if resume_snap and rng is not None:
+            for _ in range(walk_count):
+                RouteInterpolator.random_point_in_radius(
+                    center.lat, center.lng, radius_m, rng=rng,
+                )
 
         while not engine._stop_event.is_set():
             # Pick a random destination within the radius
@@ -197,6 +215,7 @@ class RandomWalkHandler:
 
             walk_count += 1
             engine.lap_count = walk_count
+            engine._random_walk_count = walk_count
 
             await engine._emit("random_walk_arrived", {
                 "count": walk_count,

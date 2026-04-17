@@ -153,6 +153,16 @@ class SimulationEngine:
         # Set by navigate / start_loop / multi_stop / random_walk below.
         self._last_sim_kind: str | None = None
         self._last_sim_args: dict | None = None
+        # Snapshot consumed by sim handlers (start_loop / multi_stop /
+        # random_walk) when this engine is taking over a sim from a
+        # disconnected peer. When set, the handler skips its
+        # "from beginning" preamble and continues from segment_index /
+        # lap_count / random_walk_count captured by the dying engine.
+        self._resume_snapshot: dict | None = None
+        # Random-walk progress counter exposed on the engine so a
+        # disconnect-promotion can capture it and restore on the new
+        # leader. The handler increments this after each completed leg.
+        self._random_walk_count: int = 0
 
     # ── Public API ───────────────────────────────────────────
 
@@ -398,6 +408,79 @@ class SimulationEngine:
 
         self._paused_from = None
         logger.info("Simulation stopped")
+
+    def capture_resumable_snapshot(self) -> dict | None:
+        """Snapshot enough state for another engine to continue this
+        sim from the current position. Used by the watchdog when the
+        primary device disconnects and a follower needs to be promoted
+        to leader without restarting the simulation from scratch.
+
+        Returns None when there's nothing meaningful to resume (idle,
+        joystick, paused, etc).
+        """
+        if self.state not in (
+            SimulationState.NAVIGATING,
+            SimulationState.LOOPING,
+            SimulationState.MULTI_STOP,
+            SimulationState.RANDOM_WALK,
+        ):
+            return None
+        if not self._last_sim_kind or not self._last_sim_args:
+            return None
+        cur = self.current_position
+        snap = {
+            "kind": self._last_sim_kind,
+            "args": dict(self._last_sim_args),
+            "current_pos": (cur.lat, cur.lng) if cur else None,
+            "segment_index": int(self.segment_index),
+            "lap_count": int(self.lap_count),
+            "user_waypoint_next": int(self._user_waypoint_next),
+            "distance_traveled": float(self.distance_traveled),
+            "speed_was_applied": bool(self._speed_was_applied),
+            "random_walk_count": int(self._random_walk_count),
+        }
+        if self._active_speed_profile:
+            snap["active_speed_profile"] = dict(self._active_speed_profile)
+        return snap
+
+    async def resume_from_snapshot(self, snap: dict) -> None:
+        """Pick up a sim where another engine left off. Teleports to
+        the captured position so the iPhone doesn't visibly jump on
+        the new device, then re-enters the original sim handler with
+        ``_resume_snapshot`` set so it skips the "from beginning"
+        preamble.
+        """
+        pos = snap.get("current_pos")
+        if pos:
+            try:
+                await self.teleport(pos[0], pos[1])
+            except Exception:
+                logger.exception("resume_from_snapshot: initial teleport failed")
+                return
+
+        # Inherit applied-speed flag so the resumed handler honors any
+        # mid-flight speed change instead of reverting to the original
+        # spec'd profile from the request.
+        self._speed_was_applied = bool(snap.get("speed_was_applied", False))
+        if "active_speed_profile" in snap:
+            self._active_speed_profile = dict(snap["active_speed_profile"])
+
+        self._resume_snapshot = snap
+
+        kind = snap.get("kind")
+        args = snap.get("args") or {}
+        if not kind:
+            return
+        method = getattr(self, kind, None)
+        if method is None:
+            logger.warning("resume_from_snapshot: no method '%s' on engine", kind)
+            return
+        try:
+            await method(**args)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("resume_from_snapshot: %s raised", kind)
 
     def get_status(self) -> SimulationStatus:
         """Build a snapshot of the current simulation status."""

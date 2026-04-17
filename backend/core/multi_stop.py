@@ -69,10 +69,23 @@ class MultiStopNavigator:
                 profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
             )
 
+        # Resume support: when this engine is taking over from a peer
+        # that just disconnected, jump straight to the leg they were on
+        # so the iPhone doesn't visibly walk back to waypoints[0] first.
+        resume_snap = engine._resume_snapshot if engine._resume_snapshot and engine._resume_snapshot.get("kind") == "multi_stop" else None
+        engine._resume_snapshot = None
+
         engine.state = SimulationState.MULTI_STOP
         engine.total_segments = len(waypoints) - 1
-        engine.segment_index = 0
-        engine.lap_count = 0
+        if resume_snap:
+            engine.lap_count = int(resume_snap.get("lap_count", 0))
+            resume_seg = max(0, min(int(resume_snap.get("segment_index", 0)), len(waypoints) - 2))
+            resume_uwn = int(resume_snap.get("user_waypoint_next", 1))
+        else:
+            engine.lap_count = 0
+            resume_seg = 0
+            resume_uwn = 1
+        engine.segment_index = resume_seg
         engine.distance_traveled = 0.0
 
         # Pre-calculate full route path for display + grand total distance so
@@ -105,27 +118,31 @@ class MultiStopNavigator:
         )
 
         # Ensure we start from the first waypoint's location
-        # If we're not near the first waypoint, navigate there first
-        first = waypoints[0]
-        start_pos = engine.current_position
-        start_dist = self._quick_distance(start_pos, first)
-        if start_dist > 50:  # more than 50m away, route to the first waypoint
-            route_data = await engine.route_service.get_route(
-                start_pos.lat, start_pos.lng,
-                first.lat, first.lng,
-                profile=osrm_profile,
-                force_straight=straight_line,
-            )
-            coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
-            if len(coords) >= 2:
-                await engine._move_along_route(coords, _pick_profile())
-                if engine._stop_event.is_set():
-                    return
+        # If we're not near the first waypoint, navigate there first.
+        # Skip this preamble entirely on resume — the previous engine
+        # was already past wp[0] and we want the iPhone to continue from
+        # whichever leg it was on, not walk back to the start.
+        if not resume_snap:
+            first = waypoints[0]
+            start_pos = engine.current_position
+            start_dist = self._quick_distance(start_pos, first)
+            if start_dist > 50:  # more than 50m away, route to the first waypoint
+                route_data = await engine.route_service.get_route(
+                    start_pos.lat, start_pos.lng,
+                    first.lat, first.lng,
+                    profile=osrm_profile,
+                    force_straight=straight_line,
+                )
+                coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
+                if len(coords) >= 2:
+                    await engine._move_along_route(coords, _pick_profile())
+                    if engine._stop_event.is_set():
+                        return
 
         # Track the named user waypoints so highlight events refer to them
         # (otherwise OSRM densification would emit indices over road points).
         engine._user_waypoints = list(waypoints)
-        engine._user_waypoint_next = 1  # we already start at waypoints[0]
+        engine._user_waypoint_next = resume_uwn if resume_snap else 1
 
         # Track how much of the grand total we have already finished so the
         # offset we hand to _move_along_route reflects the remaining legs
@@ -133,6 +150,7 @@ class MultiStopNavigator:
         completed_distance = 0.0
 
         running = True
+        first_lap = True
         while running and not engine._stop_event.is_set():
             # On each loop pass (only > 1 if loop=True) restart the highlight
             # at waypoint[1] so the UI re-highlights from the top.
@@ -141,7 +159,11 @@ class MultiStopNavigator:
             # New lap: reset completed distance so the total-ETA countdown
             # restarts from full trip length.
             completed_distance = 0.0
-            for i in range(len(waypoints) - 1):
+            # On a resume, the first lap starts at the leg the previous
+            # engine was on instead of leg 0. Subsequent laps always
+            # start from leg 0.
+            leg_start = resume_seg if (first_lap and resume_snap) else 0
+            for i in range(leg_start, len(waypoints) - 1):
                 if engine._stop_event.is_set():
                     break
 
@@ -155,9 +177,19 @@ class MultiStopNavigator:
                     wp_a.lat, wp_a.lng, wp_b.lat, wp_b.lng,
                 )
 
+                # On the first leg of a resume, start from the iPhone's
+                # actual current GPS instead of routing from wp_a (which
+                # would teleport the iPhone back to that earlier waypoint
+                # before walking forward).
+                leg_origin = (
+                    engine.current_position
+                    if (first_lap and resume_snap and i == leg_start and engine.current_position)
+                    else wp_a
+                )
+
                 # Get route for this leg
                 route_data = await engine.route_service.get_route(
-                    wp_a.lat, wp_a.lng,
+                    leg_origin.lat, leg_origin.lng,
                     wp_b.lat, wp_b.lng,
                     profile=osrm_profile,
                     force_straight=straight_line,
@@ -223,6 +255,7 @@ class MultiStopNavigator:
                         pass
                     await engine._emit("pause_countdown_end", {"source": "multi_stop"})
 
+            first_lap = False
             if not loop or engine._stop_event.is_set():
                 running = False
             else:
