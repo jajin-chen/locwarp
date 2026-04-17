@@ -259,10 +259,11 @@ const App: React.FC = () => {
     let cancelled = false
     const tid = setTimeout(async () => {
       lastLookedUpPosRef.current = { lat: pos.lat, lng: pos.lng }
+      let geoRes: any = null
       try {
-        const geo = await api.reverseGeocode(pos.lat, pos.lng)
+        geoRes = await api.reverseGeocode(pos.lat, pos.lng)
         if (cancelled) return
-        const cc = String(geo?.country_code ?? '').toLowerCase()
+        const cc = String(geoRes?.country_code ?? '').toLowerCase()
         setLocMeta((prev) => prev.countryCode === cc ? prev : { ...prev, countryCode: cc })
       } catch { /* offline / rate-limited — keep previous */ }
       try {
@@ -302,13 +303,33 @@ const App: React.FC = () => {
             const named = parts.find((p) => p.type === 'timeZoneName')?.value
             if (named) zoneLabel = named
           } catch { /* keep IANA id */ }
-          showToast(
-            t('toast.timezone_diff')
-              .replace('{zone}', zoneLabel)
-              .replace('{hours}', String(diffH))
-              .replace('{time}', `${hh}:${mm}`)
-              .replace('{date}', dateStr),
-          )
+          // Build the second line in pieces so any missing field
+          // (blank country / city / weekday) just falls out instead of
+          // leaving an orphan separator.
+          const lang2 = (typeof localStorage !== 'undefined' && localStorage.getItem('locwarp.lang') === 'en') ? 'en' : 'zh-TW'
+          let weekdayStr = ''
+          try {
+            weekdayStr = new Intl.DateTimeFormat(lang2, { timeZone: tz.zone, weekday: 'long' }).format(destNow)
+          } catch { /* skip */ }
+          const cc = String(geoRes?.country_code ?? '').toUpperCase()
+          let countryStr = ''
+          if (cc) {
+            try {
+              countryStr = new Intl.DisplayNames([lang2], { type: 'region' }).of(cc) ?? ''
+            } catch { /* skip */ }
+          }
+          const cityStr: string = String(geoRes?.short_name ?? '').trim()
+
+          const line1 = t('toast.timezone_diff')
+            .replace('{zone}', zoneLabel)
+            .replace('{hours}', String(diffH))
+            .replace('{time}', `${hh}:${mm}`)
+
+          const dateWeekday = [dateStr, weekdayStr].filter(Boolean).join(' ')
+          const place = [countryStr, cityStr].filter(Boolean).join(' ')
+          const line2 = place ? `${dateWeekday} · ${place}` : dateWeekday
+
+          showToast(line2 ? `${line1}\n${line2}` : line1)
         }
       } catch { /* ignore */ }
       try {
