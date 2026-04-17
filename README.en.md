@@ -15,10 +15,38 @@
   <a href="https://line.me/ti/p/uL__gvPNL4" target="_blank">
     <img src="https://img.shields.io/badge/LINE-Add%20Friend-06C755?style=for-the-badge&logo=line&logoColor=white" alt="LINE" height="40">
   </a>
+  &nbsp;&nbsp;
+  <a href="#usdt-tip-jar-trc-20--tron-network" target="_blank">
+    <img src="https://img.shields.io/badge/USDT-TRC--20-26A17B?style=for-the-badge&logo=tether&logoColor=white" alt="USDT" height="40">
+  </a>
 </p>
 
 > If LocWarp has been useful to you, [buy me a coffee](https://ko-fi.com/haoooooo) ☕  
-> No PayPal? Feel free to [reach me on LINE](https://line.me/ti/p/uL__gvPNL4) to support.
+> No PayPal? Feel free to [reach me on LINE](https://line.me/ti/p/uL__gvPNL4), or send USDT directly using the address below.
+
+### USDT tip jar (TRC-20 / TRON network)
+
+<table>
+<tr>
+<td valign="top">
+
+**Wallet address**
+
+```
+TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
+```
+
+**TRC-20 (TRON network) only**
+
+Sending via ERC-20 / BEP-20 / Polygon or any other chain will result in **permanent loss**, with no way to recover. Please double-check the network before sending.
+
+</td>
+<td>
+<img src="docs/donate-usdt-tron-qr.png" alt="USDT TRC-20 QR" width="220">
+</td>
+</tr>
+</table>
+
 
 > ### Project Nature
 >

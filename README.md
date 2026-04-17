@@ -15,10 +15,38 @@
   <a href="https://line.me/ti/p/uL__gvPNL4" target="_blank">
     <img src="https://img.shields.io/badge/LINE-加我好友-06C755?style=for-the-badge&logo=line&logoColor=white" alt="LINE" height="40">
   </a>
+  &nbsp;&nbsp;
+  <a href="#usdt-斗內-trc-20--tron-鏈" target="_blank">
+    <img src="https://img.shields.io/badge/USDT-TRC--20-26A17B?style=for-the-badge&logo=tether&logoColor=white" alt="USDT" height="40">
+  </a>
 </p>
 
 > 如果 LocWarp 有幫到你, 歡迎[請我喝杯咖啡](https://ko-fi.com/haoooooo)支持 ☕  
-> 沒有 PayPal 想要支持的話, 也可以[加 LINE](https://line.me/ti/p/uL__gvPNL4) 跟我聯絡。
+> 沒有 PayPal 想要支持的話, 也可以[加 LINE](https://line.me/ti/p/uL__gvPNL4) 跟我聯絡, 或用下方 USDT 地址直接斗內。
+
+### USDT 斗內 (TRC-20 / TRON 鏈)
+
+<table>
+<tr>
+<td valign="top">
+
+**錢包地址**
+
+```
+TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
+```
+
+**僅支援 TRC-20 (TRON 鏈)**
+
+轉到 ERC-20 / BEP-20 / Polygon 等其他鏈會**永久遺失**, 無法找回。請務必確認對方鏈別後再轉帳。
+
+</td>
+<td>
+<img src="docs/donate-usdt-tron-qr.png" alt="USDT TRC-20 QR" width="220">
+</td>
+</tr>
+</table>
+
 
 > ### 專案性質聲明
 >
