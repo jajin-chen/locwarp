@@ -113,7 +113,7 @@ const App: React.FC = () => {
   const lastLookedUpPosRef = useRef<{ lat: number; lng: number } | null>(null)
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const showToast = useCallback((msg: string, ms = 2000) => {
+  const showToast = useCallback((msg: string, ms = 3000) => {
     // Cancel any previous auto-clear timer so the newest toast always
     // gets its full duration. Otherwise an earlier toast (e.g. teleport,
     // 2s) would fire its clear timer mid-way through a later toast
@@ -308,7 +308,6 @@ const App: React.FC = () => {
               .replace('{hours}', String(diffH))
               .replace('{time}', `${hh}:${mm}`)
               .replace('{date}', dateStr),
-            6000,
           )
         }
       } catch { /* ignore */ }
