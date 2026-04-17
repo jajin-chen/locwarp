@@ -261,6 +261,11 @@ export const STRINGS = {
   'panel.route_paste_submit': { zh: '套用為路線', en: 'Apply as route' },
   'panel.route_paste_done': { zh: '已設定 {count} 筆路徑點', en: 'Set {count} waypoints' },
   'panel.route_paste_empty': { zh: '沒有有效的座標', en: 'No valid coordinates' },
+  'panel.waypoints_click_to_fly': { zh: '點擊飛到此座標 (不影響路徑)', en: 'Click to teleport here (route stays intact)' },
+  'panel.wp_fly_title': { zh: '飛到此座標?', en: 'Teleport to this waypoint?' },
+  'panel.wp_fly_hint': { zh: '確認要把 iPhone 瞬移到這個座標嗎?', en: 'Teleport the iPhone to this coordinate?' },
+  'panel.wp_fly_keep_mode': { zh: '模式跟路徑點會保留,不會被切回瞬移', en: 'Mode and waypoints will be preserved; it will NOT switch to Teleport mode.' },
+  'panel.wp_fly_confirm': { zh: '飛過去', en: 'Teleport' },
   'map.click_not_locate': { zh: '此功能非定位', en: 'This is NOT teleport' },
   'map.click_use_right': { zh: '請用右鍵「瞬移到這裡」', en: 'Right-click to "Teleport here"' },
   'map.device_disconnected': { zh: 'USB 已斷開,請重新插入', en: 'USB disconnected, please reconnect' },
@@ -442,7 +447,17 @@ export const STRINGS = {
 
   // ── DDI mount overlay ───────────────────────
   'ddi.mounting_title': { zh: '首次設定裝置中', en: 'Preparing device' },
-  'ddi.mounting_hint': { zh: '正在下載並掛載 Developer Disk Image(約 20MB),請保持網路連線,約需 10~30 秒...', en: 'Downloading and mounting the Developer Disk Image (~20MB). Please keep your internet connected. This takes 10–30 seconds...' },
+  'ddi.mounting_hint': { zh: '正在準備 Developer Disk Image(約 20MB),請保持網路連線', en: 'Preparing the Developer Disk Image (~20MB). Please keep your internet connected.' },
+  'ddi.stage_starting': { zh: '準備中...', en: 'Preparing...' },
+  'ddi.stage_downloading': { zh: '下載 DDI (從 GitHub)', en: 'Downloading DDI (from GitHub)' },
+  'ddi.stage_verifying': { zh: '驗證裝置狀態', en: 'Verifying device state' },
+  'ddi.stage_signing': { zh: '向 Apple 申請個人化簽章', en: 'Requesting personalization signature from Apple' },
+  'ddi.stage_uploading': { zh: '上傳 DDI 到 iPhone', en: 'Uploading DDI to iPhone' },
+  'ddi.stage_mounting': { zh: '掛載到裝置中', en: 'Mounting on device' },
+  'ddi.eta_starting': { zh: '剛剛開始', en: 'Just started' },
+  'ddi.eta_continuing': { zh: '正常時間內', en: 'On schedule' },
+  'ddi.eta_slow': { zh: '比平常久,網路可能較慢', en: 'Slower than usual — network may be slow' },
+  'ddi.eta_very_slow': { zh: '很久了,可能即將 timeout', en: 'Taking very long — may time out soon' },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

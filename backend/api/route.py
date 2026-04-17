@@ -150,5 +150,15 @@ async def export_gpx(route_id: str):
     points = [{"lat": c.lat, "lng": c.lng} for c in route.waypoints]
     gpx_xml = gpx_service.generate_gpx(points, name=route.name)
     from fastapi.responses import Response
+    # HTTP headers are encoded latin-1 by ASGI servers, so a raw
+    # non-ASCII filename (e.g. 測試用的.gpx) blows up with
+    # UnicodeEncodeError. Emit both a safe ASCII fallback and the
+    # RFC 6266 filename* parameter so modern clients get the correct
+    # Chinese / emoji / etc. name while legacy clients still download
+    # the file.
+    import urllib.parse
+    safe_name = "".join(ch if ord(ch) < 128 and ch not in '"\\/' else "_" for ch in route.name) or "route"
+    utf8_encoded = urllib.parse.quote(f"{route.name}.gpx", safe="")
+    disposition = f'attachment; filename="{safe_name}.gpx"; filename*=UTF-8\'\'{utf8_encoded}'
     return Response(content=gpx_xml, media_type="application/gpx+xml",
-                    headers={"Content-Disposition": f'attachment; filename="{route.name}.gpx"'})
+                    headers={"Content-Disposition": disposition})

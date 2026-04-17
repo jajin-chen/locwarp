@@ -602,6 +602,25 @@ const App: React.FC = () => {
     sim.setWaypoints((prev: any[]) => prev.filter((_: any, i: number) => i !== index))
   }, [sim])
 
+  // Teleport to a waypoint from inside the Loop / MultiStop list. We
+  // go around sim.teleport (which flips sim.mode to Teleport and would
+  // therefore wipe waypoints the next time the user clicks the Loop /
+  // MultiStop mode tab). Talk directly to sim.teleportAll / api.
+  // teleport so the current mode and the entire waypoint list stay
+  // intact while the iPhone jumps to the chosen point.
+  const [wpFlyConfirm, setWpFlyConfirm] = useState<{ lat: number; lng: number; index: number } | null>(null)
+  const confirmWpFly = useCallback(async () => {
+    if (!wpFlyConfirm) return
+    const { lat, lng } = wpFlyConfirm
+    sim.setCurrentPosition({ lat, lng })
+    const udids = device.connectedDevices.map((d) => d.udid)
+    if (udids.length > 0) {
+      try { await sim.teleportAll(udids, lat, lng) } catch { /* ignore */ }
+    }
+    void pushRecent(lat, lng, 'coord_teleport')
+    setWpFlyConfirm(null)
+  }, [wpFlyConfirm, sim, device, pushRecent])
+
   // Route bulk-paste: parse a textarea of "lat lng [name]" lines into a
   // waypoint list for Loop / MultiStop. Current device position (if
   // any) is prepended as waypoint[0] so the backend's seg_idx math
@@ -1214,7 +1233,18 @@ const App: React.FC = () => {
                     <span style={{ color: approaching ? '#ff9800' : passed ? '#666' : isStart ? '#4caf50' : '#ff9800', fontWeight: 600, width: 24, fontSize: isStart ? 10 : undefined }}>
                       {approaching ? '>' : passed ? 'OK' : isStart ? t('panel.waypoint_start') : `#${i}`}
                     </span>
-                    <span style={{ flex: 1, opacity: 0.85 }}>{wp.lat.toFixed(5)}, {wp.lng.toFixed(5)}</span>
+                    <button
+                      onClick={() => setWpFlyConfirm({ lat: wp.lat, lng: wp.lng, index: i })}
+                      title={t('panel.waypoints_click_to_fly')}
+                      style={{
+                        flex: 1, background: 'transparent', border: 'none',
+                        color: 'inherit', opacity: 0.85, textAlign: 'left',
+                        padding: 0, cursor: 'pointer',
+                        font: 'inherit', letterSpacing: 0,
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline'; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none'; }}
+                    >{wp.lat.toFixed(5)}, {wp.lng.toFixed(5)}</button>
                     <button
                       className="action-btn"
                       style={{ padding: '2px 6px', fontSize: 10 }}
@@ -1310,6 +1340,46 @@ const App: React.FC = () => {
               <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.6 }}>
                 {t('ddi.mounting_hint')}
               </div>
+              {sim.ddiStage && (() => {
+                // Stage labels mapped 1:1 with backend emit() calls in
+                // _staged_personalized_mount. Fall back to the raw key
+                // if we ever add a stage the UI hasn't learnt yet.
+                const stageKey = `ddi.stage_${sim.ddiStage.stage}` as any
+                const stageLabel = t(stageKey) || sim.ddiStage.stage
+                // Typical total 15-45 s. Use a coarse ETA bucket so it
+                // doesn't stress the user with a precise countdown that
+                // isn't going to be accurate anyway.
+                const elapsed = sim.ddiStage.elapsed
+                let etaHint = ''
+                if (elapsed < 5) etaHint = t('ddi.eta_starting')
+                else if (elapsed < 20) etaHint = t('ddi.eta_continuing')
+                else if (elapsed < 60) etaHint = t('ddi.eta_slow')
+                else etaHint = t('ddi.eta_very_slow')
+                // Rough stage index for progress bar fill.
+                const order = ['starting','downloading','verifying','signing','uploading','mounting']
+                const idx = Math.max(0, order.indexOf(sim.ddiStage.stage))
+                const pct = Math.round(((idx + 1) / order.length) * 100)
+                return (
+                  <div style={{ marginTop: 14 }}>
+                    <div style={{
+                      height: 6, background: 'rgba(255,255,255,0.08)',
+                      borderRadius: 99, overflow: 'hidden', marginBottom: 8,
+                    }}>
+                      <div style={{
+                        width: `${pct}%`, height: '100%',
+                        background: 'linear-gradient(90deg, #6c8cff, #4c6bd9)',
+                        transition: 'width 300ms ease-out',
+                      }} />
+                    </div>
+                    <div style={{ fontSize: 11, opacity: 0.85, fontWeight: 600 }}>
+                      {stageLabel}
+                    </div>
+                    <div style={{ fontSize: 10, opacity: 0.55, marginTop: 2 }}>
+                      {Math.round(elapsed)}s · {etaHint}
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
           </div>
         )}
@@ -1562,6 +1632,66 @@ const App: React.FC = () => {
               </div>
             )
           })(),
+          document.body,
+        )}
+        {wpFlyConfirm && createPortal(
+          <div
+            onClick={() => setWpFlyConfirm(null)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 2000,
+              background: 'rgba(8, 10, 20, 0.55)', backdropFilter: 'blur(4px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: 360, maxWidth: '92vw',
+                background: 'rgba(26, 29, 39, 0.96)',
+                border: '1px solid rgba(108, 140, 255, 0.25)', borderRadius: 12,
+                padding: 22, color: '#e8eaf0',
+                boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65)',
+                fontSize: 13,
+              }}
+            >
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>
+                {t('panel.wp_fly_title')}
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6, lineHeight: 1.6 }}>
+                {t('panel.wp_fly_hint')}
+              </div>
+              <div style={{
+                fontFamily: 'monospace', fontSize: 13,
+                padding: '8px 10px', marginBottom: 4,
+                background: 'rgba(10, 12, 18, 0.5)',
+                border: '1px solid rgba(108, 140, 255, 0.2)',
+                borderRadius: 6,
+              }}>
+                {wpFlyConfirm.lat.toFixed(6)}, {wpFlyConfirm.lng.toFixed(6)}
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.55, marginBottom: 16 }}>
+                {t('panel.wp_fly_keep_mode')}
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => setWpFlyConfirm(null)}
+                  style={{
+                    padding: '6px 14px', fontSize: 12, cursor: 'pointer',
+                    background: 'transparent', color: '#9499ac',
+                    border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6,
+                  }}
+                >{t('generic.cancel')}</button>
+                <button
+                  onClick={confirmWpFly}
+                  style={{
+                    padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    background: '#6c8cff', color: '#fff',
+                    border: 'none', borderRadius: 6,
+                  }}
+                >{t('panel.wp_fly_confirm')}</button>
+              </div>
+            </div>
+          </div>,
           document.body,
         )}
         {routePasteOpen && createPortal(

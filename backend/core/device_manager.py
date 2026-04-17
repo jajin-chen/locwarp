@@ -21,7 +21,7 @@ import logging
 import socket
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Awaitable, Callable, Dict, Optional
 
 from pymobiledevice3.lockdown import create_using_usbmux, create_using_tcp
 from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscoveryService
@@ -402,20 +402,44 @@ class DeviceManager:
         # 2. Not mounted — download + mount. Notify frontend so the user
         # sees a "preparing device" overlay instead of a frozen UI.
         logger.info("Personalized DDI not mounted on %s; mounting (may download ~20MB)...", conn.udid)
+        from api.websocket import broadcast
         try:
-            from api.websocket import broadcast
-            await broadcast("ddi_mounting", {"udid": conn.udid})
+            await broadcast("ddi_mounting", {"udid": conn.udid, "stage": "starting"})
         except Exception:
             pass
+
+        async def _emit_stage(stage: str, extra: dict | None = None) -> None:
+            """Push a progress event to the UI so the overlay can show
+            which internal step is running (downloading DDI from GitHub,
+            requesting Apple TSS signature, uploading image to the
+            device, mounting). The 'stage' field is the primary input;
+            'elapsed' lets the UI render a rough ETA without doing its
+            own timer work."""
+            elapsed = time.monotonic() - stage_start
+            payload = {"udid": conn.udid, "stage": stage, "elapsed": round(elapsed, 1)}
+            if extra:
+                payload.update(extra)
+            try:
+                await broadcast("ddi_mounting", payload)
+            except Exception:
+                pass
+
         mount_succeeded = False
+        import time
+        stage_start = time.monotonic()
         try:
-            # auto_mount_personalized internally uses requests.get for the
-            # GitHub DDI download. Hard-cap the whole operation so a slow or
-            # blocked network can't freeze us indefinitely.
-            # Serialise across devices so parallel connects don't corrupt
-            # the shared DDI cache.
+            # Split auto_mount_personalized into explicit download then
+            # mount phases so the UI overlay can show which step is
+            # running — the full operation takes 10-90s depending on
+            # network, and the user otherwise stares at a single
+            # "preparing..." message with no sense of progress.
+            # Serialise across devices so parallel connects don't
+            # corrupt the shared DDI cache.
             async with self._ddi_mount_lock:
-                await asyncio.wait_for(auto_mount_personalized(conn.lockdown), timeout=120.0)
+                await asyncio.wait_for(
+                    self._staged_personalized_mount(conn, _emit_stage),
+                    timeout=120.0,
+                )
             logger.info("Personalized DDI mounted successfully for %s", conn.udid)
             mount_succeeded = True
         except AlreadyMountedError:
@@ -450,6 +474,96 @@ class DeviceManager:
                     await broadcast("ddi_mounted", {"udid": conn.udid})
                 except Exception:
                     pass
+
+    async def _staged_personalized_mount(
+        self,
+        conn: _ActiveConnection,
+        emit: "Callable[[str, dict | None], Awaitable[None]]",
+    ) -> None:
+        """Drop-in replacement for pymobiledevice3.auto_mount_personalized
+        that emits progress events between each internal step. Mirrors
+        auto_mount_personalized's logic:
+          1. check local cache, download from GitHub if stale
+          2. query device for an existing personalization manifest
+          3. if missing, get a fresh TSS ticket from Apple
+          4. upload image bytes to the device
+          5. issue the final mount command
+        Each step emits a stage event so the UI can replace the generic
+        "mounting" spinner with an actual step name.
+        """
+        import plistlib
+        import hashlib
+        from pathlib import Path
+        from pymobiledevice3.services.mobile_image_mounter import (
+            DeveloperDiskImageRepository,
+            LATEST_DDI_BUILD_ID,
+            PersonalizedImageMounter,
+            MissingManifestError,
+            get_home_folder,
+        )
+
+        local_path = Path(get_home_folder()) / "Xcode_iOS_DDI_Personalized"
+        local_path.mkdir(parents=True, exist_ok=True)
+        image_path = local_path / "Image.dmg"
+        manifest_path = local_path / "BuildManifest.plist"
+        trustcache_path = local_path / "Image.trustcache"
+
+        needs_download = True
+        if manifest_path.exists():
+            try:
+                manifest_build = plistlib.loads(manifest_path.read_bytes()).get("ProductBuildVersion")
+                needs_download = manifest_build != LATEST_DDI_BUILD_ID
+            except Exception:
+                needs_download = True
+
+        if needs_download:
+            await emit("downloading", None)
+            # The GitHub download inside DeveloperDiskImageRepository is
+            # synchronous requests.get. Run it in the default executor so
+            # we don't block the asyncio event loop (and the 120s
+            # asyncio.wait_for can still enforce the timeout).
+            loop = asyncio.get_running_loop()
+
+            def _download():
+                repo = DeveloperDiskImageRepository.create()
+                return repo.get_personalized_disk_image()
+
+            personalized = await loop.run_in_executor(None, _download)
+            image_path.write_bytes(personalized.image)
+            manifest_path.write_bytes(personalized.build_manifest)
+            trustcache_path.write_bytes(personalized.trustcache)
+            downloaded_build = plistlib.loads(personalized.build_manifest).get("ProductBuildVersion")
+            if downloaded_build != LATEST_DDI_BUILD_ID:
+                logger.warning(
+                    "Downloaded personalized image has unexpected ProductBuildVersion %s (expected %s)",
+                    downloaded_build, LATEST_DDI_BUILD_ID,
+                )
+
+        await emit("verifying", None)
+        mounter = PersonalizedImageMounter(lockdown=conn.lockdown)
+        await mounter.raise_if_cannot_mount()
+
+        image_bytes = image_path.read_bytes()
+        trust_cache_bytes = trustcache_path.read_bytes()
+
+        try:
+            manifest = await mounter.query_personalization_manifest(
+                "DeveloperDiskImage",
+                hashlib.sha384(image_bytes).digest(),
+            )
+        except MissingManifestError:
+            # Device has never seen this DDI build; get a fresh TSS
+            # ticket from Apple. Requires network to gs.apple.com.
+            await emit("signing", None)
+            mounter._service = await conn.lockdown.start_lockdown_service(mounter.service_name)
+            manifest = await mounter.get_manifest_from_tss(plistlib.loads(manifest_path.read_bytes()))
+
+        await emit("uploading", None)
+        await mounter.upload_image(mounter.IMAGE_TYPE, image_bytes, manifest)
+
+        await emit("mounting", None)
+        extras = {"ImageTrustCache": trust_cache_bytes}
+        await mounter.mount_image(mounter.IMAGE_TYPE, manifest, extras=extras)
 
     async def _ensure_classic_ddi_mounted(self, conn: _ActiveConnection) -> None:
         """Best-effort Developer Disk Image mount for iOS 16.x devices."""

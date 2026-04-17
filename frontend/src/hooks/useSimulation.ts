@@ -167,6 +167,11 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
   const [pauseEndAt, setPauseEndAt] = useState<number | null>(null)
   const [pauseRemaining, setPauseRemaining] = useState<number | null>(null)
   const [ddiMounting, setDdiMounting] = useState(false)
+  // Stage within the DDI mount pipeline. null when not mounting, else
+  // one of the backend's stage names (starting / downloading / verifying
+  // / signing / uploading / mounting). `elapsed` is seconds since the
+  // mount started, used for a rough ETA estimate in the overlay.
+  const [ddiStage, setDdiStage] = useState<{ stage: string; elapsed: number } | null>(null)
   const [waypointProgress, setWaypointProgress] = useState<{ current: number; next: number; total: number } | null>(null)
   // What's *actually* running on the device — set when a route handler
   // starts or when applySpeed succeeds. Used by the status bar so the
@@ -328,11 +333,16 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
       }
       case 'ddi_mounting': {
         setDdiMounting(true)
+        const d = wsMessage.data
+        if (d && typeof d.stage === 'string') {
+          setDdiStage({ stage: d.stage, elapsed: typeof d.elapsed === 'number' ? d.elapsed : 0 })
+        }
         break
       }
       case 'ddi_mounted':
       case 'ddi_mount_failed': {
         setDdiMounting(false)
+        setDdiStage(null)
         break
       }
       case 'tunnel_lost': {
@@ -811,6 +821,7 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     setPauseRandomWalk,
     pauseRemaining,
     ddiMounting,
+    ddiStage,
     waypointProgress,
     effectiveSpeed,
     applySpeed,
