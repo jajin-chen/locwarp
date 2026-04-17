@@ -300,13 +300,14 @@ The world is bucketed into 1° x 1° grid cells with a per-region OSRM-coverage 
 
 End users must complete the following four steps before use:
 
-### 1. Install iTunes for Windows
+### 1. Install Apple USB driver
 
-Windows needs Apple's USB driver to communicate with iPhone.
+Windows needs Apple's USB driver to communicate with iPhone. **Either option works**:
 
-- **Required download**: [iTunes for Windows (64-bit)](https://secure-appldnld.apple.com/itunes12/047-76416-20260302-fefe4356-211d-4da1-8bc4-058eb36ea803/iTunes64Setup.exe)
+- **Classic iTunes for Windows**: [iTunes for Windows (64-bit)](https://secure-appldnld.apple.com/itunes12/047-76416-20260302-fefe4356-211d-4da1-8bc4-058eb36ea803/iTunes64Setup.exe)
+- **Microsoft Store "Apple Devices"**: [Store page](https://apps.microsoft.com/detail/9pb2mz1zmb1s)
 
-> **Note:** Do **not** use "Apple Devices" from the Microsoft Store, it is **incompatible** and LocWarp will not detect the device. You must install the classic iTunes linked above.
+> **Note:** Users have confirmed both builds let LocWarp detect the iPhone. Install one; if detection fails, try the other.
 
 ### 2. Trust the computer via USB first
 

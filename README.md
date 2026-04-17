@@ -364,13 +364,14 @@ build-installer.bat
 
 使用安裝檔的使用者需要以下四項前置:
 
-### 1. 安裝 iTunes for Windows
+### 1. 安裝 Apple USB driver
 
-Windows 需要 Apple 的 USB driver 才能與 iPhone 溝通。
+Windows 需要 Apple 的 USB driver 才能與 iPhone 溝通。下列兩種方式**擇一**即可:
 
-- **下載(必裝)**:[iTunes for Windows (64-bit)](https://secure-appldnld.apple.com/itunes12/047-76416-20260302-fefe4356-211d-4da1-8bc4-058eb36ea803/iTunes64Setup.exe)
+- **傳統桌面版 iTunes**: [iTunes for Windows (64-bit)](https://secure-appldnld.apple.com/itunes12/047-76416-20260302-fefe4356-211d-4da1-8bc4-058eb36ea803/iTunes64Setup.exe)
+- **Microsoft Store 的「Apple Devices」**: [商店頁面](https://apps.microsoft.com/detail/9pb2mz1zmb1s)
 
-> **注意:** 請勿使用 Microsoft Store 的「Apple Devices」, 該版本**不相容**,LocWarp 會抓不到裝置。必須裝上面連結的傳統版 iTunes。
+> **補充:** 兩種版本社群都回報可以讓 LocWarp 正常抓到 iPhone,裝一個就好,抓不到再換另一個試試。
 
 ### 2. USB 連接並信任此電腦
 
