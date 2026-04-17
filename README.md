@@ -12,7 +12,7 @@
     <img src="https://img.shields.io/badge/Ko--fi-請我喝咖啡-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white" alt="Ko-fi" height="40">
   </a>
   &nbsp;&nbsp;
-  <a href="https://line.me/ti/p/uL__gvPNL4" target="_blank">
+  <a href="https://lin.ee/UwdCrmf" target="_blank">
     <img src="https://img.shields.io/badge/LINE-加我好友-06C755?style=for-the-badge&logo=line&logoColor=white" alt="LINE" height="40">
   </a>
   &nbsp;&nbsp;
@@ -22,7 +22,7 @@
 </p>
 
 > 如果 LocWarp 有幫到你, 歡迎[請我喝杯咖啡](https://ko-fi.com/haoooooo)支持 ☕  
-> 沒有 PayPal 想要支持的話, 也可以[加 LINE](https://line.me/ti/p/uL__gvPNL4) 跟我聯絡, 或用下方 USDT 地址直接斗內。
+> 沒有 PayPal 想要支持的話, 也可以[加 LINE](https://lin.ee/UwdCrmf) 跟我聯絡, 或用下方 USDT 地址直接斗內。
 
 ### USDT 斗內 (TRC-20 / TRON 鏈)
 

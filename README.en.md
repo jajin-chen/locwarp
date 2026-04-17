@@ -12,7 +12,7 @@
     <img src="https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white" alt="Ko-fi" height="40">
   </a>
   &nbsp;&nbsp;
-  <a href="https://line.me/ti/p/uL__gvPNL4" target="_blank">
+  <a href="https://lin.ee/UwdCrmf" target="_blank">
     <img src="https://img.shields.io/badge/LINE-Add%20Friend-06C755?style=for-the-badge&logo=line&logoColor=white" alt="LINE" height="40">
   </a>
   &nbsp;&nbsp;
@@ -22,7 +22,7 @@
 </p>
 
 > If LocWarp has been useful to you, [buy me a coffee](https://ko-fi.com/haoooooo) ☕  
-> No PayPal? Feel free to [reach me on LINE](https://line.me/ti/p/uL__gvPNL4), or send USDT directly using the address below.
+> No PayPal? Feel free to [reach me on LINE](https://lin.ee/UwdCrmf), or send USDT directly using the address below.
 
 ### USDT tip jar (TRC-20 / TRON network)
 
