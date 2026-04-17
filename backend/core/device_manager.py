@@ -361,8 +361,8 @@ class DeviceManager:
         the DDI. On iOS 26.4.1 the 20MB image upload routinely dropped
         the RSD tunnel mid-transfer, poisoning subsequent DVT calls
         with InvalidService. We now rely on the iPhone already having
-        the DDI mounted (Xcode, 3uTools, 愛思助手, or an earlier
-        successful mount that iOS is still caching).
+        the DDI mounted (Xcode, 3uTools, 愛思助手, pymobiledevice3 CLI,
+        or an earlier successful mount that iOS is still caching).
 
         This method is therefore a pure status check. If the iPhone
         has DDI mounted we log it and return happily. If not, we emit
@@ -407,15 +407,15 @@ class DeviceManager:
         logger.warning(
             "Personalized DDI is NOT mounted on %s. LocWarp will not attempt "
             "to auto-mount (v0.2.58+). User must mount DDI via Xcode / 3uTools / "
-            "愛思助手 first, then reconnect.", conn.udid,
+            "愛思助手 / pymobiledevice3 CLI first, then reconnect.", conn.udid,
         )
         try:
             from api.websocket import broadcast
             await broadcast("ddi_not_mounted", {
                 "udid": conn.udid,
                 "hint": (
-                    "iPhone 上未偵測到 DDI。請先用 Xcode、3uTools 或愛思助手連一次這支 iPhone "
-                    "(它們會幫你掛好 DDI),然後再回來用 LocWarp;或者重開 iPhone 後再試。"
+                    "iPhone 上未偵測到 DDI。請先用 Xcode、3uTools、愛思助手或 pymobiledevice3 CLI "
+                    "幫這支 iPhone 掛一次 DDI,然後再回來用 LocWarp;或者重開 iPhone 後再試。"
                 ),
             })
         except Exception:

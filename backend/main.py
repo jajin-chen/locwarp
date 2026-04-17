@@ -607,4 +607,12 @@ async def root():
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host=API_HOST, port=API_PORT, reload=False)
+    # v0.2.59: enable uvicorn access logging so we can see which HTTP
+    # endpoints the frontend is hitting (needed to debug the "WiFi tunnel
+    # drops on USB unplug" report — we need to confirm whether the UI is
+    # POSTing /wifi/tunnel/stop or something else is triggering the
+    # cleanup).
+    uvicorn_access = logging.getLogger("uvicorn.access")
+    uvicorn_access.setLevel(logging.INFO)
+    uvicorn_access.propagate = True  # route through our basicConfig handlers
+    uvicorn.run("main:app", host=API_HOST, port=API_PORT, reload=False, access_log=True)

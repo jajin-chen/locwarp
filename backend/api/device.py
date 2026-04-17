@@ -376,14 +376,25 @@ async def wifi_tunnel_discover():
     return {"devices": unique}
 
 
-async def _cleanup_wifi_connections() -> list[str]:
+async def _cleanup_wifi_connections(caller: str = "unknown") -> list[str]:
     """Disconnect any Network devices + drop the simulation engine.
     Broadcasts device_disconnected so the frontend banners/disables context
     menu items immediately instead of waiting for the next failed action.
     Returns the UDIDs that were disconnected."""
     from main import app_state
+    import traceback
     dm = _dm()
     udids: list[str] = []
+    # v0.2.59 diag: log who called us so we can tell whether the UI hit
+    # /wifi/tunnel/stop, the tunnel watchdog fired after grace, or some
+    # other path we missed. Include the top 5 stack frames (excluding this
+    # function itself) so we can see the full trigger chain.
+    stack = traceback.extract_stack(limit=8)[:-1]
+    stack_str = " <- ".join(f"{fr.name}@{fr.filename.split(chr(92))[-1]}:{fr.lineno}" for fr in reversed(stack))
+    _tunnel_logger.warning(
+        "_cleanup_wifi_connections called (caller=%s); stack: %s",
+        caller, stack_str,
+    )
     try:
         udids = [
             udid for udid, conn in list(dm._connections.items())
@@ -452,7 +463,7 @@ async def _tunnel_watchdog(task: asyncio.Task) -> None:
                     pass
                 return
             if _tunnel.task is task or _tunnel.task is None:
-                await _cleanup_wifi_connections()
+                await _cleanup_wifi_connections(caller="_tunnel_watchdog_task_exited")
                 _tunnel.task = None
                 _tunnel.info = None
                 try:
@@ -527,8 +538,17 @@ async def wifi_tunnel_stop():
     from main import app_state
     dm = _dm()
 
+    # v0.2.59 diag: log every hit of this endpoint so we can tell if the
+    # UI is unexpectedly POSTing /wifi/tunnel/stop. Include tunnel state
+    # at entry for context.
+    _tunnel_logger.warning(
+        "/wifi/tunnel/stop endpoint hit. tunnel.is_running()=%s, network_conns=%d",
+        _tunnel.is_running(),
+        sum(1 for c in dm._connections.values() if getattr(c, "connection_type", "") == "Network"),
+    )
+
     async with _tunnel.lock:
-        await _cleanup_wifi_connections()
+        await _cleanup_wifi_connections(caller="wifi_tunnel_stop_endpoint")
 
         if not _tunnel.is_running():
             _tunnel.info = None
@@ -560,6 +580,10 @@ async def wifi_tunnel_stop():
                 usb_dev = None
             if usb_dev is not None:
                 try:
+                    # v0.2.60: drop stale WiFi engine so the new one binds
+                    # to the fresh USB lockdown (see wifi_tunnel_start_and_connect
+                    # for the symmetric case going the other direction).
+                    app_state.simulation_engines.pop(usb_dev.udid, None)
                     await app_state.create_engine_for_device(usb_dev.udid)
                     _tunnel_logger.info("Switched back to USB connection: %s", usb_dev.udid)
                 except Exception:
@@ -615,6 +639,17 @@ async def wifi_tunnel_start_and_connect(req: WifiTunnelStartRequest):
         )
     try:
         info = await dm.connect_wifi_tunnel(rsd_address, rsd_port)
+        # v0.2.60: Drop the stale engine from the prior USB conn so
+        # create_engine_for_device rebuilds a fresh one bound to the new
+        # WiFi RSD. v0.2.57 made create_engine_for_device idempotent (to
+        # survive the watchdog loop wiping current_position), but that
+        # means on a USB→WiFi conn switch it would keep the old engine —
+        # whose location_service._lockdown still points at the now-closed
+        # USB RSD. First teleport over WiFi would then throw
+        # ConnectionTerminatedError, reconnect would fail because the
+        # cached lockdown is dead, and the user would see the device get
+        # kicked as device_lost within 8 seconds of the WiFi switch.
+        app_state.simulation_engines.pop(info.udid, None)
         await app_state.create_engine_for_device(info.udid)
         return {
             "status": "connected",
