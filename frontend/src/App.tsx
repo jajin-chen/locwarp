@@ -112,9 +112,21 @@ const App: React.FC = () => {
   // user hasn't actually moved.
   const lastLookedUpPosRef = useRef<{ lat: number; lng: number } | null>(null)
 
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showToast = useCallback((msg: string, ms = 2000) => {
+    // Cancel any previous auto-clear timer so the newest toast always
+    // gets its full duration. Otherwise an earlier toast (e.g. teleport,
+    // 2s) would fire its clear timer mid-way through a later toast
+    // (e.g. timezone, 6s) and blank it out after only a fraction.
+    if (toastTimerRef.current !== null) {
+      clearTimeout(toastTimerRef.current)
+      toastTimerRef.current = null
+    }
     setToastMsg(msg)
-    setTimeout(() => setToastMsg(null), ms)
+    toastTimerRef.current = setTimeout(() => {
+      setToastMsg(null)
+      toastTimerRef.current = null
+    }, ms)
   }, [])
 
   const handleRestore = useCallback(async () => {
