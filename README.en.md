@@ -305,9 +305,10 @@ End users must complete the following four steps before use:
 Windows needs Apple's USB driver to communicate with iPhone. **Either option works**:
 
 - **Classic iTunes for Windows**: [iTunes for Windows (64-bit)](https://secure-appldnld.apple.com/itunes12/047-76416-20260302-fefe4356-211d-4da1-8bc4-058eb36ea803/iTunes64Setup.exe)
-- **Microsoft Store "Apple Devices"**: [Store page](https://apps.microsoft.com/detail/9pb2mz1zmb1s)
+- **Microsoft Store iTunes**: [Store page](https://apps.microsoft.com/detail/9pb2mz1zmb1s)
+- **Microsoft Store "Apple Devices"** (fallback when both iTunes builds fail): [Store page](https://apps.microsoft.com/detail/9np83lwlpz9k?hl=en-US&gl=US)
 
-> **Note:** Users have confirmed both builds let LocWarp detect the iPhone. Install one; if detection fails, try the other.
+> **Note:** Install any one of the three. Most users succeed with classic desktop iTunes. If neither iTunes build (desktop or Store) detects the iPhone, community reports indicate that switching to **Apple Devices** works.
 
 ### 2. Trust the computer via USB first
 

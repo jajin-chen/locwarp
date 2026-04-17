@@ -369,9 +369,10 @@ build-installer.bat
 Windows 需要 Apple 的 USB driver 才能與 iPhone 溝通。下列兩種方式**擇一**即可:
 
 - **傳統桌面版 iTunes**: [iTunes for Windows (64-bit)](https://secure-appldnld.apple.com/itunes12/047-76416-20260302-fefe4356-211d-4da1-8bc4-058eb36ea803/iTunes64Setup.exe)
-- **Microsoft Store 的「Apple Devices」**: [商店頁面](https://apps.microsoft.com/detail/9pb2mz1zmb1s)
+- **Microsoft Store 的 iTunes**: [商店頁面](https://apps.microsoft.com/detail/9pb2mz1zmb1s)
+- **Microsoft Store 的「Apple Devices」**(iTunes 兩個版本都不行時的備案): [商店頁面](https://apps.microsoft.com/detail/9np83lwlpz9k?hl=zh-TW&gl=TW)
 
-> **補充:** 兩種版本社群都回報可以讓 LocWarp 正常抓到 iPhone,裝一個就好,抓不到再換另一個試試。
+> **補充:** 三種擇一即可,裝一個就好。多數用戶裝桌面版 iTunes 就能用;若 iTunes(桌面版或 Microsoft Store 版)都抓不到 iPhone,社群回報改裝 **Apple Devices** 可以成功。
 
 ### 2. USB 連接並信任此電腦
 

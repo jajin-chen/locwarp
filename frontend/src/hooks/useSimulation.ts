@@ -345,6 +345,18 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         setDdiStage(null)
         break
       }
+      case 'ddi_not_mounted': {
+        // v0.2.58: backend no longer auto-mounts DDI. It just checks
+        // and tells us iPhone has no DDI. Show the hint so the user
+        // can mount it themselves via Xcode / 3uTools.
+        setDdiMounting(false)
+        setDdiStage(null)
+        const hint = wsMessage.data?.hint
+        if (typeof hint === 'string') {
+          setError(hint)
+        }
+        break
+      }
       case 'tunnel_lost': {
         // Uses localStorage to get current language (hooks don't have i18n context easily here)
         setError((typeof localStorage !== 'undefined' && localStorage.getItem('locwarp.lang') === 'en')
@@ -731,9 +743,13 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     const seed = udids.length >= 2 ? Date.now() : null
     return fanout(udids, 'randomwalk', (u) => api.randomWalk(center, r, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseRandomWalk.enabled, pause_min: pauseRandomWalk.min, pause_max: pauseRandomWalk.max }, u, seed, straightLine))
   }, [fanout, preSyncStart, moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseRandomWalk, straightLine])
-  const applySpeedAll = useCallback((udids: string[]) =>
-    fanout(udids, 'apply-speed', (u) => api.applySpeed(moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, u)),
-    [fanout, moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh])
+  const applySpeedAll = useCallback(async (udids: string[]) => {
+    const outcome = await fanout(udids, 'apply-speed', (u) => api.applySpeed(moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, u))
+    if (outcome.ok.length > 0) {
+      setEffectiveSpeed({ kmh: customSpeedKmh ?? MODE_DEFAULT_KMH[moveMode], min: speedMinKmh, max: speedMaxKmh })
+    }
+    return outcome
+  }, [fanout, moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh])
   const pauseAll = useCallback((udids: string[]) => fanout(udids, 'pause', (u) => api.pauseSim(u)), [fanout])
   const resumeAll = useCallback((udids: string[]) => fanout(udids, 'resume', (u) => api.resumeSim(u)), [fanout])
   const stopAll = useCallback((udids: string[]) => fanout(udids, 'stop', (u) => api.stopSim(u)), [fanout])
