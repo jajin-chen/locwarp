@@ -46,9 +46,9 @@ export function toastForFanout<T>(
 import { SimMode, MoveMode } from './hooks/useSimulation'
 
 const SPEED_MAP: Record<MoveMode, number> = {
-  walking: 5,
-  running: 10,
-  driving: 40,
+  walking: 10.8,
+  running: 19.8,
+  driving: 60,
 }
 
 const App: React.FC = () => {
@@ -723,18 +723,24 @@ const App: React.FC = () => {
     ? { lat: sim.destination.lat, lng: sim.destination.lng }
     : null
 
-  const speed = SPEED_MAP[sim.moveMode] || 5
-  // Status-bar display: when a route is running, show what the backend is
-  // *actually* executing (set when the route starts or applySpeed succeeds);
-  // otherwise show the typed inputs as a preview.
+  // Mode default km/h, used only for ControlPanel's in-panel preset
+  // preview and as a very last fallback in the status bar before any
+  // apply / sim start has happened.
+  const speed = SPEED_MAP[sim.moveMode] || 10.8
+  // Status-bar display: always show what the backend is actually
+  // executing (effectiveSpeed, set on sim start / applySpeed /
+  // initialized to walking default). Selecting a preset or typing a
+  // custom km/h no longer changes the display until the user clicks
+  // 套用 (apply-speed) or starts a new sim, which matches the user's
+  // mental model of "what's running on the iPhone".
   const fmtSpeedFromInputs = (kmh: number | null, lo: number | null, hi: number | null): number | string => {
     if (lo != null && hi != null) return `${Math.min(lo, hi)}~${Math.max(lo, hi)}`
     if (kmh != null) return kmh
-    return speed
+    return SPEED_MAP[sim.moveMode] || 10.8
   }
-  const displaySpeed: number | string = sim.status.running && sim.effectiveSpeed
+  const displaySpeed: number | string = sim.effectiveSpeed
     ? fmtSpeedFromInputs(sim.effectiveSpeed.kmh, sim.effectiveSpeed.min, sim.effectiveSpeed.max)
-    : fmtSpeedFromInputs(sim.customSpeedKmh, sim.speedMinKmh, sim.speedMaxKmh)
+    : SPEED_MAP[sim.moveMode] || 10.8
 
   // Determine running/paused state from status
   const isRunning = sim.status.running
@@ -794,8 +800,8 @@ const App: React.FC = () => {
           currentPosition={currentPos}
           onModeChange={sim.setMode}
           onSpeedChange={(s: number) => {
-            if (s <= 5) sim.setMoveMode(MoveMode.Walking)
-            else if (s <= 10) sim.setMoveMode(MoveMode.Running)
+            if (s <= 10.8) sim.setMoveMode(MoveMode.Walking)
+            else if (s <= 19.8) sim.setMoveMode(MoveMode.Running)
             else sim.setMoveMode(MoveMode.Driving)
           }}
           onMoveModeChange={sim.setMoveMode}
