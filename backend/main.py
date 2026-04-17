@@ -120,7 +120,22 @@ class AppState:
         return self.simulation_engines.get(udid)
 
     async def create_engine_for_device(self, udid: str):
-        """Create a SimulationEngine for the connected device."""
+        """Create a SimulationEngine for the connected device.
+
+        Idempotent: if an engine already exists for this udid, we
+        reuse it instead of overwriting. The watchdog sometimes calls
+        this every second (e.g. when list_devices()'s udid string
+        doesn't byte-match our _connections key due to case / separator
+        differences in certain pymobiledevice3 versions). Without this
+        guard the re-created engine would wipe current_position back to
+        None, so the user teleports successfully but any subsequent
+        navigate / loop / multi-stop / random-walk raises "Cannot
+        navigate: no current position" because the engine they're
+        aiming at is a fresh one that never saw the teleport.
+        """
+        if udid in self.simulation_engines:
+            logger.debug("Simulation engine already exists for %s; preserving current_position", udid)
+            return
         from core.simulation_engine import SimulationEngine
         from api.websocket import broadcast
 
@@ -297,30 +312,46 @@ async def _usbmux_presence_watchdog():
         await asyncio.sleep(1.0)
         try:
             dm = app_state.device_manager
-            connected = {
-                udid for udid, conn in dm._connections.items()
-                if getattr(conn, "connection_type", "USB") == "USB"
-            }
+            # Build two views: the ORIGINAL-case serials (needed for
+            # downstream look-ups into dm._connections /
+            # app_state.simulation_engines that use whatever case was
+            # originally stored) and a LOWERCASE set used only for the
+            # present_usb - connected set difference. Some pymobiledevice3
+            # versions return list_devices()'s serial in different casing
+            # from what connect() stores, which previously made every
+            # tick look like "new device detected" and triggered a
+            # (pre-idempotency-fix) engine recreation that wiped the
+            # user's teleported current_position.
+            connected_original: dict[str, str] = {}  # lowercase → original
+            for udid, conn in dm._connections.items():
+                if getattr(conn, "connection_type", "USB") == "USB":
+                    connected_original[udid.lower()] = udid
+            connected = set(connected_original.keys())
 
             try:
                 raw = await list_devices()
             except Exception:
                 logger.debug("usbmux list_devices failed in watchdog", exc_info=True)
                 continue
-            present_usb = {
-                r.serial for r in raw
-                if getattr(r, "connection_type", "USB") == "USB"
-            }
+            present_usb_original: dict[str, str] = {}  # lowercase → original
+            for r in raw:
+                if getattr(r, "connection_type", "USB") == "USB":
+                    present_usb_original[r.serial.lower()] = r.serial
+            present_usb = set(present_usb_original.keys())
 
             # --- Disappearance detection ---
+            # connected / present_usb are lowercase for set math; map
+            # back to original-case when touching simulation_engines /
+            # _connections so whichever case was stored in those maps
+            # is what we use for look-ups.
             lost_now: list[str] = []
-            for udid in connected:
-                if udid in present_usb:
-                    miss_counts.pop(udid, None)
+            for udid_lc in connected:
+                if udid_lc in present_usb:
+                    miss_counts.pop(udid_lc, None)
                 else:
-                    miss_counts[udid] = miss_counts.get(udid, 0) + 1
-                    if miss_counts[udid] >= miss_threshold:
-                        lost_now.append(udid)
+                    miss_counts[udid_lc] = miss_counts.get(udid_lc, 0) + 1
+                    if miss_counts[udid_lc] >= miss_threshold:
+                        lost_now.append(connected_original[udid_lc])
 
             if lost_now:
                 logger.warning("usbmux watchdog: device(s) gone → %s", lost_now)
@@ -441,9 +472,13 @@ async def _usbmux_presence_watchdog():
             # device cap. The user environment is assumed to only ever have
             # their own iPhones plugged in.
             MAX_DEVICES = 2
-            new_udids = present_usb - connected
-            if not new_udids or len(connected) >= MAX_DEVICES:
+            new_udids_lc = present_usb - connected
+            if not new_udids_lc or len(connected) >= MAX_DEVICES:
                 continue
+            # Map back to the original-case serials from list_devices so
+            # downstream dm.connect() sees the format pymobiledevice3
+            # itself expects.
+            new_udids = [present_usb_original[lc] for lc in new_udids_lc]
 
             now = time.monotonic()
             for udid in new_udids:
