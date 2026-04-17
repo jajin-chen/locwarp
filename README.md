@@ -11,9 +11,14 @@
   <a href="https://ko-fi.com/haoooooo" target="_blank">
     <img src="https://storage.ko-fi.com/cdn/kofi2.png?v=3" alt="Buy Me a Coffee at ko-fi.com" height="40">
   </a>
+  &nbsp;&nbsp;
+  <a href="https://line.me/ti/p/uL__gvPNL4" target="_blank">
+    <img src="https://img.shields.io/badge/LINE-06C755?style=for-the-badge&logo=line&logoColor=white" alt="LINE" height="40">
+  </a>
 </p>
 
-> 如果 LocWarp 有幫到你, 歡迎[請我喝杯咖啡](https://ko-fi.com/haoooooo)支持 ☕
+> 如果 LocWarp 有幫到你, 歡迎[請我喝杯咖啡](https://ko-fi.com/haoooooo)支持 ☕  
+> 沒有 PayPal 想要支持的話, 也可以[加 LINE](https://line.me/ti/p/uL__gvPNL4) 跟我聯絡。
 
 > ### 專案性質聲明
 >

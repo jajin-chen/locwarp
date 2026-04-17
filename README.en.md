@@ -11,9 +11,14 @@
   <a href="https://ko-fi.com/haoooooo" target="_blank">
     <img src="https://storage.ko-fi.com/cdn/kofi2.png?v=3" alt="Buy Me a Coffee at ko-fi.com" height="40">
   </a>
+  &nbsp;&nbsp;
+  <a href="https://line.me/ti/p/uL__gvPNL4" target="_blank">
+    <img src="https://img.shields.io/badge/LINE-06C755?style=for-the-badge&logo=line&logoColor=white" alt="LINE" height="40">
+  </a>
 </p>
 
-> If LocWarp has been useful to you, [buy me a coffee](https://ko-fi.com/haoooooo) ☕
+> If LocWarp has been useful to you, [buy me a coffee](https://ko-fi.com/haoooooo) ☕  
+> No PayPal? Feel free to [reach me on LINE](https://line.me/ti/p/uL__gvPNL4) to support.
 
 > ### Project Nature
 >
