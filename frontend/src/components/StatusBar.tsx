@@ -114,34 +114,8 @@ const StatusBar: React.FC<StatusBarProps> = ({
   // the same dialog body so the user can read them before dismissing.
   const [locatePcOpen, setLocatePcOpen] = useState(false);
   const [locatePcBusy, setLocatePcBusy] = useState(false);
-  const [locatePcResult, setLocatePcResult] = useState<{ lat: number; lng: number; accuracy: number; source: 'win' | 'ip' } | null>(null);
+  const [locatePcResult, setLocatePcResult] = useState<{ lat: number; lng: number; accuracy: number; via: string } | null>(null);
   const [locatePcError, setLocatePcError] = useState<string | null>(null);
-
-  // IP fallback: when Windows Location is denied / unavailable, fall back
-  // to a no-key HTTPS IP geolocation service. BigDataCloud has no
-  // sign-up, no rate limits, and supports HTTPS.
-  const fetchIpLocation = async (): Promise<{ lat: number; lng: number; accuracy: number } | null> => {
-    try {
-      const res = await fetch('https://api.bigdatacloud.net/data/client-info', { cache: 'no-store' });
-      if (!res.ok) throw new Error('bigdatacloud bad status');
-      const j = await res.json();
-      const loc = j?.location;
-      const lat = parseFloat(loc?.latitude);
-      const lng = parseFloat(loc?.longitude);
-      if (isFinite(lat) && isFinite(lng)) return { lat, lng, accuracy: 5000 };
-      throw new Error('bigdatacloud no coords');
-    } catch {
-      try {
-        const res = await fetch('https://ipwho.is/', { cache: 'no-store' });
-        if (!res.ok) return null;
-        const j = await res.json();
-        const lat = parseFloat(j?.latitude);
-        const lng = parseFloat(j?.longitude);
-        if (!isFinite(lat) || !isFinite(lng)) return null;
-        return { lat, lng, accuracy: 5000 };
-      } catch { return null; }
-    }
-  };
 
   const handleLocatePcClick = async () => {
     setLocatePcOpen(true);
@@ -150,33 +124,32 @@ const StatusBar: React.FC<StatusBarProps> = ({
     setLocatePcBusy(true);
 
     const api = (typeof window !== 'undefined') ? window.electronAPI : undefined;
-    if (api?.locatePc) {
-      try {
-        const r = await api.locatePc();
-        if (r.ok && r.lat != null && r.lng != null) {
-          setLocatePcResult({
-            lat: r.lat, lng: r.lng,
-            accuracy: r.accuracy ?? 100,
-            source: 'win',
-          });
-          setLocatePcBusy(false);
-          return;
-        }
-        if (r.code === 'DENIED') {
-          setLocatePcError(t('status.locate_pc_denied'));
-          setLocatePcBusy(false);
-          return;
-        }
-      } catch { /* fall through to IP */ }
+    if (!api?.locatePc) {
+      setLocatePcError('electronAPI.locatePc unavailable (preload missing)');
+      setLocatePcBusy(false);
+      return;
     }
-
-    const ip = await fetchIpLocation();
-    if (ip) {
-      setLocatePcResult({ ...ip, source: 'ip' });
-    } else {
-      setLocatePcError(t('status.locate_pc_ip_fallback_failed'));
+    try {
+      const r = await api.locatePc();
+      setLocatePcBusy(false);
+      if (r.ok && r.lat != null && r.lng != null) {
+        setLocatePcResult({
+          lat: r.lat,
+          lng: r.lng,
+          accuracy: r.accuracy ?? 100,
+          via: r.via ?? 'unknown',
+        });
+        return;
+      }
+      if (r.code === 'DENIED') {
+        setLocatePcError(t('status.locate_pc_denied'));
+        return;
+      }
+      setLocatePcError(`${r.code ?? 'ERROR'}${r.message ? ': ' + r.message : ''}`);
+    } catch (e: any) {
+      setLocatePcBusy(false);
+      setLocatePcError(`IPC error: ${e?.message || e}`);
     }
-    setLocatePcBusy(false);
   };
 
   const handleInitialDialogSave = async () => {
@@ -637,7 +610,8 @@ const StatusBar: React.FC<StatusBarProps> = ({
                   {t('status.locate_pc_accuracy').replace('{m}', Math.round(locatePcResult.accuracy).toString())}
                 </div>
                 <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 14 }}>
-                  {t(locatePcResult.source === 'win' ? 'status.locate_pc_source_wifi' : 'status.locate_pc_source_ip')}
+                  {t(locatePcResult.via === 'windows' ? 'status.locate_pc_source_wifi' : 'status.locate_pc_source_ip')}
+                  {locatePcResult.via !== 'windows' && ` · ${locatePcResult.via}`}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {onLocatePcFly && (

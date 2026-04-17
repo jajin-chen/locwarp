@@ -13,12 +13,16 @@ $ErrorActionPreference = 'Stop'
 try {
   Add-Type -AssemblyName System.Device
   $watcher = New-Object System.Device.Location.GeoCoordinateWatcher([System.Device.Location.GeoPositionAccuracy]::High)
-  $started = $watcher.TryStart($false, [System.TimeSpan]::FromSeconds(8))
-  if (-not $started) { Write-Output 'TIMEOUT'; exit 0 }
+  $watcher.Start()
+  $deadline = (Get-Date).AddSeconds(15)
+  while ((Get-Date) -lt $deadline) {
+    if ($watcher.Permission -eq 'Denied') { Write-Output 'DENIED'; exit 0 }
+    if ($watcher.Status -eq 'Ready' -and -not $watcher.Position.Location.IsUnknown) { break }
+    Start-Sleep -Milliseconds 200
+  }
   if ($watcher.Permission -eq 'Denied') { Write-Output 'DENIED'; exit 0 }
-  if ($watcher.Status -ne 'Ready') { Write-Output 'TIMEOUT'; exit 0 }
   $loc = $watcher.Position.Location
-  if ($loc.IsUnknown) { Write-Output 'UNKNOWN'; exit 0 }
+  if ($loc.IsUnknown) { Write-Output ('NODATA,status=' + $watcher.Status); exit 0 }
   Write-Output ('OK,' + $loc.Latitude + ',' + $loc.Longitude + ',' + $loc.HorizontalAccuracy)
   $watcher.Stop()
 } catch {
@@ -26,7 +30,55 @@ try {
 }
 `
 
-ipcMain.handle('locate-pc', async () => {
+// Run an HTTPS GET from the Electron main process (no renderer CORS,
+// no Content-Security-Policy block) and return the parsed JSON. Used
+// by the IP-geolocation fallback chain inside the locate-pc handler.
+const httpsGetJson = (url) => {
+  return new Promise((resolve) => {
+    const https = require('https')
+    const req = https.get(url, { headers: { 'User-Agent': 'LocWarp-Electron' }, timeout: 6000 }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume()
+        return resolve(null)
+      }
+      let chunks = []
+      res.on('data', (c) => chunks.push(c))
+      res.on('end', () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))) }
+        catch { resolve(null) }
+      })
+    })
+    req.on('error', () => resolve(null))
+    req.on('timeout', () => { try { req.destroy() } catch {} ; resolve(null) })
+  })
+}
+
+const ipFallback = async () => {
+  // ipwho.is — no key, no signup, HTTPS, returns latitude/longitude in JSON.
+  const a = await httpsGetJson('https://ipwho.is/')
+  if (a && typeof a.latitude === 'number' && typeof a.longitude === 'number') {
+    return { ok: true, lat: a.latitude, lng: a.longitude, accuracy: 5000, via: 'ipwho.is' }
+  }
+  // ipapi.co — backup, also no key.
+  const b = await httpsGetJson('https://ipapi.co/json/')
+  if (b && b.latitude != null && b.longitude != null) {
+    const lat = parseFloat(b.latitude); const lng = parseFloat(b.longitude)
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { ok: true, lat, lng, accuracy: 5000, via: 'ipapi.co' }
+    }
+  }
+  // freeipapi.com — last resort.
+  const c = await httpsGetJson('https://freeipapi.com/api/json/')
+  if (c && c.latitude != null && c.longitude != null) {
+    const lat = parseFloat(c.latitude); const lng = parseFloat(c.longitude)
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { ok: true, lat, lng, accuracy: 5000, via: 'freeipapi.com' }
+    }
+  }
+  return null
+}
+
+const tryWindowsLocation = () => {
   return new Promise((resolve) => {
     let settled = false
     const finish = (payload) => { if (!settled) { settled = true; resolve(payload) } }
@@ -47,21 +99,38 @@ ipcMain.handle('locate-pc', async () => {
         const lng = parseFloat(parts[2])
         const acc = parseFloat(parts[3])
         if (Number.isFinite(lat) && Number.isFinite(lng)) {
-          finish({ ok: true, lat, lng, accuracy: Number.isFinite(acc) ? acc : 100 })
-          return
+          return finish({ ok: true, lat, lng, accuracy: Number.isFinite(acc) ? acc : 100 })
         }
       }
-      if (trimmed === 'DENIED') return finish({ ok: false, code: 'DENIED' })
-      if (trimmed === 'TIMEOUT') return finish({ ok: false, code: 'TIMEOUT' })
-      if (trimmed === 'UNKNOWN') return finish({ ok: false, code: 'UNKNOWN' })
-      if (trimmed.startsWith('ERROR,')) return finish({ ok: false, code: 'ERROR', message: trimmed.slice(6) })
-      finish({ ok: false, code: 'UNKNOWN', message: trimmed.slice(0, 200) })
+      if (trimmed === 'DENIED') return finish({ ok: false, code: 'DENIED', message: 'Windows Location service is off or app access denied' })
+      if (trimmed.startsWith('NODATA')) return finish({ ok: false, code: 'NODATA', message: trimmed.slice(0, 200) })
+      if (trimmed.startsWith('ERROR,')) return finish({ ok: false, code: 'ERROR', message: trimmed.slice(6, 200) })
+      finish({ ok: false, code: 'UNKNOWN', message: trimmed.slice(0, 200) || 'no PowerShell output' })
     })
     setTimeout(() => {
       try { child.kill() } catch { /* ignore */ }
-      finish({ ok: false, code: 'TIMEOUT' })
-    }, 12000)
+      finish({ ok: false, code: 'TIMEOUT', message: 'PowerShell timed out after 18s' })
+    }, 18000)
   })
+}
+
+ipcMain.handle('locate-pc', async () => {
+  const win = await tryWindowsLocation()
+  if (win.ok) return { ...win, via: 'windows' }
+  if (win.code === 'DENIED') return win
+  // Windows Location returned NODATA / TIMEOUT / ERROR / UNKNOWN. Fall
+  // back to IP geolocation from the main process so the request is
+  // free of any renderer CORS / CSP restrictions.
+  const ip = await ipFallback()
+  if (ip) return ip
+  // Both layers failed — surface the original Windows error so the
+  // dialog can show the user something diagnostic instead of just
+  // "everything failed".
+  return {
+    ok: false,
+    code: 'ALL_FAILED',
+    message: `Windows Location: ${win.code}${win.message ? ' (' + win.message + ')' : ''} | IP fallback: all 3 services unreachable`,
+  }
 })
 
 // Strip the default "File Edit View Window Help" menubar — LocWarp has its
