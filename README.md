@@ -13,7 +13,7 @@
   </a>
   &nbsp;&nbsp;
   <a href="https://line.me/ti/p/uL__gvPNL4" target="_blank">
-    <img src="https://img.shields.io/badge/LINE-06C755?style=for-the-badge&logo=line&logoColor=white" alt="LINE" height="40">
+    <img src="https://img.shields.io/badge/LINE-加我好友-06C755?style=for-the-badge&logo=line&logoColor=white" alt="LINE" height="40">
   </a>
 </p>
 
