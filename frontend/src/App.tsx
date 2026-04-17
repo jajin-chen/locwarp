@@ -602,6 +602,55 @@ const App: React.FC = () => {
     sim.setWaypoints((prev: any[]) => prev.filter((_: any, i: number) => i !== index))
   }, [sim])
 
+  // Route bulk-paste: parse a textarea of "lat lng [name]" lines into a
+  // waypoint list for Loop / MultiStop. Current device position (if
+  // any) is prepended as waypoint[0] so the backend's seg_idx math
+  // lines up with the UI, matching handleAddWaypoint's contract.
+  // Works identically in single- and dual-device modes because sim.
+  // setWaypoints feeds both the global state and any fanout call site.
+  const [routePasteOpen, setRoutePasteOpen] = useState(false)
+  const [routePasteText, setRoutePasteText] = useState('')
+  const parseRoutePaste = useCallback((raw: string): { valid: Array<{ lat: number; lng: number }>; invalidCount: number; totalLines: number } => {
+    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0)
+    const valid: Array<{ lat: number; lng: number }> = []
+    let invalidCount = 0
+    for (const line of lines) {
+      const tokens = line.split(/[\s,]+/).filter(Boolean)
+      if (tokens.length < 2) { invalidCount++; continue }
+      const lat = parseFloat(tokens[0])
+      const lng = parseFloat(tokens[1])
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        invalidCount++; continue
+      }
+      valid.push({ lat: clampLat(lat), lng: normalizeLng(lng) })
+    }
+    return { valid, invalidCount, totalLines: lines.length }
+  }, [])
+  const submitRoutePaste = useCallback(async () => {
+    const { valid } = parseRoutePaste(routePasteText)
+    if (valid.length === 0) {
+      showToast(t('panel.route_paste_empty'))
+      return
+    }
+    // First pasted coord = route start. Teleport iPhone there so
+    // waypoints[0] lines up with current GPS, BUT don't go through
+    // handleTeleport / sim.teleport — those flip sim.mode back to
+    // Teleport, which would then clear waypoints the moment the user
+    // clicks Loop / MultiStop in the sidebar. Use the raw API + a
+    // direct setCurrentPosition so the mode the user set (Loop /
+    // MultiStop) stays intact.
+    const first = valid[0]
+    sim.setCurrentPosition({ lat: first.lat, lng: first.lng })
+    const udids = device.connectedDevices.map((d) => d.udid)
+    if (udids.length > 0) {
+      try { await sim.teleportAll(udids, first.lat, first.lng) } catch { /* ignore */ }
+    }
+    sim.setWaypoints(valid)
+    setRoutePasteOpen(false)
+    setRoutePasteText('')
+    showToast(t('panel.route_paste_done').replace('{count}', String(valid.length)))
+  }, [routePasteText, parseRoutePaste, sim, device, t, showToast])
+
   const handleStartWaypointRoute = useCallback(async () => {
     // UI waypoint list already includes the current position as index 0
     // (see handleAddWaypoint / generateWaypoints), so just hand it straight
@@ -1128,6 +1177,12 @@ const App: React.FC = () => {
                     title={t('panel.waypoints_gen_all_tooltip')}
                   >{t('panel.waypoints_generate_all')}</button>
                 </div>
+                <button
+                  className="action-btn"
+                  style={{ width: '100%', padding: '3px 8px', fontSize: 11, marginTop: 6 }}
+                  onClick={() => { setRoutePasteText(''); setRoutePasteOpen(true); }}
+                  title={t('panel.route_paste_tooltip')}
+                >{t('panel.route_paste_button')}</button>
               </div>
               {sim.waypoints.length === 0 && (
                 <div style={{ fontSize: 12, opacity: 0.5, padding: '4px 0' }}>
@@ -1502,6 +1557,86 @@ const App: React.FC = () => {
                     >
                       {bulkPasteBusy ? '...' : `${t('bm.bulk_paste_submit')} (${valid.length})`}
                     </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })(),
+          document.body,
+        )}
+        {routePasteOpen && createPortal(
+          (() => {
+            const { valid, invalidCount, totalLines } = parseRoutePaste(routePasteText)
+            return (
+              <div
+                onClick={() => setRoutePasteOpen(false)}
+                style={{
+                  position: 'fixed', inset: 0, zIndex: 2000,
+                  background: 'rgba(8, 10, 20, 0.55)', backdropFilter: 'blur(4px)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: 460, maxWidth: '92vw', maxHeight: '86vh',
+                    display: 'flex', flexDirection: 'column',
+                    background: 'rgba(26, 29, 39, 0.96)',
+                    border: '1px solid rgba(108, 140, 255, 0.25)', borderRadius: 12,
+                    padding: 22, color: '#e8eaf0',
+                    boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65)',
+                    fontSize: 13,
+                  }}
+                >
+                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>
+                    {t('panel.route_paste_title')}
+                  </div>
+                  <div style={{ fontSize: 11, opacity: 0.65, marginBottom: 10, whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+                    {t('panel.route_paste_hint')}
+                  </div>
+                  <textarea
+                    value={routePasteText}
+                    onChange={(e) => setRoutePasteText(e.target.value)}
+                    placeholder="25.0478 121.5319&#10;25.0500 121.5400&#10;25.0530 121.5500"
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      minHeight: 180, maxHeight: 280, resize: 'vertical',
+                      background: 'rgba(10, 12, 18, 0.7)',
+                      border: '1px solid rgba(108, 140, 255, 0.3)',
+                      borderRadius: 6, color: '#e8eaf0',
+                      padding: '8px 10px', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.5,
+                      outline: 'none',
+                    }}
+                  />
+                  <div style={{ fontSize: 11, opacity: 0.7, marginTop: 8 }}>
+                    {totalLines > 0 && t('panel.route_paste_stats')
+                      .replace('{total}', String(totalLines))
+                      .replace('{valid}', String(valid.length))
+                      .replace('{invalid}', String(invalidCount))}
+                  </div>
+                  <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
+                    {t('panel.route_paste_start_hint')}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
+                    <button
+                      onClick={() => { setRoutePasteOpen(false); setRoutePasteText('') }}
+                      style={{
+                        padding: '6px 14px', fontSize: 12, cursor: 'pointer',
+                        background: 'transparent', color: '#9499ac',
+                        border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6,
+                      }}
+                    >{t('generic.cancel')}</button>
+                    <button
+                      onClick={submitRoutePaste}
+                      disabled={valid.length === 0}
+                      style={{
+                        padding: '6px 14px', fontSize: 12, fontWeight: 600,
+                        cursor: valid.length === 0 ? 'not-allowed' : 'pointer',
+                        background: valid.length === 0 ? 'rgba(108,140,255,0.3)' : '#6c8cff',
+                        color: '#fff',
+                        border: 'none', borderRadius: 6,
+                      }}
+                    >{`${t('panel.route_paste_submit')} (${valid.length})`}</button>
                   </div>
                 </div>
               </div>

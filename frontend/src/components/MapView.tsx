@@ -166,6 +166,13 @@ const MapView: React.FC<MapViewProps> = ({
   useEffect(() => { followStateRef.current = followMode; }, [followMode]);
 
   const [recentOpen, setRecentOpen] = useState(false);
+  // Clear-button confirmation state. First click flips the single
+  // "清空" button into a pair of explicit "確定清空" / "取消" buttons.
+  // User has to pick one — no auto-revert, no stale timers.
+  const [clearConfirming, setClearConfirming] = useState(false);
+  useEffect(() => {
+    if (!recentOpen) setClearConfirming(false);
+  }, [recentOpen]);
   // Recent popover drag offset. Clicking + dragging the header shifts
   // the panel; state persists until closed so the user can park it.
   const [recentDragOffset, setRecentDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -1347,30 +1354,77 @@ const MapView: React.FC<MapViewProps> = ({
           style={{
             position: 'absolute',
             right: 12,
-            top: 114,
+            top: 125,
             zIndex: 851,
           }}
         >
           <button
             onClick={() => setRecentOpen((o) => !o)}
+            onMouseEnter={(e) => {
+              if (recentOpen) return;
+              (e.currentTarget as HTMLButtonElement).style.background =
+                'linear-gradient(135deg, rgba(108, 140, 255, 0.35) 0%, rgba(46, 52, 82, 0.95) 100%)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(108, 140, 255, 0.55)';
+              (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)';
+              (e.currentTarget as HTMLButtonElement).style.boxShadow =
+                '0 10px 24px rgba(108, 140, 255, 0.35), 0 2px 6px rgba(12, 18, 40, 0.45)';
+            }}
+            onMouseLeave={(e) => {
+              if (recentOpen) return;
+              (e.currentTarget as HTMLButtonElement).style.background =
+                'linear-gradient(135deg, rgba(38, 42, 58, 0.92) 0%, rgba(22, 25, 36, 0.92) 100%)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(108, 140, 255, 0.22)';
+              (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)';
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 18px rgba(12, 18, 40, 0.45)';
+            }}
             title={tRef.current('map.recent_tooltip')}
             style={{
-              width: 40, height: 40,
+              position: 'relative',
+              width: 42, height: 42,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: recentOpen ? '#6c8cff' : 'rgba(26, 29, 39, 0.82)',
+              background: recentOpen
+                ? 'linear-gradient(135deg, #6c8cff 0%, #4c6bd9 100%)'
+                : 'linear-gradient(135deg, rgba(38, 42, 58, 0.92) 0%, rgba(22, 25, 36, 0.92) 100%)',
               color: '#fff',
-              border: '1px solid rgba(108, 140, 255, 0.25)',
-              borderRadius: 8,
+              border: `1px solid ${recentOpen ? 'rgba(108, 140, 255, 0.85)' : 'rgba(108, 140, 255, 0.22)'}`,
+              borderRadius: 10,
               cursor: 'pointer',
-              boxShadow: '0 6px 18px rgba(12, 18, 40, 0.45)',
-              backdropFilter: 'blur(12px) saturate(140%)',
-              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+              boxShadow: recentOpen
+                ? '0 10px 28px rgba(108, 140, 255, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
+                : '0 6px 18px rgba(12, 18, 40, 0.45)',
+              backdropFilter: 'blur(14px) saturate(160%)',
+              WebkitBackdropFilter: 'blur(14px) saturate(160%)',
+              transition: 'transform 120ms ease-out, background 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out',
             }}
           >
+            {/* Lucide "History": counterclockwise arrow around a clock
+                face. Reads as "past / rewind / history" much more
+                clearly than a plain clock icon. */}
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+              <path d="M12 7v5l4 2" />
             </svg>
+            {/* Count badge: little pill in the corner showing how many
+                entries are recorded, so the user can glance at the map
+                and know there's something in history without opening. */}
+            {recentPlaces.length > 0 && !recentOpen && (
+              <span style={{
+                position: 'absolute',
+                top: -5, right: -5,
+                minWidth: 16, height: 16,
+                padding: '0 4px',
+                borderRadius: 99,
+                background: '#f48fb1',
+                color: '#23283a',
+                fontSize: 10, fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 2px 6px rgba(244, 143, 177, 0.5)',
+                border: '1.5px solid rgba(22, 25, 36, 0.92)',
+                fontFamily: 'system-ui, sans-serif',
+                lineHeight: 1,
+              }}>{recentPlaces.length}</span>
+            )}
           </button>
 
           {recentOpen && (
@@ -1408,15 +1462,45 @@ const MapView: React.FC<MapViewProps> = ({
               >
                 <span>{tRef.current('map.recent_title')}</span>
                 {onRecentClear && recentPlaces.length > 0 && (
-                  <button
-                    onClick={() => { onRecentClear(); setRecentOpen(false); }}
-                    style={{
-                      background: 'transparent', border: 'none',
-                      color: '#9499ac', fontSize: 11, cursor: 'pointer',
-                      padding: '2px 6px',
-                    }}
-                    title={tRef.current('map.recent_clear_tooltip')}
-                  >{tRef.current('map.recent_clear')}</button>
+                  !clearConfirming ? (
+                    <button
+                      onClick={() => setClearConfirming(true)}
+                      style={{
+                        background: 'transparent', border: '1px solid transparent',
+                        color: '#9499ac', fontSize: 11, cursor: 'pointer',
+                        padding: '2px 8px', borderRadius: 4,
+                        transition: 'background 120ms ease, color 120ms ease',
+                      }}
+                      title={tRef.current('map.recent_clear_tooltip')}
+                    >{tRef.current('map.recent_clear')}</button>
+                  ) : (
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        onClick={() => {
+                          onRecentClear();
+                          setClearConfirming(false);
+                          setRecentOpen(false);
+                        }}
+                        style={{
+                          background: 'rgba(229, 57, 53, 0.18)',
+                          border: '1px solid rgba(229, 57, 53, 0.55)',
+                          color: '#ff7a6d', fontSize: 11, fontWeight: 700,
+                          cursor: 'pointer',
+                          padding: '2px 8px', borderRadius: 4,
+                        }}
+                      >{tRef.current('map.recent_clear_confirm')}</button>
+                      <button
+                        onClick={() => setClearConfirming(false)}
+                        style={{
+                          background: 'transparent',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          color: '#9499ac', fontSize: 11,
+                          cursor: 'pointer',
+                          padding: '2px 8px', borderRadius: 4,
+                        }}
+                      >{tRef.current('generic.cancel')}</button>
+                    </div>
+                  )
                 )}
               </div>
               <div style={{ overflowY: 'auto', flex: 1 }}>
