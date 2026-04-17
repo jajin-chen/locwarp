@@ -464,9 +464,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           <div className="section-content">
             <div className="speed-selector">
               {[
-                { labelKey: 'move.walking' as const, value: 5, mode: 'walking' as MoveMode },
-                { labelKey: 'move.running' as const, value: 10, mode: 'running' as MoveMode },
-                { labelKey: 'move.driving' as const, value: 40, mode: 'driving' as MoveMode },
+                { labelKey: 'move.walking' as const, value: 10.8, mode: 'walking' as MoveMode },
+                { labelKey: 'move.running' as const, value: 19.8, mode: 'running' as MoveMode },
+                { labelKey: 'move.driving' as const, value: 60, mode: 'driving' as MoveMode },
               ].map((opt) => (
                 <button
                   key={opt.value}
@@ -476,10 +476,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                     onSpeedChange(opt.value);
                     onCustomSpeedChange(null);
                   }}
-                  style={{ padding: '6px 4px' }}
+                  style={{ padding: '4px 2px' }}
                 >
-                  <div style={{ fontSize: 12, fontWeight: 500 }}>{t(opt.labelKey)}</div>
-                  <div style={{ fontSize: 10, opacity: 0.6 }}>{opt.value} km/h</div>
+                  <div style={{ fontSize: 11, fontWeight: 500 }}>{t(opt.labelKey)}</div>
+                  <div style={{ fontSize: 9, opacity: 0.6 }}>{opt.value} km/h</div>
                 </button>
               ))}
             </div>
