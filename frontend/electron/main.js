@@ -1,7 +1,68 @@
-const { app, BrowserWindow, Menu, shell } = require('electron')
+const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron')
 const path = require('path')
 const { spawn } = require('child_process')
 const http = require('http')
+
+// Locate-PC over IPC: shells out to PowerShell + System.Device.Location
+// (the Windows Location API). This taps Windows' built-in Wi-Fi
+// positioning + GPS without needing a Google API key (which Electron's
+// navigator.geolocation requires) or any third-party HTTP service.
+// Accuracy in urban areas is typically 30-100m; rural ~500m.
+const LOCATE_PS_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+try {
+  Add-Type -AssemblyName System.Device
+  $watcher = New-Object System.Device.Location.GeoCoordinateWatcher([System.Device.Location.GeoPositionAccuracy]::High)
+  $started = $watcher.TryStart($false, [System.TimeSpan]::FromSeconds(8))
+  if (-not $started) { Write-Output 'TIMEOUT'; exit 0 }
+  if ($watcher.Permission -eq 'Denied') { Write-Output 'DENIED'; exit 0 }
+  if ($watcher.Status -ne 'Ready') { Write-Output 'TIMEOUT'; exit 0 }
+  $loc = $watcher.Position.Location
+  if ($loc.IsUnknown) { Write-Output 'UNKNOWN'; exit 0 }
+  Write-Output ('OK,' + $loc.Latitude + ',' + $loc.Longitude + ',' + $loc.HorizontalAccuracy)
+  $watcher.Stop()
+} catch {
+  Write-Output ('ERROR,' + $_.Exception.Message)
+}
+`
+
+ipcMain.handle('locate-pc', async () => {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (payload) => { if (!settled) { settled = true; resolve(payload) } }
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', LOCATE_PS_SCRIPT],
+      { windowsHide: true },
+    )
+    let out = ''
+    child.stdout.on('data', (d) => { out += d.toString('utf8') })
+    child.stderr.on('data', (d) => console.error('[locate-pc] stderr:', d.toString('utf8')))
+    child.on('error', (e) => finish({ ok: false, code: 'SPAWN_FAILED', message: e.message }))
+    child.on('exit', () => {
+      const trimmed = out.trim()
+      if (trimmed.startsWith('OK,')) {
+        const parts = trimmed.split(',')
+        const lat = parseFloat(parts[1])
+        const lng = parseFloat(parts[2])
+        const acc = parseFloat(parts[3])
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          finish({ ok: true, lat, lng, accuracy: Number.isFinite(acc) ? acc : 100 })
+          return
+        }
+      }
+      if (trimmed === 'DENIED') return finish({ ok: false, code: 'DENIED' })
+      if (trimmed === 'TIMEOUT') return finish({ ok: false, code: 'TIMEOUT' })
+      if (trimmed === 'UNKNOWN') return finish({ ok: false, code: 'UNKNOWN' })
+      if (trimmed.startsWith('ERROR,')) return finish({ ok: false, code: 'ERROR', message: trimmed.slice(6) })
+      finish({ ok: false, code: 'UNKNOWN', message: trimmed.slice(0, 200) })
+    })
+    setTimeout(() => {
+      try { child.kill() } catch { /* ignore */ }
+      finish({ ok: false, code: 'TIMEOUT' })
+    }, 12000)
+  })
+})
 
 // Strip the default "File Edit View Window Help" menubar — LocWarp has its
 // own in-window controls and the native menu only adds noise on Windows.
@@ -103,18 +164,9 @@ async function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
     },
   })
-  // Auto-grant geolocation requests so the StatusBar's "Locate PC"
-  // button can actually call navigator.geolocation. Electron blocks the
-  // request silently by default, which surfaces in the renderer as a
-  // PERMISSION_DENIED error that looks like a Windows-side denial.
-  try {
-    mainWindow.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
-      if (permission === 'geolocation') return callback(true)
-      callback(false)
-    })
-  } catch (e) { console.error('[electron] permission handler hook failed:', e) }
   // Show the window once the first frame is painted. Combined with
   // backgroundColor above, this eliminates the blank/white boot state.
   mainWindow.once('ready-to-show', () => { mainWindow.show() })

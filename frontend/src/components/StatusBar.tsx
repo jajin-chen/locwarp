@@ -114,72 +114,69 @@ const StatusBar: React.FC<StatusBarProps> = ({
   // the same dialog body so the user can read them before dismissing.
   const [locatePcOpen, setLocatePcOpen] = useState(false);
   const [locatePcBusy, setLocatePcBusy] = useState(false);
-  const [locatePcResult, setLocatePcResult] = useState<{ lat: number; lng: number; accuracy: number; source: 'wifi' | 'ip' } | null>(null);
+  const [locatePcResult, setLocatePcResult] = useState<{ lat: number; lng: number; accuracy: number; source: 'win' | 'ip' } | null>(null);
   const [locatePcError, setLocatePcError] = useState<string | null>(null);
 
-  // IP fallback: Electron's navigator.geolocation needs GOOGLE_API_KEY to
-  // actually resolve via Wi-Fi positioning. Without it, requests return
-  // POSITION_UNAVAILABLE. ipapi.co is a no-key HTTPS service that gives
-  // city-level coordinates, which is enough to drop the user near home.
+  // IP fallback: when Windows Location is denied / unavailable, fall back
+  // to a no-key HTTPS IP geolocation service. BigDataCloud has no
+  // sign-up, no rate limits, and supports HTTPS.
   const fetchIpLocation = async (): Promise<{ lat: number; lng: number; accuracy: number } | null> => {
     try {
-      const res = await fetch('https://ipapi.co/json/', { cache: 'no-store' });
-      if (!res.ok) return null;
+      const res = await fetch('https://api.bigdatacloud.net/data/client-info', { cache: 'no-store' });
+      if (!res.ok) throw new Error('bigdatacloud bad status');
       const j = await res.json();
-      const lat = parseFloat(j.latitude);
-      const lng = parseFloat(j.longitude);
-      if (!isFinite(lat) || !isFinite(lng)) return null;
-      return { lat, lng, accuracy: 5000 };
+      const loc = j?.location;
+      const lat = parseFloat(loc?.latitude);
+      const lng = parseFloat(loc?.longitude);
+      if (isFinite(lat) && isFinite(lng)) return { lat, lng, accuracy: 5000 };
+      throw new Error('bigdatacloud no coords');
     } catch {
-      return null;
+      try {
+        const res = await fetch('https://ipwho.is/', { cache: 'no-store' });
+        if (!res.ok) return null;
+        const j = await res.json();
+        const lat = parseFloat(j?.latitude);
+        const lng = parseFloat(j?.longitude);
+        if (!isFinite(lat) || !isFinite(lng)) return null;
+        return { lat, lng, accuracy: 5000 };
+      } catch { return null; }
     }
   };
 
-  const handleLocatePcClick = () => {
+  const handleLocatePcClick = async () => {
     setLocatePcOpen(true);
     setLocatePcResult(null);
     setLocatePcError(null);
     setLocatePcBusy(true);
 
-    const tryIpFallback = async (denyMsg: string) => {
-      const ip = await fetchIpLocation();
-      if (ip) {
-        setLocatePcResult({ ...ip, source: 'ip' });
-        setLocatePcError(null);
-      } else {
-        setLocatePcError(denyMsg);
-      }
-      setLocatePcBusy(false);
-    };
-
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      tryIpFallback(t('status.locate_pc_ip_fallback_failed'));
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocatePcBusy(false);
-        setLocatePcResult({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-          source: 'wifi',
-        });
-      },
-      async (err) => {
-        // Permission denied is the user explicitly saying no, so don't
-        // silently fall back to IP without telling them.
-        if (err.code === err.PERMISSION_DENIED) {
+    const api = (typeof window !== 'undefined') ? window.electronAPI : undefined;
+    if (api?.locatePc) {
+      try {
+        const r = await api.locatePc();
+        if (r.ok && r.lat != null && r.lng != null) {
+          setLocatePcResult({
+            lat: r.lat, lng: r.lng,
+            accuracy: r.accuracy ?? 100,
+            source: 'win',
+          });
           setLocatePcBusy(false);
-          setLocatePcError(t('status.locate_pc_denied'));
           return;
         }
-        // POSITION_UNAVAILABLE / TIMEOUT both happen on no-Google-key
-        // Electron builds and on machines without Wi-Fi. Try IP.
-        await tryIpFallback(t('status.locate_pc_ip_fallback_failed'));
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 },
-    );
+        if (r.code === 'DENIED') {
+          setLocatePcError(t('status.locate_pc_denied'));
+          setLocatePcBusy(false);
+          return;
+        }
+      } catch { /* fall through to IP */ }
+    }
+
+    const ip = await fetchIpLocation();
+    if (ip) {
+      setLocatePcResult({ ...ip, source: 'ip' });
+    } else {
+      setLocatePcError(t('status.locate_pc_ip_fallback_failed'));
+    }
+    setLocatePcBusy(false);
   };
 
   const handleInitialDialogSave = async () => {
@@ -640,7 +637,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
                   {t('status.locate_pc_accuracy').replace('{m}', Math.round(locatePcResult.accuracy).toString())}
                 </div>
                 <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 14 }}>
-                  {t(locatePcResult.source === 'wifi' ? 'status.locate_pc_source_wifi' : 'status.locate_pc_source_ip')}
+                  {t(locatePcResult.source === 'win' ? 'status.locate_pc_source_wifi' : 'status.locate_pc_source_ip')}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {onLocatePcFly && (
