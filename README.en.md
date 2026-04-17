@@ -17,7 +17,7 @@
 
 > ### Project Nature
 >
-> LocWarp is an independently-maintained open source hobby project, not a commercial product, and without a dedicated team. The author will make reasonable efforts to add features, respond to issues, fix bugs and track iOS / pymobiledevice3 updates, however:
+> LocWarp is an independently-maintained open source project, not a commercial product, and without a dedicated team. The author will make reasonable efforts to add features, respond to issues, fix bugs and track iOS / pymobiledevice3 updates, however:
 >
 > - Stable operation is only guaranteed in **the developer's own test environment** (currently iPhone 16 Pro Max / iOS 26.4.1 + Windows 11 Pro);
 > - **Stability on other devices, iOS patch revisions, network environments or system configurations is not guaranteed**;
