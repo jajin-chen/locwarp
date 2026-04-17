@@ -395,27 +395,65 @@ const App: React.FC = () => {
   }
   const clampLat = (lat: number): number => Math.max(-90, Math.min(90, lat))
 
-  const handleTeleport = useCallback(async (latIn: number, lngIn: number) => {
+  // Recent places list (last 20 destinations the user flew to). Loaded
+  // once on mount; refreshed after each push so the map's recent-button
+  // popover is always current.
+  const [recentPlaces, setRecentPlaces] = useState<api.RecentEntry[]>([])
+  const refreshRecent = useCallback(async () => {
+    try { setRecentPlaces(await api.getRecent()) } catch { /* silent */ }
+  }, [])
+  useEffect(() => { void refreshRecent() }, [refreshRecent])
+  const pushRecent = useCallback(async (lat: number, lng: number, kind: api.RecentKind, name?: string) => {
+    try {
+      await api.pushRecent({ lat, lng, kind, name: name || null })
+      void refreshRecent()
+      // When the caller didn't supply a name (right-click teleport /
+      // navigate, coord-input fly), reverse-geocode in the background
+      // and push again with a resolved short_name. Backend dedupe then
+      // bumps the top entry and fills in its name field, so the list
+      // stops showing the raw coord twice.
+      if (!name) {
+        void (async () => {
+          try {
+            const geo = await api.reverseGeocode(lat, lng)
+            const resolved = String(geo?.short_name || geo?.display_name || '').trim()
+            if (!resolved) return
+            await api.pushRecent({ lat, lng, kind, name: resolved })
+            void refreshRecent()
+          } catch { /* offline / rate-limited — keep the unnamed entry */ }
+        })()
+      }
+    } catch { /* silent */ }
+  }, [refreshRecent])
+  const clearRecentList = useCallback(async () => {
+    try { await api.clearRecent() } catch { /* silent */ }
+    setRecentPlaces([])
+  }, [])
+
+  // `source` lets the caller tag this flight for the recent-places
+  // history: 'menu' (map right-click) is the default, 'coord' when the
+  // coord-input overlay button fired us. The UI shows different labels
+  // depending on source.
+  const handleTeleport = useCallback(async (latIn: number, lngIn: number, source: 'menu' | 'coord' = 'menu') => {
     const lat = clampLat(latIn)
     const lng = normalizeLng(lngIn)
     const udids = device.connectedDevices.map((d) => d.udid)
     if (udids.length >= 2) {
-      // Pre-set the map's tracked position so pan-to-current fires immediately,
-      // without waiting for the backend position_update event to arrive.
       sim.setCurrentPosition({ lat, lng })
       const outcome = await sim.teleportAll(udids, lat, lng)
       showToast(toastForFanout(t, t('mode.teleport'), outcome, device.connectedDevices))
     } else {
       sim.teleport(lat, lng)
     }
-  }, [sim, device, t, showToast])
+    void pushRecent(lat, lng, source === 'coord' ? 'coord_teleport' : 'teleport')
+  }, [sim, device, t, showToast, pushRecent])
 
   const mapApiRef = useRef<{ panTo: (lat: number, lng: number, zoom?: number) => void } | null>(null)
   const handleMapPanOnly = useCallback((lat: number, lng: number) => {
     mapApiRef.current?.panTo(clampLat(lat), normalizeLng(lng))
   }, [])
 
-  const handleNavigate = useCallback(async (latIn: number, lngIn: number) => {
+  const handleNavigate = useCallback(async (latIn: number, lngIn: number, source: 'menu' | 'coord' = 'menu') => {
     const lat = clampLat(latIn)
     const lng = normalizeLng(lngIn)
     const udids = device.connectedDevices.map((d) => d.udid)
@@ -425,7 +463,8 @@ const App: React.FC = () => {
     } else {
       sim.navigate(lat, lng)
     }
-  }, [sim, device, t, showToast])
+    void pushRecent(lat, lng, source === 'coord' ? 'coord_navigate' : 'navigate')
+  }, [sim, device, t, showToast, pushRecent])
 
   const [addBmDialog, setAddBmDialog] = useState<{
     lat: number; lng: number; name: string; category: string;
@@ -483,6 +522,59 @@ const App: React.FC = () => {
     } as any)
     setAddBmDialog(null)
   }, [addBmDialog, bm])
+
+  // Bulk-paste bookmark dialog state. Input is a textarea of one-per-line
+  // "lat lng [optional name]" rows; separator is any run of whitespace
+  // or commas so pasting from most sources (Excel, Notepad, Google Maps
+  // copy-coords) lands cleanly.
+  const [bulkPasteOpen, setBulkPasteOpen] = useState(false)
+  const [bulkPasteText, setBulkPasteText] = useState('')
+  const [bulkPasteCategory, setBulkPasteCategory] = useState<string>(() => bm.categories[0]?.name || '預設')
+  const [bulkPasteBusy, setBulkPasteBusy] = useState(false)
+  const parseBulkPaste = useCallback((raw: string): { valid: Array<{ lat: number; lng: number; name: string }>; invalidCount: number; totalLines: number } => {
+    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0)
+    const valid: Array<{ lat: number; lng: number; name: string }> = []
+    let invalidCount = 0
+    for (const line of lines) {
+      const tokens = line.split(/[\s,]+/).filter(Boolean)
+      if (tokens.length < 2) { invalidCount++; continue }
+      const lat = parseFloat(tokens[0])
+      const lng = parseFloat(tokens[1])
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        invalidCount++; continue
+      }
+      const name = tokens.slice(2).join(' ').trim()
+      valid.push({ lat, lng, name })
+    }
+    return { valid, invalidCount, totalLines: lines.length }
+  }, [])
+  const submitBulkPaste = useCallback(async () => {
+    const { valid } = parseBulkPaste(bulkPasteText)
+    if (valid.length === 0) {
+      showToast(t('bm.bulk_paste_empty'))
+      return
+    }
+    setBulkPasteBusy(true)
+    const cat = bm.categories.find((c) => c.name === bulkPasteCategory)
+    const catId = cat?.id || 'default'
+    let added = 0
+    for (const entry of valid) {
+      try {
+        await bm.createBookmark({
+          name: entry.name || `${entry.lat.toFixed(5)}, ${entry.lng.toFixed(5)}`,
+          lat: entry.lat,
+          lng: entry.lng,
+          category_id: catId,
+          country_code: '',
+        } as any)
+        added++
+      } catch { /* skip bad rows */ }
+    }
+    setBulkPasteBusy(false)
+    setBulkPasteOpen(false)
+    setBulkPasteText('')
+    showToast(t('bm.bulk_paste_done').replace('{count}', String(added)))
+  }, [bulkPasteText, bulkPasteCategory, bm, parseBulkPaste, t, showToast])
 
   const handleAddWaypoint = useCallback((lat: number, lng: number) => {
     // Seed the list with the current device position as the implicit start
@@ -820,6 +912,19 @@ const App: React.FC = () => {
           waypointProgress={sim.waypointProgress}
           onTeleport={handleTeleport}
           onNavigate={handleNavigate}
+          onAddressSelect={async (lat, lng, name) => {
+            const latN = clampLat(lat)
+            const lngN = normalizeLng(lng)
+            const udids = device.connectedDevices.map((d) => d.udid)
+            if (udids.length >= 2) {
+              sim.setCurrentPosition({ lat: latN, lng: lngN })
+              const outcome = await sim.teleportAll(udids, latN, lngN)
+              showToast(toastForFanout(t, t('mode.teleport'), outcome, device.connectedDevices))
+            } else {
+              sim.teleport(latN, lngN)
+            }
+            void pushRecent(latN, lngN, 'search', name)
+          }}
           bookmarks={bm.bookmarks.map((b: any) => ({
             id: b.id,
             name: b.name,
@@ -944,6 +1049,11 @@ const App: React.FC = () => {
           bookmarkShowOnMap={showBookmarkPins}
           onBookmarkShowOnMapChange={setShowBookmarkPins}
           onBookmarkImport={handleBookmarkImport}
+          onBookmarkBulkPaste={() => {
+            setBulkPasteText('')
+            setBulkPasteCategory(bm.categories[0]?.name || '預設')
+            setBulkPasteOpen(true)
+          }}
           bookmarkExportUrl={api.bookmarksExportUrl()}
           savedRoutes={savedRoutes.map(r => ({ id: r.id, name: r.name, waypoints: r.waypoints ?? [] }))}
           onRouteGpxImport={handleGpxImport}
@@ -1201,6 +1311,13 @@ const App: React.FC = () => {
           }))}
           showBookmarkPins={showBookmarkPins}
           onMapReady={(api) => { mapApiRef.current = api }}
+          recentPlaces={recentPlaces}
+          onRecentReFly={(entry) => {
+            const isNavigate = entry.kind === 'navigate' || entry.kind === 'coord_navigate'
+            if (isNavigate) handleNavigate(entry.lat, entry.lng)
+            else handleTeleport(entry.lat, entry.lng)
+          }}
+          onRecentClear={clearRecentList}
         />
         {avatarPickerOpen && (
           <UserAvatarPicker
@@ -1295,6 +1412,101 @@ const App: React.FC = () => {
               <button className="action-btn" onClick={() => setAddBmDialog(null)}>{t('generic.cancel')}</button>
             </div>
           </div>,
+          document.body,
+        )}
+        {bulkPasteOpen && createPortal(
+          (() => {
+            const { valid, invalidCount, totalLines } = parseBulkPaste(bulkPasteText)
+            return (
+              <div
+                onClick={() => { if (!bulkPasteBusy) setBulkPasteOpen(false) }}
+                style={{
+                  position: 'fixed', inset: 0, zIndex: 2000,
+                  background: 'rgba(8, 10, 20, 0.55)', backdropFilter: 'blur(4px)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: 460, maxWidth: '92vw', maxHeight: '86vh',
+                    display: 'flex', flexDirection: 'column',
+                    background: 'rgba(26, 29, 39, 0.96)',
+                    border: '1px solid rgba(108, 140, 255, 0.25)', borderRadius: 12,
+                    padding: 22, color: '#e8eaf0',
+                    boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65)',
+                    fontSize: 13,
+                  }}
+                >
+                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>
+                    {t('bm.bulk_paste_title')}
+                  </div>
+                  <div style={{ fontSize: 11, opacity: 0.65, marginBottom: 10, whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+                    {t('bm.bulk_paste_hint')}
+                  </div>
+                  <textarea
+                    value={bulkPasteText}
+                    onChange={(e) => setBulkPasteText(e.target.value)}
+                    placeholder="25.0478 121.5319 台北車站&#10;24.1456 120.6839 台中"
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      minHeight: 160, maxHeight: 240, resize: 'vertical',
+                      background: 'rgba(10, 12, 18, 0.7)',
+                      border: '1px solid rgba(108, 140, 255, 0.3)',
+                      borderRadius: 6, color: '#e8eaf0',
+                      padding: '8px 10px', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.5,
+                      outline: 'none',
+                    }}
+                  />
+                  <div style={{ fontSize: 11, opacity: 0.7, marginTop: 8 }}>
+                    {totalLines > 0 && t('bm.bulk_paste_stats')
+                      .replace('{total}', String(totalLines))
+                      .replace('{valid}', String(valid.length))
+                      .replace('{invalid}', String(invalidCount))}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                    <span style={{ fontSize: 12, opacity: 0.75 }}>{t('bm.bulk_paste_category')}:</span>
+                    <select
+                      value={bulkPasteCategory}
+                      onChange={(e) => setBulkPasteCategory(e.target.value)}
+                      className="search-input"
+                      style={{ flex: 1, padding: '4px 8px', fontSize: 12 }}
+                    >
+                      {bm.categories.map((c) => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
+                    <button
+                      onClick={() => { if (!bulkPasteBusy) { setBulkPasteOpen(false); setBulkPasteText('') } }}
+                      disabled={bulkPasteBusy}
+                      style={{
+                        padding: '6px 14px', fontSize: 12, cursor: bulkPasteBusy ? 'not-allowed' : 'pointer',
+                        background: 'transparent', color: '#9499ac',
+                        border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6,
+                        opacity: bulkPasteBusy ? 0.6 : 1,
+                      }}
+                    >{t('generic.cancel')}</button>
+                    <button
+                      onClick={submitBulkPaste}
+                      disabled={bulkPasteBusy || valid.length === 0}
+                      style={{
+                        padding: '6px 14px', fontSize: 12, fontWeight: 600,
+                        cursor: (bulkPasteBusy || valid.length === 0) ? 'not-allowed' : 'pointer',
+                        background: valid.length === 0 ? 'rgba(108,140,255,0.3)' : '#6c8cff',
+                        color: '#fff',
+                        border: 'none', borderRadius: 6,
+                        opacity: bulkPasteBusy ? 0.6 : 1,
+                      }}
+                    >
+                      {bulkPasteBusy ? '...' : `${t('bm.bulk_paste_submit')} (${valid.length})`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })(),
           document.body,
         )}
         {sim.error && (

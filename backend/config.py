@@ -7,6 +7,7 @@ DATA_DIR.mkdir(exist_ok=True)
 SETTINGS_FILE = DATA_DIR / "settings.json"
 BOOKMARKS_FILE = DATA_DIR / "bookmarks.json"
 ROUTES_FILE = DATA_DIR / "routes.json"
+RECENT_PLACES_FILE = DATA_DIR / "recent_places.json"
 
 # OSRM
 OSRM_BASE_URL = "https://router.project-osrm.org"

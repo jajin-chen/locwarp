@@ -373,8 +373,14 @@ class DeviceManager:
                 auto_mount_personalized,
                 AlreadyMountedError,
             )
-        except ImportError:
-            logger.warning("pymobiledevice3 mobile_image_mounter not available; skipping DDI mount")
+        except ImportError as exc:
+            logger.warning(
+                "pymobiledevice3 mobile_image_mounter not importable (%s: %s); "
+                "skipping DDI mount — common causes: Windows Defender / AV quarantined "
+                "a bundled file, installer didn't fully overwrite an older LocWarp, or "
+                "the developer_disk_image package is missing from the bundle",
+                type(exc).__name__, exc,
+            )
             return
 
         # 1. Check whether a Personalized image is already mounted.
@@ -449,8 +455,12 @@ class DeviceManager:
         """Best-effort Developer Disk Image mount for iOS 16.x devices."""
         try:
             import pymobiledevice3.services.mobile_image_mounter as mim
-        except ImportError:
-            logger.warning("mobile_image_mounter not available; skipping classic DDI mount")
+        except ImportError as exc:
+            logger.warning(
+                "mobile_image_mounter not importable for classic DDI (%s: %s); "
+                "skipping classic DDI mount",
+                type(exc).__name__, exc,
+            )
             return
 
         mounter_cls = getattr(mim, "MobileImageMounterService", None)

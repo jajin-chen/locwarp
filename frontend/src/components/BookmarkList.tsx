@@ -39,6 +39,11 @@ interface BookmarkListProps {
   showOnMap?: boolean;
   onShowOnMapChange?: (v: boolean) => void;
   onImport?: (file: File) => Promise<void>;
+  // Bulk paste: opens a textarea dialog where the user can drop
+  // whitespace-separated "lat lng name" lines and push them all as
+  // bookmarks at once. Wired separately from onImport so the file-
+  // picker flow stays untouched.
+  onBulkPaste?: () => void;
   exportUrl?: string;
 }
 
@@ -85,6 +90,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   showOnMap = false,
   onShowOnMapChange,
   onImport,
+  onBulkPaste,
   exportUrl,
 }) => {
   // Prefer the stored color (set at creation, editable via color picker). Only
@@ -326,10 +332,25 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             </svg>
           </a>
         )}
+        {onBulkPaste && (
+          <button
+            className="action-btn"
+            onClick={onBulkPaste}
+            style={{ padding: '3px 6px', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', marginLeft: exportUrl ? 0 : 'auto' }}
+            title={t('bm.bulk_paste_tooltip')}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+              <line x1="15" y1="12" x2="18" y2="12" />
+              <line x1="15" y1="16" x2="18" y2="16" />
+            </svg>
+          </button>
+        )}
         {onImport && (
           <label
             className="action-btn"
-            style={{ padding: '3px 6px', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', marginLeft: exportUrl ? 0 : 'auto' }}
+            style={{ padding: '3px 6px', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', marginLeft: (exportUrl || onBulkPaste) ? 0 : 'auto' }}
             title={t('bm.import_tooltip')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

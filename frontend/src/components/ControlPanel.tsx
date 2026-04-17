@@ -77,6 +77,11 @@ interface ControlPanelProps {
   waypointProgress?: { current: number; next: number; total: number } | null;
   onTeleport: (lat: number, lng: number) => void;
   onNavigate: (lat: number, lng: number) => void;
+  // Address-search fires this instead of onTeleport so the recent-places
+  // history can distinguish "I searched for this" from "I right-click
+  // teleported". The action is still a teleport; only the tagging
+  // changes.
+  onAddressSelect?: (lat: number, lng: number, name: string) => void;
   bookmarks: Bookmark[];
   bookmarkCategories: string[];
   bookmarkCategoryColors?: Record<string, string>;
@@ -91,6 +96,7 @@ interface ControlPanelProps {
   bookmarkShowOnMap?: boolean;
   onBookmarkShowOnMapChange?: (v: boolean) => void;
   onBookmarkImport?: (file: File) => Promise<void>;
+  onBookmarkBulkPaste?: () => void;
   bookmarkExportUrl?: string;
   savedRoutes: SavedRoute[];
   onRouteLoad: (id: string) => void;
@@ -208,6 +214,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   waypointProgress,
   onTeleport,
   onNavigate,
+  onAddressSelect,
   bookmarks,
   bookmarkCategories,
   bookmarkCategoryColors,
@@ -222,6 +229,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   bookmarkShowOnMap,
   onBookmarkShowOnMapChange,
   onBookmarkImport,
+  onBookmarkBulkPaste,
   bookmarkExportUrl,
   savedRoutes,
   onRouteLoad,
@@ -301,9 +309,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     }
   };
 
-  const handleSearchSelect = (lat: number, lng: number, _name: string) => {
+  const handleSearchSelect = (lat: number, lng: number, name: string) => {
     // Address search always teleports, regardless of current mode.
-    onTeleport(lat, lng);
+    // When the parent wires onAddressSelect we route through it so the
+    // recent-places list can tag this entry as kind=search.
+    if (onAddressSelect) onAddressSelect(lat, lng, name);
+    else onTeleport(lat, lng);
   };
 
   const chevron = (open: boolean) => (
@@ -771,6 +782,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   showOnMap={bookmarkShowOnMap}
                   onShowOnMapChange={onBookmarkShowOnMapChange}
                   onImport={onBookmarkImport}
+                  onBulkPaste={onBookmarkBulkPaste}
                   exportUrl={bookmarkExportUrl}
                 />
               ) : (

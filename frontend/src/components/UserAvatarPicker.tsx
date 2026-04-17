@@ -99,6 +99,36 @@ const UserAvatarPicker: React.FC<Props> = ({ avatar, customPng, onSave, onClose,
     onClose();
   };
 
+  // Drag support: clicking the title bar lets the user park this panel
+  // anywhere on the map so it doesn't cover the coord / pin they're
+  // trying to see. Offset persists for the panel's lifetime. Use
+  // document capture-phase listeners so Leaflet / other overlays can't
+  // swallow mousemove / mouseup during the drag.
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const beginDrag = (e: React.MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('button')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const baseX = dragOffset.x;
+    const baseY = dragOffset.y;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const onMove = (ev: MouseEvent) => {
+      ev.preventDefault();
+      setDragOffset({
+        x: baseX + (ev.clientX - startX),
+        y: baseY + (ev.clientY - startY),
+      });
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('mouseup', onUp, true);
+    };
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('mouseup', onUp, true);
+  };
+
   return (
     <div
       style={{
@@ -116,12 +146,19 @@ const UserAvatarPicker: React.FC<Props> = ({ avatar, customPng, onSave, onClose,
         zIndex: 900,
         color: '#e8ebf1',
         fontSize: 12,
+        transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)`,
       }}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.stopPropagation()}
     >
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+      <div
+        onMouseDown={beginDrag}
+        style={{
+          display: 'flex', alignItems: 'center', marginBottom: 10,
+          cursor: 'move', userSelect: 'none',
+        }}
+      >
         <div style={{ fontWeight: 600, fontSize: 13 }}>{t('avatar.title')}</div>
         <button
           onClick={handleCancel}

@@ -183,6 +183,17 @@ export const updateCategory = (id: string, cat: any) => request<any>('PUT', `/ap
 export const deleteCategory = (id: string) => request<any>('DELETE', `/api/bookmarks/categories/${id}`)
 
 export const bookmarksExportUrl = () => `${API}/api/bookmarks/export`
+
+// Recent places: last 20 flights.
+// kind distinguishes the entry point AND the action, so the UI can show
+// a clear label ("座標 / 瞬移 / 導航 / 地址") and re-fly with the same
+// action the user originally invoked.
+export type RecentKind = 'teleport' | 'navigate' | 'search' | 'coord_teleport' | 'coord_navigate'
+export interface RecentEntry { lat: number; lng: number; kind: RecentKind; name: string; ts: number }
+export const getRecent = () => request<RecentEntry[]>('GET', '/api/recent')
+export const pushRecent = (entry: { lat: number; lng: number; kind: RecentKind; name?: string | null }) =>
+  request<RecentEntry>('POST', '/api/recent', entry)
+export const clearRecent = () => request<{ status: string }>('DELETE', '/api/recent')
 export const importBookmarks = (data: any) => request<{ imported: number }>('POST', '/api/bookmarks/import', data)
 
 export const getInitialPosition = () =>

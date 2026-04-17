@@ -32,8 +32,8 @@ interface MapViewProps {
   routePath: Position[];
   randomWalkRadius: number | null;
   onMapClick: (lat: number, lng: number) => void;
-  onTeleport: (lat: number, lng: number) => void;
-  onNavigate: (lat: number, lng: number) => void;
+  onTeleport: (lat: number, lng: number, source?: 'menu' | 'coord') => void;
+  onNavigate: (lat: number, lng: number, source?: 'menu' | 'coord') => void;
   onAddBookmark: (lat: number, lng: number) => void;
   onAddWaypoint?: (lat: number, lng: number) => void;
   showWaypointOption?: boolean;
@@ -56,6 +56,11 @@ interface MapViewProps {
   // "Locate PC" pan-only flow) can move the map view without going
   // through React state.
   onMapReady?: (api: { panTo: (lat: number, lng: number, zoom?: number) => void }) => void;
+  // Recent destinations (last 20 teleport / navigate / search actions).
+  // Rendered in a topright popover so the user can re-fly in one click.
+  recentPlaces?: Array<{ lat: number; lng: number; kind: 'teleport' | 'navigate' | 'search' | 'coord_teleport' | 'coord_navigate'; name: string; ts: number }>;
+  onRecentReFly?: (entry: { lat: number; lng: number; kind: 'teleport' | 'navigate' | 'search' | 'coord_teleport' | 'coord_navigate'; name: string }) => void;
+  onRecentClear?: () => void;
 }
 
 const DEVICE_COLORS = ['#4285f4', '#ff9800'];
@@ -100,6 +105,9 @@ const MapView: React.FC<MapViewProps> = ({
   bookmarkPins,
   showBookmarkPins,
   onMapReady,
+  recentPlaces,
+  onRecentReFly,
+  onRecentClear,
 }) => {
   // Dual-mode rendering disabled by design: with pre-sync (both devices
   // teleport to the same start before any group action) and shared random
@@ -156,6 +164,42 @@ const MapView: React.FC<MapViewProps> = ({
 
   const [followMode, setFollowMode] = useState(false);
   useEffect(() => { followStateRef.current = followMode; }, [followMode]);
+
+  const [recentOpen, setRecentOpen] = useState(false);
+  // Recent popover drag offset. Clicking + dragging the header shifts
+  // the panel; state persists until closed so the user can park it.
+  const [recentDragOffset, setRecentDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  // Capture-phase mousemove/mouseup listeners on document so Leaflet's
+  // map-container handlers can't eat the events before we update the
+  // drag offset. Previous window-level + Pointer-Events attempts both
+  // failed because Leaflet attached its own handlers higher up.
+  const beginRecentDrag = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Ignore mousedown that lands on a child button (e.g. 清空);
+    // otherwise our drag handler swallows the click.
+    const t = e.target as HTMLElement;
+    if (t.closest('button')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const baseX = recentDragOffset.x;
+    const baseY = recentDragOffset.y;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    // Use document with capture:true so Leaflet / the map container
+    // cannot swallow mousemove / mouseup before we see them.
+    const onMove = (ev: MouseEvent) => {
+      ev.preventDefault();
+      setRecentDragOffset({
+        x: baseX + (ev.clientX - startX),
+        y: baseY + (ev.clientY - startY),
+      });
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('mouseup', onUp, true);
+    };
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('mouseup', onUp, true);
+  };
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false,
@@ -1191,13 +1235,14 @@ const MapView: React.FC<MapViewProps> = ({
     if (!Number.isFinite(lng) || lng < -180 || lng > 180) return null;
     return { lat, lng };
   };
-  const submitCoordGo = () => {
+  const submitCoordGo = (kind: 'teleport' | 'navigate' = 'teleport') => {
     const parsed = parseCoordInput(coordInput);
     if (!parsed) {
       if (onShowToast) onShowToast(tRef.current('panel.coord_invalid'));
       return;
     }
-    onTeleport(parsed.lat, parsed.lng);
+    if (kind === 'navigate') onNavigate(parsed.lat, parsed.lng, 'coord');
+    else onTeleport(parsed.lat, parsed.lng, 'coord');
     setCoordInput('');
   };
 
@@ -1234,7 +1279,7 @@ const MapView: React.FC<MapViewProps> = ({
           type="text"
           value={coordInput}
           onChange={(e) => setCoordInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') submitCoordGo(); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') submitCoordGo('teleport'); }}
           placeholder={tRef.current('panel.coord_placeholder')}
           style={{
             width: 210, background: 'transparent', border: 'none',
@@ -1266,7 +1311,7 @@ const MapView: React.FC<MapViewProps> = ({
           {tRef.current('panel.paste')}
         </button>
         <button
-          onClick={submitCoordGo}
+          onClick={() => submitCoordGo('teleport')}
           disabled={!coordInput.trim() || !deviceConnected}
           title={t('map.teleport_here')}
           style={{
@@ -1275,8 +1320,189 @@ const MapView: React.FC<MapViewProps> = ({
             padding: '4px 10px', fontSize: 11, fontWeight: 600,
             cursor: !coordInput.trim() || !deviceConnected ? 'not-allowed' : 'pointer',
           }}
-        >Go</button>
+        >{tRef.current('panel.coord_teleport')}</button>
+        <button
+          onClick={() => submitCoordGo('navigate')}
+          disabled={!coordInput.trim() || !deviceConnected}
+          title={tRef.current('panel.coord_navigate_tooltip')}
+          style={{
+            background: 'transparent',
+            color: !coordInput.trim() || !deviceConnected ? 'rgba(76, 175, 80, 0.4)' : '#4caf50',
+            border: `1px solid ${!coordInput.trim() || !deviceConnected ? 'rgba(76, 175, 80, 0.3)' : 'rgba(76, 175, 80, 0.55)'}`,
+            borderRadius: 4,
+            padding: '4px 10px', fontSize: 11, fontWeight: 600,
+            cursor: !coordInput.trim() || !deviceConnected ? 'not-allowed' : 'pointer',
+          }}
+        >{tRef.current('panel.coord_navigate')}</button>
       </div>
+
+      {/* Recent destinations button + popover (topright, below tile layer
+          switcher). Click the clock to toggle a list of the last 20
+          places the user flew to; click an entry to re-fly using that
+          entry's original action (teleport / navigate / search). */}
+      {(recentPlaces && recentPlaces.length > 0) && (
+        <div
+          onContextMenu={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            right: 12,
+            top: 114,
+            zIndex: 851,
+          }}
+        >
+          <button
+            onClick={() => setRecentOpen((o) => !o)}
+            title={tRef.current('map.recent_tooltip')}
+            style={{
+              width: 40, height: 40,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: recentOpen ? '#6c8cff' : 'rgba(26, 29, 39, 0.82)',
+              color: '#fff',
+              border: '1px solid rgba(108, 140, 255, 0.25)',
+              borderRadius: 8,
+              cursor: 'pointer',
+              boxShadow: '0 6px 18px rgba(12, 18, 40, 0.45)',
+              backdropFilter: 'blur(12px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(12px) saturate(140%)',
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+          </button>
+
+          {recentOpen && (
+            <div
+              // No animation class here: the CSS animation-fill-mode:both
+              // on .anim-fade-slide-up pins transform at translateY(0)
+              // and wins against any inline transform we apply via drag.
+              style={{
+                position: 'absolute',
+                right: 0,
+                top: 48,
+                width: 320,
+                maxHeight: '62vh',
+                display: 'flex', flexDirection: 'column',
+                background: 'rgba(26, 29, 39, 0.94)',
+                backdropFilter: 'blur(18px) saturate(160%)',
+                WebkitBackdropFilter: 'blur(18px) saturate(160%)',
+                border: '1px solid rgba(108, 140, 255, 0.22)',
+                borderRadius: 12,
+                boxShadow: '0 18px 48px rgba(12, 18, 40, 0.65)',
+                overflow: 'hidden',
+                transform: `translate(${recentDragOffset.x}px, ${recentDragOffset.y}px)`,
+              }}
+            >
+              <div
+                onMouseDown={beginRecentDrag}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '10px 12px',
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  fontSize: 12, fontWeight: 600, color: '#e8eaf0',
+                  cursor: 'move',
+                  userSelect: 'none',
+                }}
+              >
+                <span>{tRef.current('map.recent_title')}</span>
+                {onRecentClear && recentPlaces.length > 0 && (
+                  <button
+                    onClick={() => { onRecentClear(); setRecentOpen(false); }}
+                    style={{
+                      background: 'transparent', border: 'none',
+                      color: '#9499ac', fontSize: 11, cursor: 'pointer',
+                      padding: '2px 6px',
+                    }}
+                    title={tRef.current('map.recent_clear_tooltip')}
+                  >{tRef.current('map.recent_clear')}</button>
+                )}
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {recentPlaces.map((entry, idx) => {
+                  // Text badge + colour per kind. Coord-input entries
+                  // share a single "座標" label regardless of the
+                  // teleport / navigate sub-action, since the entry
+                  // point is what the user remembers.
+                  type BadgeSpec = { label: string; color: string; bg: string };
+                  const badgeByKind: Record<string, BadgeSpec> = {
+                    teleport:        { label: tRef.current('recent.kind_teleport'),   color: '#6c8cff', bg: 'rgba(108, 140, 255, 0.16)' },
+                    navigate:        { label: tRef.current('recent.kind_navigate'),   color: '#4caf50', bg: 'rgba(76, 175, 80, 0.16)' },
+                    search:          { label: tRef.current('recent.kind_search'),     color: '#f48fb1', bg: 'rgba(244, 143, 177, 0.16)' },
+                    coord_teleport:  { label: tRef.current('recent.kind_coord'),      color: '#ffb74d', bg: 'rgba(255, 183, 77, 0.16)' },
+                    coord_navigate:  { label: tRef.current('recent.kind_coord'),      color: '#ffb74d', bg: 'rgba(255, 183, 77, 0.16)' },
+                  };
+                  const badge = badgeByKind[entry.kind] ?? { label: entry.kind, color: '#9499ac', bg: 'rgba(148, 153, 172, 0.16)' };
+                  const now = Math.floor(Date.now() / 1000);
+                  const ago = now - (entry.ts || 0);
+                  let agoLabel = '';
+                  if (ago < 60) agoLabel = tRef.current('time.just_now');
+                  else if (ago < 3600) agoLabel = `${Math.floor(ago / 60)} ${tRef.current('time.minutes_ago')}`;
+                  else if (ago < 86400) agoLabel = `${Math.floor(ago / 3600)} ${tRef.current('time.hours_ago')}`;
+                  else if (ago < 86400 * 7) agoLabel = `${Math.floor(ago / 86400)} ${tRef.current('time.days_ago')}`;
+                  else {
+                    const d = new Date(entry.ts * 1000);
+                    agoLabel = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                  }
+                  const display = entry.name && entry.name.length > 0
+                    ? entry.name
+                    : `${entry.lat.toFixed(5)}, ${entry.lng.toFixed(5)}`;
+                  return (
+                    <button
+                      key={`${entry.ts}-${idx}`}
+                      onClick={() => {
+                        if (onRecentReFly) onRecentReFly(entry);
+                        setRecentOpen(false);
+                      }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        width: '100%',
+                        padding: '9px 12px',
+                        background: 'transparent', border: 'none',
+                        borderBottom: idx < recentPlaces.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+                        color: '#e8eaf0', textAlign: 'left',
+                        cursor: 'pointer', transition: 'background 0.12s',
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)'; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+                    >
+                      <span style={{
+                        flexShrink: 0,
+                        fontSize: 10, fontWeight: 700,
+                        letterSpacing: '0.05em',
+                        color: badge.color,
+                        background: badge.bg,
+                        border: `1px solid ${badge.color}33`,
+                        borderRadius: 4,
+                        padding: '3px 6px',
+                        minWidth: 34,
+                        textAlign: 'center',
+                      }}>{badge.label}</span>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{
+                          fontSize: 13, fontWeight: 500,
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        }}>{display}</div>
+                        <div style={{
+                          fontSize: 10, opacity: 0.55, fontFamily: 'monospace', marginTop: 2,
+                        }}>
+                          {entry.lat.toFixed(5)}, {entry.lng.toFixed(5)} · {agoLabel}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+                {recentPlaces.length === 0 && (
+                  <div style={{ padding: 16, fontSize: 12, opacity: 0.6, textAlign: 'center' }}>
+                    {tRef.current('map.recent_empty')}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {contextMenu.visible && (
         <div
