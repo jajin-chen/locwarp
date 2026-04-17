@@ -38,8 +38,6 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 **僅支援 TRC-20 (TRON 鏈)**
 
-轉到 ERC-20 / BEP-20 / Polygon 等其他鏈會**永久遺失**, 無法找回。請務必確認對方鏈別後再轉帳。
-
 </td>
 <td>
 <img src="docs/donate-usdt-tron-qr.png" alt="USDT TRC-20 QR" width="220">

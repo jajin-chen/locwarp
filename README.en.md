@@ -38,8 +38,6 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 **TRC-20 (TRON network) only**
 
-Sending via ERC-20 / BEP-20 / Polygon or any other chain will result in **permanent loss**, with no way to recover. Please double-check the network before sending.
-
 </td>
 <td>
 <img src="docs/donate-usdt-tron-qr.png" alt="USDT TRC-20 QR" width="220">
