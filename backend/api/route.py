@@ -9,6 +9,7 @@ from config import ROUTES_FILE
 from models.schemas import RoutePlanRequest, SavedRoute, Coordinate
 from services.route_service import RouteService
 from services.gpx_service import GpxService
+from services.json_safe import safe_load_json, safe_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -19,29 +20,22 @@ gpx_service = GpxService()
 
 
 def _load_saved_routes() -> dict[str, SavedRoute]:
-    if not ROUTES_FILE.exists():
+    raw = safe_load_json(ROUTES_FILE)
+    if raw is None:
         return {}
-    try:
-        raw = json.loads(ROUTES_FILE.read_text(encoding="utf-8"))
-        out: dict[str, SavedRoute] = {}
-        for item in raw.get("routes", []):
-            try:
-                route = SavedRoute(**item)
-                out[route.id] = route
-            except Exception as e:
-                logger.warning("skip malformed saved route: %s", e)
-        return out
-    except Exception as e:
-        logger.error("failed to read routes.json, starting empty: %s", e)
-        return {}
+    out: dict[str, SavedRoute] = {}
+    for item in raw.get("routes", []):
+        try:
+            route = SavedRoute(**item)
+            out[route.id] = route
+        except Exception as e:
+            logger.warning("skip malformed saved route: %s", e)
+    return out
 
 
 def _persist_saved_routes() -> None:
-    try:
-        payload = {"routes": [r.model_dump(mode="json") for r in _saved_routes.values()]}
-        ROUTES_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception as e:
-        logger.error("failed to write routes.json: %s", e)
+    payload = {"routes": [r.model_dump(mode="json") for r in _saved_routes.values()]}
+    safe_write_json(ROUTES_FILE, payload)
 
 
 _saved_routes: dict[str, SavedRoute] = _load_saved_routes()

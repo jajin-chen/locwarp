@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 from config import RECENT_PLACES_FILE
+from services.json_safe import safe_load_json, safe_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -45,25 +46,15 @@ class RecentPlacesManager:
         self._load()
 
     def _load(self) -> None:
-        path = Path(RECENT_PLACES_FILE)
-        if not path.exists():
+        data = safe_load_json(Path(RECENT_PLACES_FILE))
+        if data is None:
             return
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                self.entries = [e for e in data if self._valid(e)][:MAX_ENTRIES]
-                logger.info("Loaded %d recent places", len(self.entries))
-        except Exception:
-            logger.exception("Failed to load recent_places.json; starting empty")
-            self.entries = []
+        if isinstance(data, list):
+            self.entries = [e for e in data if self._valid(e)][:MAX_ENTRIES]
+            logger.info("Loaded %d recent places", len(self.entries))
 
     def _save(self) -> None:
-        try:
-            path = Path(RECENT_PLACES_FILE)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(self.entries, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            logger.exception("Failed to persist recent_places.json")
+        safe_write_json(Path(RECENT_PLACES_FILE), self.entries)
 
     @staticmethod
     def _valid(entry: dict) -> bool:

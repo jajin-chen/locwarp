@@ -10,6 +10,7 @@ from pathlib import Path
 
 from config import BOOKMARKS_FILE
 from models.schemas import Bookmark, BookmarkCategory, BookmarkStore
+from services.json_safe import safe_load_json, safe_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +46,19 @@ class BookmarkManager:
     # ------------------------------------------------------------------
 
     def _load(self) -> None:
-        """Load bookmarks from the JSON file, if it exists."""
-        path = Path(BOOKMARKS_FILE)
-        if not path.exists():
-            logger.info("No bookmark file found; using defaults")
-            return
+        """Load bookmarks from the JSON file, if it exists.
 
+        Uses ``safe_load_json`` so a parse failure does not silently
+        discard the user's data: the corrupt file is renamed aside as
+        ``bookmarks.json.bak-<timestamp>`` before we fall back to the
+        default empty store. Otherwise the next ``_save()`` would
+        overwrite the original file with an empty bookmark list.
+        """
+        data = safe_load_json(Path(BOOKMARKS_FILE))
+        if data is None:
+            logger.info("No bookmark file (or unreadable); using defaults")
+            return
         try:
-            raw = path.read_text(encoding="utf-8")
-            data = json.loads(raw)
             self.store = BookmarkStore(**data)
             logger.info(
                 "Loaded %d bookmarks in %d categories",
@@ -61,18 +66,12 @@ class BookmarkManager:
                 len(self.store.categories),
             )
         except Exception as exc:
-            logger.warning("Failed to load bookmarks: %s", exc)
+            logger.warning("Bookmark payload failed schema validation: %s", exc)
 
     def _save(self) -> None:
-        """Persist the current store to disk."""
-        path = Path(BOOKMARKS_FILE)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            raw = self.store.model_dump_json(indent=2)
-            path.write_text(raw, encoding="utf-8")
-        except Exception as exc:
-            logger.error("Failed to save bookmarks: %s", exc)
+        """Persist the current store to disk via atomic tmp + rename."""
+        payload = json.loads(self.store.model_dump_json())
+        safe_write_json(Path(BOOKMARKS_FILE), payload)
 
     # ------------------------------------------------------------------
     # Categories

@@ -58,32 +58,32 @@ class AppState:
         self._load_settings()
 
     def _load_settings(self):
-        if SETTINGS_FILE.exists():
-            try:
-                data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-                pos = data.get("last_position")
-                if pos:
-                    self._last_position = pos
-                fmt = data.get("coord_format")
-                if fmt:
-                    from models.schemas import CoordinateFormat
-                    self.coord_formatter.format = CoordinateFormat(fmt)
-                imp = data.get("initial_map_position")
-                if isinstance(imp, dict) and "lat" in imp and "lng" in imp:
-                    self._initial_map_position = {"lat": float(imp["lat"]), "lng": float(imp["lng"])}
-            except (json.JSONDecodeError, OSError, ValueError, KeyError):
-                logger.warning("Settings file malformed or unreadable; using defaults", exc_info=True)
+        from services.json_safe import safe_load_json
+        data = safe_load_json(SETTINGS_FILE)
+        if not isinstance(data, dict):
+            return
+        try:
+            pos = data.get("last_position")
+            if pos:
+                self._last_position = pos
+            fmt = data.get("coord_format")
+            if fmt:
+                from models.schemas import CoordinateFormat
+                self.coord_formatter.format = CoordinateFormat(fmt)
+            imp = data.get("initial_map_position")
+            if isinstance(imp, dict) and "lat" in imp and "lng" in imp:
+                self._initial_map_position = {"lat": float(imp["lat"]), "lng": float(imp["lng"])}
+        except (ValueError, KeyError):
+            logger.warning("Settings payload field malformed; keeping defaults", exc_info=True)
 
     def save_settings(self):
+        from services.json_safe import safe_write_json
         data = {
             "last_position": self._last_position,
             "coord_format": self.coord_formatter.format.value,
             "initial_map_position": self._initial_map_position,
         }
-        try:
-            SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        except Exception as e:
-            logger.warning("Failed to save settings: %s", e)
+        safe_write_json(SETTINGS_FILE, data)
 
     def get_initial_position(self) -> dict:
         if self._last_position:
