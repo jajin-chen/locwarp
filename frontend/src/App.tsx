@@ -1191,6 +1191,36 @@ const App: React.FC = () => {
                 value={sim.mode === SimMode.Loop ? sim.pauseLoop : sim.pauseMultiStop}
                 onChange={sim.mode === SimMode.Loop ? sim.setPauseLoop : sim.setPauseMultiStop}
               />
+              {sim.mode === SimMode.Loop && (
+                <div style={{
+                  marginBottom: 6, fontSize: 11,
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  <span style={{ opacity: 0.7, whiteSpace: 'nowrap' }}>{t('loop.lap_count_label')}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder={t('loop.lap_count_placeholder')}
+                    value={sim.loopLapCount ?? ''}
+                    onChange={(e) => {
+                      const raw = e.target.value.trim()
+                      if (raw === '') { sim.setLoopLapCount(null); return }
+                      const n = parseInt(raw, 10)
+                      sim.setLoopLapCount(Number.isFinite(n) && n > 0 ? n : null)
+                    }}
+                    style={{ width: 60, padding: '2px 4px', fontSize: 11 }}
+                    title={t('loop.lap_count_tooltip')}
+                  />
+                  {sim.lapProgress && (
+                    <span style={{ opacity: 0.6, fontSize: 10, marginLeft: 'auto' }}>
+                      {t('loop.lap_progress', {
+                        current: sim.lapProgress.current,
+                        total: sim.lapProgress.total ?? '∞',
+                      })}
+                    </span>
+                  )}
+                </div>
+              )}
               <div style={{ marginBottom: 6, fontSize: 11 }}>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
                   <span style={{ opacity: 0.7, width: 36 }}>{t('panel.waypoints_radius')}</span>

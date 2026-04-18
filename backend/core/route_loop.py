@@ -30,6 +30,7 @@ class RouteLooper:
         pause_min: float = 5.0,
         pause_max: float = 20.0,
         straight_line: bool = False,
+        lap_count: int | None = None,
     ) -> None:
         """Build a multi-waypoint route that forms a closed loop, then
         traverse it repeatedly until stopped.
@@ -147,8 +148,23 @@ class RouteLooper:
                 break
 
             engine.lap_count += 1
-            await engine._emit("lap_complete", {"lap": engine.lap_count})
-            logger.info("Loop lap %d complete", engine.lap_count)
+            # lap_count <= 0 is treated as "unlimited" (same as None) so the
+            # field is safe to accept from schema even if client sends 0.
+            limit = lap_count if (lap_count is not None and lap_count > 0) else None
+            await engine._emit("lap_complete", {
+                "lap": engine.lap_count,
+                "total": limit,
+            })
+            logger.info(
+                "Loop lap %d%s complete",
+                engine.lap_count,
+                f"/{limit}" if limit else "",
+            )
+
+            # Auto-stop after the requested number of laps.
+            if limit is not None and engine.lap_count >= limit:
+                logger.info("Loop reached configured lap count %d, stopping", limit)
+                break
 
             # Optional random pause between laps
             if pause_enabled:

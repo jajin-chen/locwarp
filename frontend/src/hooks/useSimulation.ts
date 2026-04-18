@@ -173,6 +173,26 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
   // mount started, used for a rough ETA estimate in the overlay.
   const [ddiStage, setDdiStage] = useState<{ stage: string; elapsed: number } | null>(null)
   const [waypointProgress, setWaypointProgress] = useState<{ current: number; next: number; total: number } | null>(null)
+  // Loop lap tracker. `current` = laps completed so far; `total` = the
+  // configured lap limit if the user asked for auto-stop, or null for an
+  // unbounded loop. Updated on `lap_complete` WS events from the backend.
+  const [lapProgress, setLapProgress] = useState<{ current: number; total: number | null } | null>(null)
+  // User's preferred lap count for the Loop mode start button. Null / 0 = no limit.
+  const [loopLapCount, setLoopLapCountRaw] = useState<number | null>(() => {
+    try {
+      const raw = localStorage.getItem('locwarp.loop.lap_count')
+      if (!raw) return null
+      const n = parseInt(raw, 10)
+      return Number.isFinite(n) && n > 0 ? n : null
+    } catch { return null }
+  })
+  const setLoopLapCount = useCallback((v: number | null) => {
+    setLoopLapCountRaw(v)
+    try {
+      if (v != null && v > 0) localStorage.setItem('locwarp.loop.lap_count', String(v))
+      else localStorage.removeItem('locwarp.loop.lap_count')
+    } catch { /* ignore quota errors */ }
+  }, [])
   // What's *actually* running on the device — set when a route handler
   // starts or when applySpeed succeeds. Used by the status bar so the
   // user doesn't see a typed-or-preset-selected speed before it has
@@ -316,6 +336,7 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         setEta(null)
         setPauseEndAt(null)
         setWaypointProgress(null)
+        setLapProgress(null)
         setDestination(null)
         setRoutePath([])
         break
@@ -327,6 +348,16 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
             current: d.current_index,
             next: d.next_index ?? d.current_index + 1,
             total: d.total ?? 0,
+          })
+        }
+        break
+      }
+      case 'lap_complete': {
+        const d = wsMessage.data
+        if (d && typeof d.lap === 'number') {
+          setLapProgress({
+            current: d.lap,
+            total: typeof d.total === 'number' && d.total > 0 ? d.total : null,
           })
         }
         break
@@ -519,7 +550,8 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         // waypoints here would prepend the start point on every restart,
         // and break the backend↔UI seg_idx mapping for highlighting.
         setProgress(0)
-        const res = await api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseLoop.enabled, pause_min: pauseLoop.min, pause_max: pauseLoop.max }, undefined, straightLine)
+        setLapProgress(null)
+        const res = await api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseLoop.enabled, pause_min: pauseLoop.min, pause_max: pauseLoop.max }, undefined, straightLine, loopLapCount)
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
         setEffectiveSpeed({ kmh: customSpeedKmh ?? MODE_DEFAULT_KMH[moveMode], min: speedMinKmh, max: speedMaxKmh })
         return res
@@ -528,7 +560,7 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         throw err
       }
     },
-    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseMultiStop, pauseLoop, pauseRandomWalk, straightLine],
+    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseMultiStop, pauseLoop, pauseRandomWalk, straightLine, loopLapCount],
   )
 
   const multiStop = useCallback(
@@ -627,6 +659,7 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
       setEta(null)
       setRoutePath([])
       setWaypointProgress(null)
+      setLapProgress(null)
       // Keep effectiveSpeed so status bar shows last-applied speed after stop/restore.
       // Clear the destination so the red "target" marker goes away —
       // lingering destination pin after Stop was a reported UX bug.
@@ -651,6 +684,7 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
       setWaypoints([])
       setRoutePath([])
       setWaypointProgress(null)
+      setLapProgress(null)
       // Keep effectiveSpeed so status bar shows last-applied speed after stop/restore.
       return res
     } catch (err: any) {
@@ -741,8 +775,9 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
   }, [fanout, preSyncStart, moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, straightLine])
   const startLoopAll = useCallback(async (udids: string[], wps: LatLng[]) => {
     await preSyncStart(udids)
-    return fanout(udids, 'loop', (u) => api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseLoop.enabled, pause_min: pauseLoop.min, pause_max: pauseLoop.max }, u, straightLine))
-  }, [fanout, preSyncStart, moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseLoop, straightLine])
+    setLapProgress(null)
+    return fanout(udids, 'loop', (u) => api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseLoop.enabled, pause_min: pauseLoop.min, pause_max: pauseLoop.max }, u, straightLine, loopLapCount))
+  }, [fanout, preSyncStart, moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseLoop, straightLine, loopLapCount])
   const multiStopAll = useCallback(async (udids: string[], wps: LatLng[], dur: number, loop: boolean) => {
     await preSyncStart(udids)
     return fanout(udids, 'multistop', (u) => api.multiStop(wps, moveMode, dur, loop, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseMultiStop.enabled, pause_min: pauseMultiStop.min, pause_max: pauseMultiStop.max }, u, straightLine))
@@ -783,6 +818,7 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     setWaypoints([])
     setRoutePath([])
     setWaypointProgress(null)
+    setLapProgress(null)
     // Keep effectiveSpeed so status bar shows last-applied speed after restore-all.
     return outcome
   }, [fanout])
@@ -849,6 +885,9 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     ddiMounting,
     ddiStage,
     waypointProgress,
+    lapProgress,
+    loopLapCount,
+    setLoopLapCount,
     effectiveSpeed,
     applySpeed,
     error,

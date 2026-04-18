@@ -229,6 +229,7 @@ class SimulationEngine:
         pause_min: float = 5.0,
         pause_max: float = 20.0,
         straight_line: bool = False,
+        lap_count: int | None = None,
     ) -> None:
         """Start looping through a closed route."""
         await self._ensure_stopped()
@@ -239,14 +240,14 @@ class SimulationEngine:
             waypoints=waypoints, mode=mode, speed_kmh=speed_kmh,
             speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
             pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
-            straight_line=straight_line,
+            straight_line=straight_line, lap_count=lap_count,
         )
         await self._run_handler(
             self._looper.start_loop(
                 waypoints, mode, speed_kmh=speed_kmh,
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
                 pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
-                straight_line=straight_line,
+                straight_line=straight_line, lap_count=lap_count,
             ),
             "Loop",
         )
@@ -584,11 +585,16 @@ class SimulationEngine:
         # We therefore track the minimum distance seen toward the next
         # target and consider it "passed" when either we got *close enough*
         # OR we got reasonably close and have started moving away.
+        # Waypoint-progress detection uses deterministic seg-index math
+        # (not distance thresholds). We precompute which coord index along
+        # planned_coords each remaining user waypoint corresponds to, then
+        # advance _user_waypoint_next whenever the current interpolation
+        # point's seg_idx reaches that index. Handles off-road waypoints
+        # (OSRM snaps them to the nearest road, so "nearest coord" is a
+        # sharp, reliable anchor) and high-speed travel (seg_idx is a
+        # monotonically-increasing integer so no point can skip over a
+        # waypoint's trigger).
         user_wps = list(self._user_waypoints)
-        WP_HARD_HIT_M = 15.0      # straight-up "we're at it"
-        WP_NEAR_M = 60.0          # got close enough to count as visiting
-        WP_RECEDE_M = 12.0        # how far past min before declaring passed
-        wp_min_dist = float("inf")
         if user_wps:
             await self._emit("waypoint_progress", {
                 "current_index": max(self._user_waypoint_next - 1, 0),
@@ -620,6 +626,32 @@ class SimulationEngine:
 
             if not timed_points:
                 return
+
+            # Precompute: for each remaining user waypoint, find the nearest
+            # planned_coord index (monotonic forward scan). Stops as soon as
+            # a waypoint can't be matched further along than the previous
+            # one, meaning it belongs to a later leg (multi_stop) or isn't
+            # on this planned_coords at all.
+            wp_seg_idx: list[int] = []
+            last_ci = -1
+            for wi in range(self._user_waypoint_next, len(user_wps)):
+                wp = user_wps[wi]
+                start_ci = max(last_ci + 1, 0)
+                best_ci = -1
+                best_d = float("inf")
+                for ci in range(start_ci, len(planned_coords)):
+                    d = RouteInterpolator.haversine(
+                        wp.lat, wp.lng,
+                        planned_coords[ci].lat, planned_coords[ci].lng,
+                    )
+                    if d < best_d:
+                        best_d = d
+                        best_ci = ci
+                if best_ci < 0:
+                    break
+                wp_seg_idx.append(best_ci)
+                last_ci = best_ci
+            wp_hit_ptr = 0
 
             accumulated_distance = 0.0
             prev_lat = timed_points[0]["lat"]
@@ -697,25 +729,26 @@ class SimulationEngine:
 
                 prev_lat, prev_lng = lat, lng
 
-                # Waypoint hit detection (see WP_* constants above).
-                if user_wps and self._user_waypoint_next < len(user_wps):
-                    target = user_wps[self._user_waypoint_next]
-                    d = RouteInterpolator.haversine(jittered_lat, jittered_lng, target.lat, target.lng)
-                    if d < wp_min_dist:
-                        wp_min_dist = d
-                    hit_close = d <= WP_HARD_HIT_M
-                    hit_passed = (
-                        wp_min_dist <= WP_NEAR_M
-                        and d > wp_min_dist + WP_RECEDE_M
-                    )
-                    if hit_close or hit_passed:
-                        self._user_waypoint_next += 1
-                        wp_min_dist = float("inf")
-                        await self._emit("waypoint_progress", {
-                            "current_index": self._user_waypoint_next - 1,
-                            "next_index": min(self._user_waypoint_next, len(user_wps) - 1),
-                            "total": len(user_wps),
-                        })
+                # Waypoint hit detection (seg-index based, deterministic).
+                # Advance past every waypoint whose precomputed coord index
+                # is <= the interpolation point's current seg_idx. Uses a
+                # while loop so two user waypoints placed very close
+                # together (or a fast-moving simulation that crosses
+                # multiple seg boundaries in one tick) still emit one
+                # progress event per waypoint, in order.
+                cur_seg = point.get("seg_idx", 0)
+                while (
+                    wp_hit_ptr < len(wp_seg_idx)
+                    and cur_seg >= wp_seg_idx[wp_hit_ptr]
+                    and self._user_waypoint_next < len(user_wps)
+                ):
+                    self._user_waypoint_next += 1
+                    wp_hit_ptr += 1
+                    await self._emit("waypoint_progress", {
+                        "current_index": self._user_waypoint_next - 1,
+                        "next_index": min(self._user_waypoint_next, len(user_wps) - 1),
+                        "total": len(user_wps),
+                    })
 
                 # Wait for the next tick (unless this is the last point)
                 if idx < len(timed_points) - 1:
@@ -763,22 +796,29 @@ class SimulationEngine:
                     continue  # outer while — build a fresh plan
             break  # outer while: done (stopped, completed, or push-failure)
 
-        # If we exited the route normally without stopping but didn't quite
-        # touch the final user waypoint (OSRM routing can end metres away
-        # from a user-clicked point that's off-road), force-advance once so
-        # the UI marks the leg's destination as reached instead of leaving
-        # it stuck in "approaching" forever.
+        # Safety net: if we exited the route normally and there are still
+        # waypoints in this leg's wp_seg_idx that the tick loop didn't
+        # advance past (extreme edge case, e.g. a hot-swap cutoff that
+        # left tail waypoints beyond the new planned_coords boundary),
+        # consume them now so the UI doesn't leave them stuck in an
+        # "approaching" highlight.
         if (
             user_wps
             and not self._stop_event.is_set()
             and self._user_waypoint_next < len(user_wps)
+            and wp_hit_ptr < len(wp_seg_idx)
         ):
-            self._user_waypoint_next += 1
-            await self._emit("waypoint_progress", {
-                "current_index": self._user_waypoint_next - 1,
-                "next_index": min(self._user_waypoint_next, len(user_wps) - 1),
-                "total": len(user_wps),
-            })
+            while (
+                wp_hit_ptr < len(wp_seg_idx)
+                and self._user_waypoint_next < len(user_wps)
+            ):
+                self._user_waypoint_next += 1
+                wp_hit_ptr += 1
+                await self._emit("waypoint_progress", {
+                    "current_index": self._user_waypoint_next - 1,
+                    "next_index": min(self._user_waypoint_next, len(user_wps) - 1),
+                    "total": len(user_wps),
+                })
 
         self._pending_speed_profile = None
         self._active_route_coords = []

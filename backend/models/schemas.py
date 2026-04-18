@@ -76,6 +76,9 @@ class LoopRequest(BaseModel):
     pause_max: float = 20.0
     straight_line: bool = False
     udid: str | None = None
+    # Number of laps to run before auto-stopping. None / 0 / negative means
+    # infinite laps (current default behaviour, user stops manually).
+    lap_count: int | None = None
 
 
 class MultiStopRequest(BaseModel):
