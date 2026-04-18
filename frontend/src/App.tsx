@@ -937,12 +937,14 @@ const App: React.FC = () => {
             name: device.connectedDevice.name,
             iosVersion: device.connectedDevice.ios_version,
             connectionType: device.connectedDevice.connection_type,
+            developerModeEnabled: device.connectedDevice.developer_mode_enabled,
           } : null}
           devices={device.devices.map(d => ({
             id: d.udid,
             name: d.name,
             iosVersion: d.ios_version,
             connectionType: d.connection_type,
+            developerModeEnabled: d.developer_mode_enabled,
           }))}
           isConnected={device.connectedDevice !== null}
           onScan={() => { device.scan() }}
@@ -950,6 +952,17 @@ const App: React.FC = () => {
           onStartWifiTunnel={device.startWifiTunnel}
           onStopTunnel={device.stopTunnel}
           tunnelStatus={device.tunnelStatus}
+          onRevealDeveloperMode={async (udid: string) => {
+            try {
+              await api.amfiRevealDeveloperMode(udid)
+              showToast(t('dev_mode.reveal_success'))
+              // Refresh so the button hides once the user actually enables
+              // dev mode in Settings and reconnects.
+              await device.scan()
+            } catch (err: any) {
+              showToast(t('dev_mode.reveal_failed') + (err?.message ? `: ${err.message}` : ''))
+            }
+          }}
         />
         <ControlPanel
           simMode={sim.mode}

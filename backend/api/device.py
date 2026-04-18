@@ -667,6 +667,78 @@ async def wifi_tunnel_start_and_connect(req: WifiTunnelStartRequest):
 # ── Generic UDID routes (MUST be defined after all specific /wifi/* routes
 #    so that /wifi/* paths do not accidentally match {udid}). ─────────────
 
+@router.post("/{udid}/amfi/reveal-developer-mode")
+async def amfi_reveal_developer_mode(udid: str):
+    """Make iOS's "Developer Mode" option appear in Settings → Privacy &
+    Security. Same end state as side-loading a developer-signed IPA via
+    Sideloadly / Xcode, but done directly through AMFI so the user doesn't
+    need a third-party side-loader. iOS 16+ only.
+
+    This is action 0 (REVEAL) of the com.apple.amfi.lockdown service. It
+    just creates the AMFIShowOverridePath marker file on the device —
+    no reboot, no passcode prompt, completely safe. The user still has
+    to open Settings and toggle Developer Mode on themselves (which iOS
+    will then require passcode removal + reboot for, per Apple's rules).
+    """
+    dm = _dm()
+    conn = dm._connections.get(udid)
+    if conn is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "device_not_connected", "message": "裝置未連線,請先連線再試"},
+        )
+
+    # iOS 15 and below have no Developer Mode concept.
+    try:
+        major = int((conn.ios_version or "0.0").split(".")[0])
+    except Exception:
+        major = 0
+    if major < 16:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "ios_too_old",
+                "message": f"iOS {conn.ios_version} 沒有開發者模式,不需要此操作",
+            },
+        )
+
+    try:
+        from pymobiledevice3.services.amfi import AmfiService
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "amfi_not_available", "message": f"AMFI 服務載入失敗: {exc}"},
+        )
+
+    # AMFI is a legacy lockdown service (com.apple.amfi.lockdown) that's only
+    # advertised on the classic USB lockdown, NOT on iOS 17+'s RSD tunnel.
+    # For iOS 17+ devices we stash the original USB lockdown on
+    # conn.usbmux_lockdown; use it here. For iOS 16 devices conn.lockdown
+    # IS the USB lockdown, so fall back to it.
+    amfi_lockdown = getattr(conn, "usbmux_lockdown", None) or conn.lockdown
+    if amfi_lockdown is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "amfi_needs_usb",
+                "message": "AMFI 需要走 USB 連線。請插 USB 後再試(WiFi tunnel 不 advertise AMFI 服務)。",
+            },
+        )
+
+    try:
+        await AmfiService(amfi_lockdown).reveal_developer_mode_option_in_ui()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "amfi_reveal_failed",
+                "message": f"AMFI reveal 失敗: {exc.__class__.__name__}: {exc}",
+            },
+        )
+
+    return {"status": "ok"}
+
+
 @router.post("/{udid}/connect")
 async def connect_device(udid: str):
     from main import app_state

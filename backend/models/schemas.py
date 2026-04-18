@@ -41,6 +41,10 @@ class DeviceInfo(BaseModel):
     ios_version: str
     connection_type: str = "usb"
     is_connected: bool = False
+    # iOS 16+ "Developer Mode" toggle state. None means we couldn't query
+    # (not connected, iOS <16, or service call failed). Frontend uses this
+    # to decide whether to show the "Reveal Developer Mode option" button.
+    developer_mode_enabled: bool | None = None
 
 
 # ── Location requests ────────────────────────────────────

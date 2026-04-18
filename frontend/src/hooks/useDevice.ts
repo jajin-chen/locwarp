@@ -12,6 +12,10 @@ export interface DeviceInfo {
   ios_version: string
   connection_type: string
   is_connected: boolean
+  // iOS 16+ Developer Mode toggle state. null = unknown (iOS <16, query
+  // failed, or device not yet connected). Used to decide whether to show
+  // the "Reveal Developer Mode option" button.
+  developer_mode_enabled?: boolean | null
 }
 
 export interface WifiScanResult {

@@ -146,6 +146,14 @@ class DeviceManager:
                     connection_type=conn_type,
                 )
                 info.is_connected = raw.serial in self._connections
+                # Query Developer Mode status (iOS 16+). Tolerate failure —
+                # None means "unknown", frontend will hide the reveal button.
+                try:
+                    ver = _parse_ios_version(info.ios_version)
+                    if ver >= (16, 0):
+                        info.developer_mode_enabled = await lockdown.get_developer_mode_status()
+                except Exception:
+                    logger.debug("get_developer_mode_status failed for %s", raw.serial, exc_info=True)
                 devices.append(info)
                 logger.debug("Discovered device %s (%s) running iOS %s via %s (connected=%s)",
                              info.name, info.udid, info.ios_version, conn_type, info.is_connected)

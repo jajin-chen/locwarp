@@ -216,6 +216,17 @@ export const STRINGS = {
   'wifi.tunnel_establishing': { zh: '建立 tunnel 中...', en: 'Establishing tunnel...' },
   'wifi.tunnel_start': { zh: 'Start WiFi Tunnel', en: 'Start Wi-Fi Tunnel' },
   'wifi.tunnel_stop': { zh: 'Stop Tunnel', en: 'Stop Tunnel' },
+  'dev_mode.reveal_button': { zh: '顯示開發者模式選項', en: 'Reveal Developer Mode option' },
+  'dev_mode.reveal_working': { zh: '處理中...', en: 'Working...' },
+  'dev_mode.reveal_tooltip': {
+    zh: 'iPhone 設定裡找不到「開發者模式」時按這個,會讓選項出現',
+    en: "Press this if 'Developer Mode' doesn't appear in iPhone Settings — it will make the option show up",
+  },
+  'dev_mode.reveal_success': {
+    zh: '已送出指令。請到 iPhone:完全關掉「設定」App(從底部往上滑移除)→ 重新打開「設定」→ 隱私權與安全性 → 往下拉找「開發者模式」,如果有看見自行開啟此功能。',
+    en: "Done. On the iPhone: fully close Settings (swipe up from bottom), reopen it → Privacy & Security → scroll down to find Developer Mode. If it appears, turn it on yourself.",
+  },
+  'dev_mode.reveal_failed': { zh: '顯示開發者模式失敗', en: 'Reveal Developer Mode failed' },
   'wifi.tunnel_active': { zh: 'Active', en: 'Active' },
   'wifi.tunnel_usb_can_disconnect': { zh: 'USB 可拔除', en: 'USB can be disconnected' },
   'wifi.tunnel_admin_hint': { zh: '請使用身分管理員開啟 LocWarp,必須先通過 USB 信任。', en: 'Run LocWarp as Administrator. Device must be paired via USB first.' },

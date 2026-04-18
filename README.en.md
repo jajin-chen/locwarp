@@ -405,25 +405,38 @@ The installer is self-contained, end users need no Python or Node installed.
 | --- | --- |
 | Backend unreachable after tunnel started | Make sure LocWarp was launched as Administrator |
 | `No such service: com.apple.instruments.dtservicehub` (iOS 17+/26) / LocWarp shows "DDI not mounted" | Since v0.2.58 LocWarp no longer auto-mounts the DDI. Mount it once via Xcode / 愛思助手 / 3uTools / pymobiledevice3 CLI, then reconnect. If mount still fails, toggle Settings → Privacy & Security → **Developer Mode** off, reboot, re-enable, and try mounting again. |
-| **Developer Mode option missing** (iOS 16+) | The device must have had a signed app deployed to it before the option appears in Settings. See [Appendix: Enabling Developer Mode on iPhone (Windows)](#appendix-enabling-developer-mode-on-iphone-windows) below. |
+| **Developer Mode option missing** (iOS 16+) | Since v0.2.61, LocWarp shows a "**Reveal Developer Mode option**" button in the status bar once a device is connected. Clicking it makes the Developer Mode toggle appear in iPhone Settings (no sideloading needed). If the button fails or you prefer manual, see [Appendix: Enabling Developer Mode on iPhone (Windows)](#appendix-enabling-developer-mode-on-iphone-windows) below as a fallback. |
 
 ---
 
 ### Appendix: Enabling Developer Mode on iPhone (Windows)
 
-On iOS 16+, **Settings → Privacy & Security → Developer Mode** is hidden by default. Apple only surfaces the toggle after the device has been deployed to by a developer-signed app at least once. Windows users can trigger this by sideloading any self-signed IPA:
+On iOS 16+, **Settings → Privacy & Security → Developer Mode** is hidden by default. Apple only surfaces the toggle after a developer-signed app has been installed, or after an AMFI `reveal` command is sent to the device.
 
-1. Install [**Sideloadly**](https://sideloadly.io/).
-2. Obtain an IPA file from a decrypted IPA source such as [**Decrypt IPA Store**](https://decrypt.day/) or [**ARM Converter Decrypted App Store**](https://armconverter.com/decryptedappstore/us). A small file-manager-style app is recommended to keep sideload time short.
-3. Drag the IPA into the Sideloadly window.
-4. Connect the iPhone via USB and enter your personal Apple ID in Sideloadly.
-5. Press **Start** and wait for the sideload to complete.
-6. On the iPhone: Settings → Privacy & Security → scroll to the bottom → the **Developer Mode** toggle will now appear. Turn it on.
-7. The device will prompt to restart. After the reboot, verify Developer Mode is still on.
+#### Primary flow (recommended, v0.2.61+)
+
+After LocWarp connects to your device, the status bar shows a "**Reveal Developer Mode option**" button (only when the device reports Developer Mode as OFF). Clicking it asks AMFI to write the reveal marker on the iPhone. Then:
+
+1. On the iPhone, fully close the Settings app (swipe up from the bottom)
+2. Reopen Settings
+3. Go to **Privacy & Security**, scroll down, you should see **Developer Mode**
+4. Turn it on yourself (iPhone will ask to remove the lock-screen passcode first and reboot once)
+
+After the toggle is on, the button disappears automatically from LocWarp.
+
+#### Fallback flow (sideloading an IPA)
+
+If the LocWarp button doesn't work (e.g. the device is only connected over a Wi-Fi tunnel — AMFI isn't advertised over RSD), you can still use the classic sideloading approach:
+
+1. Install [**Sideloadly**](https://sideloadly.io/)
+2. Obtain an IPA file from a decrypted IPA source such as [**Decrypt IPA Store**](https://decrypt.day/) or [**ARM Converter Decrypted App Store**](https://armconverter.com/decryptedappstore/us). A small file-manager-style app is recommended to keep sideload time short
+3. Drag the IPA into the Sideloadly window
+4. Connect the iPhone via USB and enter your personal Apple ID in Sideloadly
+5. Press **Start** and wait for the sideload to complete
+6. On the iPhone: Settings → Privacy & Security → scroll to the bottom → the **Developer Mode** toggle will now appear. Turn it on
+7. The device will prompt to restart. After the reboot, verify Developer Mode is still on
 
 Once done, return to LocWarp and connect. For iOS 17+ you also need to mount the Developer Disk Image once via Xcode / 愛思助手 / 3uTools / pymobiledevice3 CLI; LocWarp itself no longer auto-mounts (since v0.2.58).
-
-> Procedure adapted from community feedback, thanks for sharing.
 
 ---
 

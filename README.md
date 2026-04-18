@@ -457,25 +457,38 @@ locwarp/
 | --- | --- |
 | Tunnel 啟動後 backend 連不上 | 確認以系統管理員身份啟動 |
 | `No such service: com.apple.instruments.dtservicehub` (iOS 17+/26) / LocWarp 跳「iPhone 上未偵測到 DDI」 | v0.2.58 起 LocWarp 不再自動掛 DDI,請用下列任一工具幫 iPhone 掛一次 DDI 後再回來使用:Xcode、愛思助手、3uTools、pymobiledevice3 CLI。也可先「設定 → 隱私權與安全性 → **開發者模式** 關閉,重開機,再次開啟」,然後用上述工具重新掛一次。 |
-| **開發者模式未顯示**(iOS 16+) | 需先讓裝置被任一自簽 IPA 部署過,設定中方會出現該選項。請見下方 [附錄:iPhone 開啟開發者模式(Windows 流程)](#附錄iphone-開啟開發者模式windows-流程)。 |
+| **開發者模式未顯示**(iOS 16+) | v0.2.61 起,LocWarp 連線後在狀態列會出現「**顯示開發者模式選項**」按鈕,點下去 iPhone 設定裡就會出現開發者模式(不用側載 IPA)。若按鈕失敗或想手動處理,可參考下方 [附錄:iPhone 開啟開發者模式(Windows 流程)](#附錄iphone-開啟開發者模式windows-流程) 的側載方式作為備援。 |
 
 ---
 
 ### 附錄:iPhone 開啟開發者模式(Windows 流程)
 
-iOS 16+ 的「設定 → 隱私權與安全性 → 開發者模式」預設**不顯示**。Apple 要求裝置必須曾經被開發者簽署之 App 部署過,該選項才會出現。使用者可依下列流程側載任一自簽 IPA 完成觸發:
+iOS 16+ 的「設定 → 隱私權與安全性 → 開發者模式」預設**不顯示**。Apple 要求裝置必須被開發者簽署之 App 部署過(或直接對 AMFI 服務下 reveal 指令),該選項才會出現。
 
-1. 安裝 [**Sideloadly**](https://sideloadly.io/)。
-2. 於 [**Decrypt IPA Store**](https://decrypt.day/) 或 [**ARM Converter Decrypted App Store**](https://armconverter.com/decryptedappstore/us) 等解密 IPA 網站取得任意 IPA 檔案。建議挑選體積較小的檔案管理類 App 以縮短側載時間。
-3. 將 IPA 拖入 Sideloadly 視窗。
-4. USB 連接 iPhone,於 Sideloadly 輸入個人 Apple ID。
-5. 按下 **Start** 執行側載,等待完成。
-6. iPhone 上 設定 → 隱私權與安全性 → 滑至底部 → 會出現「**開發者模式**」。開啟該開關。
-7. 系統提示重新啟動,重啟後再次確認開發者模式為開啟狀態。
+#### 主要流程(推薦,v0.2.61 起)
+
+LocWarp 連上裝置後,狀態列會出現「**顯示開發者模式選項**」按鈕(僅在偵測到 iPhone 的 Developer Mode 未啟用時顯示)。點一下,後端呼叫 AMFI 服務幫 iPhone 寫下顯示 marker,然後:
+
+1. iPhone 上完全關掉「設定」App(從底部往上滑移除)
+2. 重新打開「設定」
+3. 「隱私權與安全性」往下拉,應該會看到「**開發者模式**」
+4. 點進去自行開啟(iPhone 會要求先關閉螢幕密碼 + 重啟一次)
+
+完成後 LocWarp 狀態列的按鈕會自動消失。
+
+#### 備援流程(側載 IPA)
+
+如果 LocWarp 的按鈕不能用(例如裝置沒透過 USB 連線,純 WiFi 模式下 AMFI 服務 advertising 不到),可改用傳統側載 IPA 方式:
+
+1. 安裝 [**Sideloadly**](https://sideloadly.io/)
+2. 於 [**Decrypt IPA Store**](https://decrypt.day/) 或 [**ARM Converter Decrypted App Store**](https://armconverter.com/decryptedappstore/us) 等解密 IPA 網站取得任意 IPA 檔案。建議挑選體積較小的檔案管理類 App 以縮短側載時間
+3. 將 IPA 拖入 Sideloadly 視窗
+4. USB 連接 iPhone,於 Sideloadly 輸入個人 Apple ID
+5. 按下 **Start** 執行側載,等待完成
+6. iPhone 上 設定 → 隱私權與安全性 → 滑至底部 → 會出現「**開發者模式**」,開啟該開關
+7. 系統提示重新啟動,重啟後再次確認開發者模式為開啟狀態
 
 完成後即可回到 LocWarp 建立連線。iOS 17+ 還需額外用 Xcode / 愛思助手 / 3uTools / pymobiledevice3 CLI 幫 iPhone 掛過一次 Developer Disk Image,LocWarp 本身不會自動掛(v0.2.58 起)。
-
-> 本流程參考自社群使用者回饋,感謝分享。
 
 ---
 

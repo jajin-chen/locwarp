@@ -8,6 +8,7 @@ interface Device {
   name: string;
   iosVersion: string;
   connectionType?: string;
+  developerModeEnabled?: boolean | null;
 }
 
 interface TunnelStatus {
@@ -26,6 +27,7 @@ interface DeviceStatusProps {
   onStopTunnel?: () => Promise<void>;
   tunnelStatus?: TunnelStatus;
   onWifiConnect?: (ip: string) => Promise<any>;
+  onRevealDeveloperMode?: (udid: string) => Promise<void>;
 }
 
 const DeviceStatus: React.FC<DeviceStatusProps> = ({
@@ -38,6 +40,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   onStopTunnel,
   tunnelStatus = { running: false },
   onWifiConnect,
+  onRevealDeveloperMode,
 }) => {
   const t = useT();
   const [showDropdown, setShowDropdown] = useState(false);
@@ -48,6 +51,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   const [showIpHelp, setShowIpHelp] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [wifiExpanded, setWifiExpanded] = useState(false);
+  const [revealingDevMode, setRevealingDevMode] = useState(false);
   const [showWifiWarning, setShowWifiWarning] = useState(false);
   const [showRepairConfirm, setShowRepairConfirm] = useState(false);
   const [repairState, setRepairState] = useState<'idle' | 'running' | 'success' | 'failed'>('idle');
@@ -209,6 +213,35 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
           )}
         </button>
       </div>
+
+      {/* Reveal Developer Mode button — only show when device is connected,
+          iOS >= 16, and dev mode is explicitly reported as OFF. Clicking it
+          writes the AMFIShowOverridePath marker via AMFI so the "Developer
+          Mode" option appears in Settings → Privacy & Security. */}
+      {device && isConnected && device.developerModeEnabled === false && (() => {
+        let major = 0
+        try { major = parseInt((device.iosVersion || '0').split('.')[0], 10) } catch {}
+        if (major < 16) return null
+        return (
+          <button
+            className="action-btn"
+            onClick={async () => {
+              if (!onRevealDeveloperMode) return
+              setRevealingDevMode(true)
+              try {
+                await onRevealDeveloperMode(device.id)
+              } finally {
+                setRevealingDevMode(false)
+              }
+            }}
+            disabled={revealingDevMode}
+            style={{ width: '100%', fontSize: 12, marginBottom: 6, padding: '6px 10px' }}
+            title={t('dev_mode.reveal_tooltip')}
+          >
+            {revealingDevMode ? t('dev_mode.reveal_working') : t('dev_mode.reveal_button')}
+          </button>
+        )
+      })()}
 
       {/* Device dropdown */}
       {devices.length >= 1 && (

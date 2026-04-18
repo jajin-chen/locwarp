@@ -87,6 +87,8 @@ export const wifiTunnelStatus = () => request<any>('GET', '/api/device/wifi/tunn
 export const wifiTunnelDiscover = () => request<{ devices: { ip: string; port: number; host: string; name: string }[] }>('GET', '/api/device/wifi/tunnel/discover')
 export const wifiTunnelStop = () => request<any>('POST', '/api/device/wifi/tunnel/stop')
 export const wifiRepair = () => request<{ status: string; udid: string; name: string; ios_version: string; remote_record_regenerated: boolean }>('POST', '/api/device/wifi/repair')
+export const amfiRevealDeveloperMode = (udid: string) =>
+  request<{ status: string }>('POST', `/api/device/${encodeURIComponent(udid)}/amfi/reveal-developer-mode`)
 
 // Location simulation
 // Every action accepts an optional `udid` so the caller can target a specific
