@@ -547,6 +547,18 @@ async def wifi_tunnel_stop():
         sum(1 for c in dm._connections.values() if getattr(c, "connection_type", "") == "Network"),
     )
 
+    # Snapshot which udids were in WiFi conn BEFORE cleanup so the USB
+    # fallback below only targets those specific devices. Without this
+    # snapshot the fallback used to pick any USB-looking device from
+    # discover_devices() and auto-reconnect it, which broke the dual-
+    # device "switch WiFi target from A to B, then stop" flow — A was
+    # still plugged USB, got grabbed by the fallback, and the user saw
+    # their "closed" device pop back up.
+    was_network_udids = [
+        udid for udid, conn in dm._connections.items()
+        if getattr(conn, "connection_type", "") == "Network"
+    ]
+
     async with _tunnel.lock:
         await _cleanup_wifi_connections(caller="wifi_tunnel_stop_endpoint")
 
@@ -565,49 +577,61 @@ async def wifi_tunnel_stop():
         except Exception:
             _tunnel_logger.exception("Failed to stop tunnel task cleanly")
 
-    # Try to fall back to USB if a device is still plugged in.
-    # Keep both connect() and engine creation atomic under the tunnel lock —
-    # if engine creation fails, roll back the connection so the device list
-    # doesn't advertise a connected device with no engine behind it.
+    # Try to fall back to USB for ONLY the udids that were just in the
+    # WiFi tunnel. Previously this grabbed any discover_devices entry
+    # whose connection_type wasn't "Network", which misfired in two
+    # ways: it could re-attach a phone the user never asked to use
+    # (other plugged iPhone), and a just-disconnected WiFi-paired phone
+    # could still be visible as non-Network during the ms-scale race
+    # and get reconnected via Network anyway. Require (a) the udid
+    # was actually in the WiFi conn we just tore down AND (b) it
+    # shows as "USB" in usbmuxd right now.
     try:
         devices = await dm.discover_devices()
-        usb_dev = next((d for d in devices if d.connection_type != "Network"), None)
-        if usb_dev:
+        for udid in was_network_udids:
+            usb_dev = next(
+                (d for d in devices if d.udid == udid and d.connection_type == "USB"),
+                None,
+            )
+            if usb_dev is None:
+                _tunnel_logger.info(
+                    "USB fallback: skipping %s (not visible as USB after tunnel stop)",
+                    udid,
+                )
+                continue
             try:
                 await dm.connect(usb_dev.udid)
             except Exception:
                 _tunnel_logger.exception("USB fallback: connect failed for %s", usb_dev.udid)
-                usb_dev = None
-            if usb_dev is not None:
+                continue
+            try:
+                # v0.2.60: drop stale WiFi engine so the new one binds
+                # to the fresh USB lockdown.
+                app_state.simulation_engines.pop(usb_dev.udid, None)
+                await app_state.create_engine_for_device(usb_dev.udid)
+                _tunnel_logger.info("Switched back to USB connection: %s", usb_dev.udid)
+            except Exception:
+                _tunnel_logger.exception(
+                    "USB fallback: engine creation failed for %s; rolling back",
+                    usb_dev.udid,
+                )
                 try:
-                    # v0.2.60: drop stale WiFi engine so the new one binds
-                    # to the fresh USB lockdown (see wifi_tunnel_start_and_connect
-                    # for the symmetric case going the other direction).
-                    app_state.simulation_engines.pop(usb_dev.udid, None)
-                    await app_state.create_engine_for_device(usb_dev.udid)
-                    _tunnel_logger.info("Switched back to USB connection: %s", usb_dev.udid)
+                    await dm.disconnect(usb_dev.udid)
                 except Exception:
-                    _tunnel_logger.exception(
-                        "USB fallback: engine creation failed for %s; rolling back",
-                        usb_dev.udid,
-                    )
-                    try:
-                        await dm.disconnect(usb_dev.udid)
-                    except Exception:
-                        pass
-                    app_state.simulation_engines.pop(usb_dev.udid, None)
-                    if app_state._primary_udid == usb_dev.udid:
-                        remaining = next(iter(app_state.simulation_engines.keys()), None)
-                        app_state._primary_udid = remaining
-                    try:
-                        from api.websocket import broadcast
-                        await broadcast("device_error", {
-                            "udid": usb_dev.udid,
-                            "stage": "usb_fallback",
-                            "error": "USB fallback engine creation failed",
-                        })
-                    except Exception:
-                        pass
+                    pass
+                app_state.simulation_engines.pop(usb_dev.udid, None)
+                if app_state._primary_udid == usb_dev.udid:
+                    remaining = next(iter(app_state.simulation_engines.keys()), None)
+                    app_state._primary_udid = remaining
+                try:
+                    from api.websocket import broadcast
+                    await broadcast("device_error", {
+                        "udid": usb_dev.udid,
+                        "stage": "usb_fallback",
+                        "error": "USB fallback engine creation failed",
+                    })
+                except Exception:
+                    pass
     except Exception:
         _tunnel_logger.exception("USB fallback after tunnel stop failed")
 
