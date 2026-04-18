@@ -67,6 +67,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 > | **18.5** (iPadOS) | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
 > | **18.1.1** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
 > | **17.6.1** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
+> | **16.7.15** | Community reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
 > | **16.7.12** (community) | @bitifyChen · [#9](https://github.com/keezxc1223/locwarp/pull/9) | ![Community](https://img.shields.io/badge/Community-ffa726?style=flat-square) |
 > | **15.x and below** | n/a | ![Unsupported](https://img.shields.io/badge/Unsupported-f44336?style=flat-square) |
 >
