@@ -26,10 +26,6 @@
 
 ### USDT 斗內 (TRC-20 / TRON 鏈)
 
-<table>
-<tr>
-<td valign="top">
-
 **錢包地址**
 
 ```
@@ -38,12 +34,9 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 **僅支援 TRC-20 (TRON 鏈)**
 
-</td>
-<td>
-<img src="docs/donate-usdt-tron-qr.png" alt="USDT TRC-20 QR" width="220">
-</td>
-</tr>
-</table>
+<p>
+  <img src="docs/donate-usdt-tron-qr.png" alt="USDT TRC-20 QR" width="260">
+</p>
 
 
 > ### 專案性質聲明

@@ -26,10 +26,6 @@
 
 ### USDT tip jar (TRC-20 / TRON network)
 
-<table>
-<tr>
-<td valign="top">
-
 **Wallet address**
 
 ```
@@ -38,12 +34,9 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 **TRC-20 (TRON network) only**
 
-</td>
-<td>
-<img src="docs/donate-usdt-tron-qr.png" alt="USDT TRC-20 QR" width="220">
-</td>
-</tr>
-</table>
+<p>
+  <img src="docs/donate-usdt-tron-qr.png" alt="USDT TRC-20 QR" width="260">
+</p>
 
 
 > ### Project Nature
