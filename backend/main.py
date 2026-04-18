@@ -55,6 +55,11 @@ class AppState:
         # User-chosen initial map center (persisted between launches). When
         # None, the frontend falls back to a hardcoded default.
         self._initial_map_position: dict | None = None
+        # Which bookmark category ids the user has expanded in the panel.
+        # None = never set (first-time install); frontend applies the
+        # "auto-collapse when total bookmarks > 30" rule. Empty list means
+        # explicitly all-collapsed.
+        self._bookmark_expanded_categories: list[str] | None = None
         self._load_settings()
 
     def _load_settings(self):
@@ -73,6 +78,9 @@ class AppState:
             imp = data.get("initial_map_position")
             if isinstance(imp, dict) and "lat" in imp and "lng" in imp:
                 self._initial_map_position = {"lat": float(imp["lat"]), "lng": float(imp["lng"])}
+            bmExp = data.get("bookmark_expanded_categories")
+            if isinstance(bmExp, list):
+                self._bookmark_expanded_categories = [str(x) for x in bmExp]
         except (ValueError, KeyError):
             logger.warning("Settings payload field malformed; keeping defaults", exc_info=True)
 
@@ -82,6 +90,7 @@ class AppState:
             "last_position": self._last_position,
             "coord_format": self.coord_formatter.format.value,
             "initial_map_position": self._initial_map_position,
+            "bookmark_expanded_categories": self._bookmark_expanded_categories,
         }
         safe_write_json(SETTINGS_FILE, data)
 

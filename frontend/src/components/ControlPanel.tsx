@@ -771,7 +771,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   categories={bookmarkCategories}
                   categoryColors={bookmarkCategoryColors}
                   currentPosition={currentPosition}
-                  onBookmarkClick={(b) => { onBookmarkClick(b); setLibraryOpen(false); }}
+                  onBookmarkClick={(b) => { onBookmarkClick(b); }}
                   onBookmarkAdd={onBookmarkAdd}
                   onBookmarkDelete={onBookmarkDelete}
                   onBookmarkEdit={onBookmarkEdit}

@@ -742,11 +742,31 @@ const App: React.FC = () => {
     }
   }, [sim, device, t, showToast])
 
+  const [routeLoadConfirm, setRouteLoadConfirm] = useState<{ name: string; waypoints: { lat: number; lng: number }[] } | null>(null)
   const handleRouteLoad = useCallback((id: string) => {
     const route = savedRoutes.find((r) => r.id === id)
-    if (!route || !Array.isArray(route.waypoints)) return
-    sim.setWaypoints(route.waypoints.map((w: any) => ({ lat: w.lat, lng: w.lng })))
-  }, [savedRoutes, sim])
+    if (!route || !Array.isArray(route.waypoints) || route.waypoints.length === 0) return
+    const wps = route.waypoints.map((w: any) => ({ lat: w.lat, lng: w.lng }))
+    setRouteLoadConfirm({ name: route.name ?? '', waypoints: wps })
+  }, [savedRoutes])
+
+  const confirmRouteLoad = useCallback(async (flyToStart: boolean) => {
+    if (!routeLoadConfirm) return
+    const { waypoints } = routeLoadConfirm
+    sim.setWaypoints(waypoints)
+    if (flyToStart && waypoints.length > 0) {
+      const first = waypoints[0]
+      const udids = device.connectedDevices.map((d) => d.udid)
+      // Match wpFly flow: set current position + teleport directly (no sim.teleport,
+      // so we preserve the mode the user is already in for this route).
+      sim.setCurrentPosition({ lat: first.lat, lng: first.lng })
+      if (udids.length > 0) {
+        try { await sim.teleportAll(udids, first.lat, first.lng) } catch { /* ignore */ }
+      }
+      void pushRecent(first.lat, first.lng, 'coord_teleport')
+    }
+    setRouteLoadConfirm(null)
+  }, [routeLoadConfirm, sim, device, pushRecent])
 
   const handleRouteSave = useCallback(async (name: string) => {
     if (sim.waypoints.length === 0) {
@@ -1702,6 +1722,81 @@ const App: React.FC = () => {
                     border: 'none', borderRadius: 6,
                   }}
                 >{t('panel.wp_fly_confirm')}</button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+        {routeLoadConfirm && createPortal(
+          <div
+            onClick={() => setRouteLoadConfirm(null)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 2000,
+              background: 'rgba(8, 10, 20, 0.55)', backdropFilter: 'blur(4px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: 380, maxWidth: '92vw',
+                background: 'rgba(26, 29, 39, 0.96)',
+                border: '1px solid rgba(108, 140, 255, 0.25)', borderRadius: 12,
+                padding: 22, color: '#e8eaf0',
+                boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65)',
+                fontSize: 13,
+              }}
+            >
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>
+                {t('panel.route_load_title')}
+              </div>
+              {routeLoadConfirm.name && (
+                <div style={{
+                  fontSize: 13, marginBottom: 8, padding: '6px 10px',
+                  background: 'rgba(108, 140, 255, 0.1)',
+                  border: '1px solid rgba(108, 140, 255, 0.2)', borderRadius: 6,
+                }}>
+                  {routeLoadConfirm.name}
+                </div>
+              )}
+              <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6, lineHeight: 1.6 }}>
+                {t('panel.route_load_hint', { n: routeLoadConfirm.waypoints.length })}
+              </div>
+              {routeLoadConfirm.waypoints.length > 0 && (
+                <div style={{
+                  fontFamily: 'monospace', fontSize: 12,
+                  padding: '8px 10px', marginBottom: 16,
+                  background: 'rgba(10, 12, 18, 0.5)',
+                  border: '1px solid rgba(108, 140, 255, 0.2)', borderRadius: 6,
+                }}>
+                  {t('panel.route_load_start')} {routeLoadConfirm.waypoints[0].lat.toFixed(6)}, {routeLoadConfirm.waypoints[0].lng.toFixed(6)}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setRouteLoadConfirm(null)}
+                  style={{
+                    padding: '6px 14px', fontSize: 12, cursor: 'pointer',
+                    background: 'transparent', color: '#9499ac',
+                    border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6,
+                  }}
+                >{t('generic.cancel')}</button>
+                <button
+                  onClick={() => void confirmRouteLoad(false)}
+                  style={{
+                    padding: '6px 14px', fontSize: 12, cursor: 'pointer',
+                    background: 'transparent', color: '#e8eaf0',
+                    border: '1px solid rgba(108, 140, 255, 0.5)', borderRadius: 6,
+                  }}
+                >{t('panel.route_load_show_only')}</button>
+                <button
+                  onClick={() => void confirmRouteLoad(true)}
+                  style={{
+                    padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    background: '#6c8cff', color: '#fff',
+                    border: 'none', borderRadius: 6,
+                  }}
+                >{t('panel.route_load_fly_start')}</button>
               </div>
             </div>
           </div>,

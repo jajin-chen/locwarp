@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from models.schemas import Bookmark, BookmarkCategory, BookmarkMoveRequest
 
@@ -9,6 +10,10 @@ router = APIRouter(prefix="/api/bookmarks", tags=["bookmarks"])
 def _bm():
     from main import app_state
     return app_state.bookmark_manager
+
+
+class BookmarkUiState(BaseModel):
+    expanded_categories: list[str] | None = None
 
 
 # ── Bookmarks ─────────────────────────────────────────────
@@ -116,3 +121,21 @@ async def import_bookmarks(data: dict):
     bm = _bm()
     count = bm.import_json(json.dumps(data))
     return {"imported": count}
+
+
+# ── UI state (persists per-category collapse in ~/.locwarp/settings.json) ──
+
+@router.get("/ui-state")
+async def get_bookmark_ui_state():
+    from main import app_state
+    return {"expanded_categories": app_state._bookmark_expanded_categories}
+
+
+@router.post("/ui-state")
+async def set_bookmark_ui_state(req: BookmarkUiState):
+    from main import app_state
+    app_state._bookmark_expanded_categories = (
+        list(req.expanded_categories) if req.expanded_categories is not None else []
+    )
+    app_state.save_settings()
+    return {"status": "ok", "expanded_categories": app_state._bookmark_expanded_categories}

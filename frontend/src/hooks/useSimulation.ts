@@ -467,7 +467,17 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
   const teleport = useCallback(async (lat: number, lng: number) => {
     setError(null)
     try {
-      _setMode(SimMode.Teleport)
+      // Intentionally NOT calling _setMode here. Teleport is an ACTION
+      // (right-click / bookmark / recent / address / locate-PC / coord
+      // overlay all flow through here), not a mode switch. Mode change
+      // only happens when the user explicitly clicks the Teleport tab in
+      // ControlPanel, which goes through the separate setMode() path
+      // that also wipes waypoints / destination / routePath. Previously,
+      // this line flipped sim.mode to Teleport on every teleport action,
+      // which was visible as "setting up Loop waypoints, right-clicking
+      // to teleport, then finding waypoints gone" — the tab switch made
+      // the Loop UI unmount its waypoint list. Removing this one line is
+      // the entire fix.
       const res = await api.teleport(lat, lng)
       setCurrentPosition({ lat, lng })
       setDestination(null)

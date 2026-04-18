@@ -1234,7 +1234,14 @@ const MapView: React.FC<MapViewProps> = ({
   // Accepts any of: "25.04, 121.51", "25.04,121.51", or "25.04 121.51".
   const [coordInput, setCoordInput] = useState('');
   const parseCoordInput = (raw: string): { lat: number; lng: number } | null => {
-    const m = raw.trim().match(/^(-?\d+(?:\.\d+)?)[\s,]+(-?\d+(?:\.\d+)?)$/);
+    // Strip decorations that commonly come with pasted coordinates:
+    // parentheses / brackets (both ASCII and CJK), degree symbols,
+    // quotes, and stray semicolons. Lets e.g. "(35.2643, 126.9584)"
+    // pasted straight from Google Maps work without manual cleanup.
+    const cleaned = raw.trim()
+      .replace(/[()\[\]{}（）【】「」『』"'`°]/g, '')
+      .trim();
+    const m = cleaned.match(/^(-?\d+(?:\.\d+)?)[\s,;]+(-?\d+(?:\.\d+)?)$/);
     if (!m) return null;
     const lat = parseFloat(m[1]);
     const lng = parseFloat(m[2]);

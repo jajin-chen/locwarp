@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
+import { getBookmarkUiState, setBookmarkUiState } from '../services/api';
+
+const AUTO_COLLAPSE_THRESHOLD = 30;
 
 interface Bookmark {
   id?: string;
@@ -108,6 +111,11 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   // Translate at render time so EN users see "Default" without touching storage.
   const displayCat = (name: string) => (name === '預設' ? t('bm.default') : name);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [uiStateLoaded, setUiStateLoaded] = useState(false);
+  const uiStateSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastClickTs = useRef<number>(0);
+  const [flashedBmId, setFlashedBmId] = useState<string | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newName, setNewName] = useState('');
   const [newCategory, setNewCategory] = useState(categories[0] || 'Default');
@@ -239,8 +247,102 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
     };
   }, [colorPickerFor]);
 
+  // Collapse state is persisted in ~/.locwarp/settings.json via the
+  // /api/bookmarks/ui-state endpoint. The rule, designed so "paste a lot
+  // of bookmarks and get them auto-collapsed" always works:
+  //
+  //   - While bookmarks.length > AUTO_COLLAPSE_THRESHOLD, all categories
+  //     are collapsed by default. User can still manually expand one.
+  //   - While <= threshold, use the user's saved expand list (or all
+  //     expanded if never saved).
+  //   - Crossing the threshold (up or down) resets state to the rule,
+  //     so their manual choice from the other regime doesn't leak
+  //     (e.g. they expanded two categories at 10 bookmarks, then bulk
+  //     paste 50 more; those two no longer stay expanded after the
+  //     crossing — user can re-expand if they want).
+  //
+  // We intentionally do NOT gate on a "user touched anything" flag,
+  // because that confused the expected auto-collapse behaviour: a saved
+  // list from an earlier session made the auto-rule inert when the
+  // user pasted more bookmarks later.
+  const savedExpandedRef = useRef<string[] | null>(null);
+  const prevOverThresholdRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getBookmarkUiState()
+      .then((state) => {
+        if (cancelled) return;
+        savedExpandedRef.current = state.expanded_categories;
+      })
+      .catch(() => { /* leave null, auto-rule handles first load */ })
+      .finally(() => { if (!cancelled) setUiStateLoaded(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!uiStateLoaded) return;
+    if (categories.length === 0) return;
+    const isOver = bookmarks.length > AUTO_COLLAPSE_THRESHOLD;
+    const wasOver = prevOverThresholdRef.current;
+    // Only reset when crossing the threshold, or on the very first eval.
+    // Between crossings the user's manual toggles are preserved.
+    if (wasOver === null || isOver !== wasOver) {
+      if (isOver) {
+        const all: Record<string, boolean> = {};
+        categories.forEach((c) => { all[c] = true; });
+        setCollapsed(all);
+      } else {
+        const saved = savedExpandedRef.current;
+        if (saved === null) {
+          setCollapsed({});
+        } else {
+          const savedSet = new Set(saved);
+          const next: Record<string, boolean> = {};
+          categories.forEach((c) => { next[c] = !savedSet.has(c); });
+          setCollapsed(next);
+        }
+      }
+    }
+    prevOverThresholdRef.current = isOver;
+  }, [uiStateLoaded, bookmarks.length, categories]);
+
+  // Debounce saves so that rapid open/close of several categories sends
+  // one POST 400ms after the last flip, not one per click.
+  const scheduleUiStateSave = (nextCollapsed: Record<string, boolean>) => {
+    if (!uiStateLoaded) return; // don't overwrite during initial fetch
+    if (uiStateSaveTimer.current) clearTimeout(uiStateSaveTimer.current);
+    uiStateSaveTimer.current = setTimeout(() => {
+      const expanded = categories.filter((c) => !nextCollapsed[c]);
+      void setBookmarkUiState(expanded).catch(() => { /* best effort */ });
+    }, 400);
+  };
+
   const toggleCategory = (cat: string) => {
-    setCollapsed((prev) => ({ ...prev, [cat]: !prev[cat] }));
+    setCollapsed((prev) => {
+      const next = { ...prev, [cat]: !prev[cat] };
+      // Mirror to savedExpandedRef so a cross-down-under-threshold event
+      // restores the user's most recent manual choice, not the stale
+      // backend snapshot from session start.
+      savedExpandedRef.current = categories.filter((c) => !next[c]);
+      scheduleUiStateSave(next);
+      return next;
+    });
+  };
+
+  // Teleport click: flash the bookmark green for 500ms as visual feedback
+  // and apply a 150ms debounce so accidental double-clicks don't fire
+  // teleport twice (which on slow connections would race).
+  const handleBookmarkClick = (bm: Bookmark) => {
+    const now = Date.now();
+    if (now - lastClickTs.current < 150) return;
+    lastClickTs.current = now;
+    onBookmarkClick(bm);
+    if (bm.id) {
+      setFlashedBmId(bm.id);
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => setFlashedBmId(null), 500);
+    }
   };
 
   const handleAddBookmark = () => {
@@ -373,8 +475,14 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
         <button
           className="action-btn"
           onClick={() => {
-            if (multiSelect) exitMultiSelect();
-            else setMultiSelect(true);
+            if (multiSelect) {
+              exitMultiSelect();
+            } else {
+              // Opening multi-select closes any other mutually-exclusive
+              // panel that'd otherwise stack on top and confuse the user.
+              setShowCategoryMgr(false);
+              setMultiSelect(true);
+            }
           }}
           style={{
             padding: '3px 6px', fontSize: 12, display: 'inline-flex', alignItems: 'center',
@@ -390,7 +498,13 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
         </button>
         <button
           className="action-btn"
-          onClick={() => setShowCategoryMgr(!showCategoryMgr)}
+          onClick={() => {
+            setShowCategoryMgr((prev) => {
+              const next = !prev;
+              if (next && multiSelect) exitMultiSelect();
+              return next;
+            });
+          }}
           style={{ padding: '3px 8px', fontSize: 12 }}
           title={t('bm.manage_categories')}
         >
@@ -401,8 +515,17 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
         </button>
       </div>
 
-      {/* Search box — filters by name / coords across all categories */}
-      <div style={{ position: 'relative', marginBottom: 8 }}>
+      {/* Search box. Sticks to top of the scroll container so users with
+          long lists don't have to scroll back up to start a new search. */}
+      <div style={{
+        position: 'sticky', top: -12, zIndex: 5,
+        background: '#1e1e24',
+        marginLeft: -12, marginRight: -12,
+        padding: '8px 12px',
+        borderBottom: '1px solid rgba(108, 140, 255, 0.08)',
+        marginBottom: 8,
+      }}>
+        <div style={{ position: 'relative' }}>
         <svg
           width="12" height="12" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" strokeWidth="2"
@@ -430,6 +553,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             }}
           >×</button>
         )}
+        </div>
       </div>
 
       {/* Show-all-on-map toggle */}
@@ -448,52 +572,6 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
           />
           <span>{t('bm.show_on_map')}</span>
         </label>
-      )}
-
-      {/* Multi-select toolbar — batch actions (delete / select-all). */}
-      {multiSelect && (
-        <div
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6, marginTop: 8,
-            padding: '6px 8px', borderRadius: 4,
-            background: 'rgba(108,140,255,0.12)',
-            border: '1px solid rgba(108,140,255,0.35)',
-            fontSize: 11,
-          }}
-        >
-          <button
-            className="action-btn"
-            onClick={() => {
-              const allIds = bookmarks.map((b) => b.id).filter((x): x is string => !!x);
-              if (selectedIds.size === allIds.length) {
-                setSelectedIds(new Set());
-              } else {
-                setSelectedIds(new Set(allIds));
-              }
-            }}
-            style={{ padding: '2px 6px', fontSize: 11 }}
-          >
-            {selectedIds.size === bookmarks.length && bookmarks.length > 0
-              ? t('bm.deselect_all')
-              : t('bm.select_all')}
-          </button>
-          <span style={{ opacity: 0.7, marginLeft: 'auto' }}>
-            {selectedIds.size} / {bookmarks.length}
-          </span>
-          <button
-            className="action-btn"
-            onClick={handleBulkDelete}
-            disabled={selectedIds.size === 0}
-            style={{
-              padding: '2px 8px', fontSize: 11,
-              color: selectedIds.size === 0 ? '#888' : '#ff6b6b',
-              borderColor: selectedIds.size === 0 ? undefined : 'rgba(255,107,107,0.4)',
-              cursor: selectedIds.size === 0 ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {t('bm.delete_selected').replace('{n}', String(selectedIds.size))}
-          </button>
-        </div>
       )}
 
       {/* Sort control — choose how the bookmark list is ordered. */}
@@ -773,9 +851,8 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
         const q = search.trim().toLowerCase();
         const matches = sortBookmarks(bookmarks.filter((bm) => {
           const name = (bm.name ?? '').toLowerCase();
-          const cat = (bm.category ?? '').toLowerCase();
           const coord = `${bm.lat.toFixed(5)}, ${bm.lng.toFixed(5)}`;
-          return name.includes(q) || cat.includes(q) || coord.includes(q);
+          return name.includes(q) || coord.includes(q);
         }));
         if (matches.length === 0) {
           return (
@@ -796,21 +873,25 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                     display: 'flex', alignItems: 'center', gap: 6,
                     padding: '5px 6px', cursor: 'pointer',
                     borderRadius: 4, fontSize: 12, transition: 'background 0.15s',
-                    background: multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent',
+                    background: bm.id && flashedBmId === bm.id
+                      ? 'rgba(34, 197, 94, 0.22)'
+                      : (multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent'),
                   }}
                   onClick={() => {
                     if (multiSelect) {
                       if (bm.id) toggleSelected(bm.id);
                     } else {
-                      onBookmarkClick(bm);
+                      handleBookmarkClick(bm);
                     }
                   }}
                   onContextMenu={(e) => { if (!multiSelect) handleContextMenu(e, bm); else e.preventDefault(); }}
                   onMouseEnter={(e) => {
-                    if (!(multiSelect && isSelected)) (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
+                    if (!(multiSelect && isSelected) && !(bm.id && flashedBmId === bm.id)) (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
                   }}
                   onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.background = multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent';
+                    (e.currentTarget as HTMLDivElement).style.background = bm.id && flashedBmId === bm.id
+                      ? 'rgba(34, 197, 94, 0.22)'
+                      : (multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent');
                   }}
                 >
                   {multiSelect && (
@@ -856,7 +937,12 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
       })()}
 
       {/* Bookmark groups — only when NOT searching */}
-      {search.trim() === '' && Object.entries(bookmarksByCategory).map(([cat, bms]) => (
+      {search.trim() === '' && Object.entries(bookmarksByCategory).map(([cat, bms]) => {
+        const catIds = bms.map((b) => b.id).filter((x): x is string => !!x);
+        const selectedInCat = catIds.filter((id) => selectedIds.has(id)).length;
+        const allSelectedInCat = catIds.length > 0 && selectedInCat === catIds.length;
+        const someSelectedInCat = selectedInCat > 0 && !allSelectedInCat;
+        return (
         <div key={cat} className="bookmark-group" style={{ marginBottom: 4 }}>
           <div
             style={{
@@ -871,6 +957,27 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             }}
             onClick={() => toggleCategory(cat)}
           >
+            {multiSelect && (
+              <input
+                type="checkbox"
+                checked={allSelectedInCat}
+                ref={(el) => { if (el) el.indeterminate = someSelectedInCat; }}
+                onChange={() => {
+                  setSelectedIds((prev) => {
+                    const next = new Set(prev);
+                    if (allSelectedInCat) {
+                      catIds.forEach((id) => next.delete(id));
+                    } else {
+                      catIds.forEach((id) => next.add(id));
+                    }
+                    return next;
+                  });
+                }}
+                onClick={(e) => e.stopPropagation()}
+                style={{ margin: 0, flexShrink: 0, cursor: 'pointer' }}
+                title={allSelectedInCat ? t('bm.deselect_category') : t('bm.select_category')}
+              />
+            )}
             <svg
               width="10"
               height="10"
@@ -920,21 +1027,25 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                       borderRadius: 4,
                       fontSize: 12,
                       transition: 'background 0.15s',
-                      background: multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent',
+                      background: bm.id && flashedBmId === bm.id
+                        ? 'rgba(34, 197, 94, 0.22)'
+                        : (multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent'),
                     }}
                     onClick={() => {
                       if (multiSelect) {
                         if (bm.id) toggleSelected(bm.id);
                       } else {
-                        onBookmarkClick(bm);
+                        handleBookmarkClick(bm);
                       }
                     }}
                     onContextMenu={(e) => { if (!multiSelect) handleContextMenu(e, bm); else e.preventDefault(); }}
                     onMouseEnter={(e) => {
-                      if (!(multiSelect && isSelected)) (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
+                      if (!(multiSelect && isSelected) && !(bm.id && flashedBmId === bm.id)) (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
                     }}
                     onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLDivElement).style.background = multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent';
+                      (e.currentTarget as HTMLDivElement).style.background = bm.id && flashedBmId === bm.id
+                        ? 'rgba(34, 197, 94, 0.22)'
+                        : (multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent');
                     }}
                   >
                     {multiSelect && (
@@ -1002,11 +1113,66 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
 
       {bookmarks.length === 0 && (
         <div style={{ fontSize: 12, opacity: 0.5, padding: '8px 0', textAlign: 'center' }}>
           {t('bm.empty')}
+        </div>
+      )}
+
+      {/* Multi-select toolbar — sticks to the bottom of the scroll area
+          so the user can scroll through the list unchecking items to
+          keep, then hit Delete without scrolling back up. */}
+      {multiSelect && (
+        <div
+          style={{
+            position: 'sticky',
+            bottom: -12, zIndex: 10,
+            marginLeft: -12, marginRight: -12,
+            marginTop: 16,
+            padding: '8px 12px',
+            background: 'rgba(26, 29, 39, 0.98)',
+            backdropFilter: 'blur(6px)',
+            borderTop: '1px solid rgba(108,140,255,0.35)',
+            boxShadow: '0 -6px 12px rgba(0,0,0,0.35)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+            <button
+              className="action-btn"
+              onClick={() => {
+                const allIds = bookmarks.map((b) => b.id).filter((x): x is string => !!x);
+                if (selectedIds.size === allIds.length) {
+                  setSelectedIds(new Set());
+                } else {
+                  setSelectedIds(new Set(allIds));
+                }
+              }}
+              style={{ padding: '3px 8px', fontSize: 11 }}
+            >
+              {selectedIds.size === bookmarks.length && bookmarks.length > 0
+                ? t('bm.deselect_all')
+                : t('bm.select_all')}
+            </button>
+            <span style={{ opacity: 0.7, marginLeft: 'auto' }}>
+              {selectedIds.size} / {bookmarks.length}
+            </span>
+            <button
+              className="action-btn"
+              onClick={handleBulkDelete}
+              disabled={selectedIds.size === 0}
+              style={{
+                padding: '3px 10px', fontSize: 11, fontWeight: 600,
+                color: selectedIds.size === 0 ? '#888' : '#ff6b6b',
+                borderColor: selectedIds.size === 0 ? undefined : 'rgba(255,107,107,0.4)',
+                cursor: selectedIds.size === 0 ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {t('bm.delete_selected').replace('{n}', String(selectedIds.size))}
+            </button>
+          </div>
         </div>
       )}
 

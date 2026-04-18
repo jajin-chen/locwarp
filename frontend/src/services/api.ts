@@ -90,6 +90,12 @@ export const wifiRepair = () => request<{ status: string; udid: string; name: st
 export const amfiRevealDeveloperMode = (udid: string) =>
   request<{ status: string }>('POST', `/api/device/${encodeURIComponent(udid)}/amfi/reveal-developer-mode`)
 
+// Bookmark UI state (expand/collapse per category, persisted in settings.json)
+export const getBookmarkUiState = () =>
+  request<{ expanded_categories: string[] | null }>('GET', '/api/bookmarks/ui-state')
+export const setBookmarkUiState = (expanded_categories: string[]) =>
+  request<{ status: string; expanded_categories: string[] }>('POST', '/api/bookmarks/ui-state', { expanded_categories })
+
 // Location simulation
 // Every action accepts an optional `udid` so the caller can target a specific
 // device in group mode. When omitted, the backend routes to the primary engine.
