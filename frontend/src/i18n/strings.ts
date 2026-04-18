@@ -223,7 +223,7 @@ export const STRINGS = {
     en: "Press this if 'Developer Mode' doesn't appear in iPhone Settings — it will make the option show up",
   },
   'dev_mode.reveal_success': {
-    zh: '已送出指令。請到 iPhone:完全關掉「設定」App(從底部往上滑移除)→ 重新打開「設定」→ 隱私權與安全性 → 往下拉找「開發者模式」,如果有看見自行開啟此功能。',
+    zh: '已送出指令。請到 iPhone:完全關掉「設定」(從底部往上滑移除)→ 重新打開「設定」→ 隱私權與安全性 → 往下拉找「開發者模式」,如果有看見自行開啟此功能。',
     en: "Done. On the iPhone: fully close Settings (swipe up from bottom), reopen it → Privacy & Security → scroll down to find Developer Mode. If it appears, turn it on yourself.",
   },
   'dev_mode.reveal_failed': { zh: '顯示開發者模式失敗', en: 'Reveal Developer Mode failed' },
