@@ -61,6 +61,10 @@ interface MapViewProps {
   recentPlaces?: Array<{ lat: number; lng: number; kind: 'teleport' | 'navigate' | 'search' | 'coord_teleport' | 'coord_navigate'; name: string; ts: number }>;
   onRecentReFly?: (entry: { lat: number; lng: number; kind: 'teleport' | 'navigate' | 'search' | 'coord_teleport' | 'coord_navigate'; name: string }) => void;
   onRecentClear?: () => void;
+  // Click handler for the topleft library shortcut. Opens the
+  // bookmarks / routes panel without the user having to scroll down
+  // to the ControlPanel's library button.
+  onOpenLibrary?: () => void;
 }
 
 const DEVICE_COLORS = ['#4285f4', '#ff9800'];
@@ -108,6 +112,7 @@ const MapView: React.FC<MapViewProps> = ({
   recentPlaces,
   onRecentReFly,
   onRecentClear,
+  onOpenLibrary,
 }) => {
   // Dual-mode rendering disabled by design: with pre-sync (both devices
   // teleport to the same start before any group action) and shared random
@@ -152,6 +157,10 @@ const MapView: React.FC<MapViewProps> = ({
   // Manual map drag disables follow so the user can pan/look around freely.
   const followBtnRef = useRef<HTMLButtonElement | null>(null);
   const followHandlerRef = useRef<() => void>(() => {});
+  // Library button handler (bottom of the topleft stack). Wired to the
+  // App-level callback that bumps `openLibraryToken`, triggering the
+  // ControlPanel library panel to open.
+  const openLibraryHandlerRef = useRef<() => void>(() => {});
   // followStateRef mirrors followMode so the dragstart handler (wired once
   // at map init) sees the latest value without a stale closure.
   const followStateRef = useRef(false);
@@ -348,6 +357,34 @@ const MapView: React.FC<MapViewProps> = ({
       });
       topLeftEl.appendChild(wrapper);
       followBtnRef.current = btn;
+    }
+
+    // Library (座標 / 路線) shortcut — fourth leaflet-bar. Tapping this
+    // opens the library panel without having to scroll down the left
+    // ControlPanel. Gold-pulsing star to catch the eye (animation
+    // auto-disabled under prefers-reduced-motion).
+    if (topLeftEl) {
+      const wrapper = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+      const btn = L.DomUtil.create('button', 'locwarp-library-btn', wrapper) as HTMLButtonElement;
+      btn.type = 'button';
+      btn.title = tRef.current('map.library_open');
+      btn.setAttribute('role', 'button');
+      btn.style.cssText = [
+        'width: 30px', 'height: 30px', 'display: flex',
+        'align-items: center', 'justify-content: center',
+        'padding: 0', 'margin: 0', 'cursor: pointer',
+        'background: var(--bg-surface, #2a2f3a)',
+        'color: #ffd95b', 'border: none', 'border-radius: 0',
+      ].join(';');
+      btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2l2.5 6.5L22 9l-5.5 5.5L18 22l-6-3.5L6 22l1.5-7.5L2 9l7.5-.5z"/>
+      </svg>`;
+      L.DomEvent.disableClickPropagation(wrapper);
+      L.DomEvent.on(btn, 'click', (e: Event) => {
+        e.preventDefault();
+        openLibraryHandlerRef.current();
+      });
+      topLeftEl.appendChild(wrapper);
     }
 
     // User-initiated drag disables follow mode so they can pan freely. We
@@ -1193,6 +1230,13 @@ const MapView: React.FC<MapViewProps> = ({
   const toggleFollow = useCallback(() => {
     setFollowMode((prev) => !prev);
   }, []);
+
+  // Keep the library-shortcut button ref in sync with the parent
+  // callback. The button itself was mounted once in the map init
+  // effect; this useEffect just rewires the target on each render.
+  useEffect(() => {
+    openLibraryHandlerRef.current = onOpenLibrary ?? (() => {});
+  }, [onOpenLibrary]);
 
   // Sync the follow button's visual state + handler with React state. Active
   // (blue) when on, neutral surface when off. Title flips between on/off

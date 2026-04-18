@@ -240,6 +240,7 @@ export const STRINGS = {
   'map.recenter': { zh: '定位到目前位置', en: 'Recenter on current position' },
   'map.follow_on': { zh: '跟隨模式 (開啟中, 點擊關閉)', en: 'Follow mode (on, click to disable)' },
   'map.follow_off': { zh: '跟隨模式 (關閉中, 點擊開啟)', en: 'Follow mode (off, click to enable)' },
+  'map.library_open': { zh: '開啟座標 / 路線', en: 'Open bookmarks / routes' },
   'map.follow_disabled_toast': { zh: '跟隨已關閉, 點按鈕可恢復', en: 'Follow disabled. Tap the button to resume.' },
   'map.recent_tooltip': { zh: '最近去過的地點', en: 'Recent destinations' },
   'map.recent_title': { zh: '最近去過', en: 'Recent destinations' },

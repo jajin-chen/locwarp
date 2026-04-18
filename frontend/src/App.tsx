@@ -64,6 +64,11 @@ const App: React.FC = () => {
   const bm = useBookmarks()
 
   const [savedRoutes, setSavedRoutes] = useState<any[]>([])
+  // Bumped every time an external trigger (currently the map topleft
+  // library button) wants ControlPanel to open its library panel.
+  // ControlPanel reacts on change via useEffect, so we don't have to
+  // lift the whole libraryOpen/libraryTab state here.
+  const [openLibraryToken, setOpenLibraryToken] = useState(0)
   const [cooldown, setCooldown] = useState(0)
   const [cooldownEnabled, setCooldownEnabled] = useState(false)
   const [randomWalkRadius, setRandomWalkRadius] = useState(500)
@@ -1174,6 +1179,7 @@ const App: React.FC = () => {
           onStraightLineChange={sim.setStraightLine}
           clickToAddWaypoint={clickToAddWaypoint}
           onClickToAddWaypointChange={setClickToAddWaypoint}
+          openLibraryToken={openLibraryToken}
           modeExtraSection={(sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop) ? (
           <div className="section" style={{ margin: '0 0 8px 0' }}>
             <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1506,6 +1512,7 @@ const App: React.FC = () => {
             else handleTeleport(entry.lat, entry.lng)
           }}
           onRecentClear={clearRecentList}
+          onOpenLibrary={() => setOpenLibraryToken((t) => t + 1)}
         />
         {avatarPickerOpen && (
           <UserAvatarPicker

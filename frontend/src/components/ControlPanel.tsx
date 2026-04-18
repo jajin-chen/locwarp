@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 
@@ -117,6 +117,13 @@ interface ControlPanelProps {
   onStraightLineChange?: (v: boolean) => void;
   clickToAddWaypoint?: boolean;
   onClickToAddWaypointChange?: (v: boolean) => void;
+  // Incremented by any external source (e.g. map top-left library
+  // button) to request the library panel be opened. useEffect on the
+  // value toggles libraryOpen=true so the parent doesn't have to own
+  // the open state.
+  openLibraryToken?: number;
+  // Which tab to show when opening via the token. Defaults to 'bookmarks'.
+  openLibraryTab?: 'bookmarks' | 'routes';
 }
 
 interface SectionState {
@@ -250,6 +257,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onStraightLineChange,
   clickToAddWaypoint = false,
   onClickToAddWaypointChange,
+  openLibraryToken,
+  openLibraryTab,
 }) => {
   const [sections, setSections] = useState<SectionState>({
     mode: true,
@@ -268,6 +277,19 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const [editingRouteName, setEditingRouteName] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [libraryTab, setLibraryTab] = useState<'bookmarks' | 'routes'>('bookmarks');
+
+  // Toggle the library panel whenever `openLibraryToken` changes. Used
+  // by the map top-left library button in MapView, which just
+  // increments a counter in App.tsx. We TOGGLE (not always-open) so a
+  // second click on the star closes the panel. Guard with !token to
+  // skip the initial mount (token starts at 0) — without that, the
+  // panel would flash open on app launch.
+  useEffect(() => {
+    if (!openLibraryToken) return;
+    setLibraryOpen((prev) => !prev);
+    if (openLibraryTab) setLibraryTab(openLibraryTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openLibraryToken]);
   const [libraryPos, setLibraryPos] = useState<{ x: number; y: number }>(() => ({
     x: Math.max(20, window.innerWidth - 440),
     y: 70,
@@ -649,22 +671,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         )}
       </div>
 
-      {/* Library entry button (bookmarks + saved routes) */}
-      <div className="section">
-        <button
-          className="action-btn"
-          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '8px' }}
-          onClick={(e) => { e.stopPropagation(); setLibraryOpen((o) => !o); }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" />
-          </svg>
-          {t('panel.library')}
-          <span style={{ opacity: 0.6, fontSize: 11 }}>
-            ({bookmarks.length} / {savedRoutes.length})
-          </span>
-        </button>
-      </div>
+      {/* Library entry button moved to the map's topleft control stack
+          (see MapView A3 star). Keeping this block removed — the map
+          button is the only entry point now. */}
 
       {/* Support caption + LINE + Ko-fi pinned to the sidebar bottom.
           Caption is split across two lines so the second line is the

@@ -2575,3 +2575,18 @@ input:focus-visible {
 .wx-delay-1 { animation-delay: 0.3s; }
 .wx-delay-2 { animation-delay: 0.6s; }
 .wx-delay-3 { animation-delay: 0.9s; }
+
+/* Library button — A3 star with gold pulse + glow. Lives in the map's
+   topleft leaflet-bar stack, below the follow-mode button. */
+@keyframes locwarp-library-pulse {
+  0%, 100% { transform: scale(1) rotate(0deg); filter: drop-shadow(0 0 0 transparent); }
+  50%      { transform: scale(1.18) rotate(6deg); filter: drop-shadow(0 0 4px rgba(255,217,91,0.9)); }
+}
+.locwarp-library-btn svg {
+  animation: locwarp-library-pulse 1400ms ease-in-out infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+@media (prefers-reduced-motion: reduce) {
+  .locwarp-library-btn svg { animation: none; }
+}

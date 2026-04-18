@@ -19,6 +19,7 @@ build-py/
 frontend/release/
 frontend/release-tmp/
 frontend/release-tmp*/
+frontend/release-new/
 *.spec.bak
 
 # ── Runtime state ───────────────────────────────────
