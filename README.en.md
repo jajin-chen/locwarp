@@ -56,23 +56,13 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 > ### Compatibility Status
 >
-> | iOS Version | Source | Status |
+> | Major Version | Verified Versions (newest → oldest) | Status |
 > | --- | --- | --- |
-> | **26.4.1** | Developer-tested | ![Verified](https://img.shields.io/badge/Verified-4caf50?style=flat-square) |
-> | **26.4.1** (iPadOS) | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
-> | **26.4** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
-> | **26.3.1** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
-> | **26.2** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
-> | **26.2.1** (iPadOS, M1 iPad) | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
-> | **18.7.7** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
-> | **18.7.1** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
-> | **18.6.2** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
-> | **18.5** (iPadOS) | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
-> | **18.1.1** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
-> | **17.6.1** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
-> | **16.7.15** | Community reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
-> | **16.7.12** (community) | @bitifyChen · [#9](https://github.com/keezxc1223/locwarp/pull/9) | ![Community](https://img.shields.io/badge/Community-ffa726?style=flat-square) |
-> | **15.x and below** | n/a | ![Unsupported](https://img.shields.io/badge/Unsupported-f44336?style=flat-square) |
+> | **iOS 26.x** | **26.4.1** (developer-tested) · 26.4.1 iPadOS · 26.4 · 26.3.1 · 26.2 · 26.2.1 iPadOS (M1 iPad) | ![Verified](https://img.shields.io/badge/Verified-4caf50?style=flat-square) ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
+> | **iOS 18.x** | 18.7.7 · 18.7.1 · 18.6.2 · 18.5 iPadOS · 18.1.1 | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
+> | **iOS 17.x** | 17.6.1 | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
+> | **iOS 16.x** (community) | 16.7.15 · 16.7.12 ([#9](https://github.com/keezxc1223/locwarp/pull/9), @bitifyChen) | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) ![Community](https://img.shields.io/badge/Community-ffa726?style=flat-square) |
+> | **iOS 15.x and below** | n/a | ![Unsupported](https://img.shields.io/badge/Unsupported-f44336?style=flat-square) |
 >
 > **Note**: The table above aggregates developer-tested results and a handful of community reports. It **does not guarantee that every device on the same iOS version, network environment, or system configuration will work**. iOS virtual location stability depends on the exact iOS patch revision, pymobiledevice3's support for that revision, whether the Developer Disk Image mounts successfully, and the Windows host's driver / VPN / firewall / AV stack. "Reported" therefore means **at least one user succeeded in their specific environment**, it is not a universal compatibility claim.
 >

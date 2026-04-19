@@ -56,23 +56,13 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 > ### 相容性測試狀態
 >
-> | iOS 版本 | 驗證來源 | 狀態 |
+> | 主版本 | 已驗證版本(新→舊) | 狀態 |
 > | --- | --- | --- |
-> | **26.4.1** | 開發者實測 | ![Tested](https://img.shields.io/badge/測試可用-4caf50?style=flat-square) |
-> | **26.4.1**(iPadOS) | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
-> | **26.4** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
-> | **26.3.1** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
-> | **26.2** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
-> | **26.2.1**(iPadOS,M1 iPad) | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
-> | **18.7.7** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
-> | **18.7.1** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
-> | **18.6.2** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
-> | **18.5**(iPadOS) | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
-> | **18.1.1** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
-> | **17.6.1** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
-> | **16.7.15** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
-> | **16.7.12**(社群維護) | @bitifyChen · [#9](https://github.com/keezxc1223/locwarp/pull/9) | ![Community](https://img.shields.io/badge/社群維護-ffa726?style=flat-square) |
-> | **15.x 及以下** | n/a | ![Unsupported](https://img.shields.io/badge/不支援-f44336?style=flat-square) |
+> | **iOS 26.x** | **26.4.1**(開發者實測) · 26.4.1 iPadOS · 26.4 · 26.3.1 · 26.2 · 26.2.1 iPadOS (M1 iPad) | ![Tested](https://img.shields.io/badge/測試可用-4caf50?style=flat-square) ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
+> | **iOS 18.x** | 18.7.7 · 18.7.1 · 18.6.2 · 18.5 iPadOS · 18.1.1 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
+> | **iOS 17.x** | 17.6.1 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
+> | **iOS 16.x**(社群維護) | 16.7.15 · 16.7.12([#9](https://github.com/keezxc1223/locwarp/pull/9),@bitifyChen) | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) ![Community](https://img.shields.io/badge/社群維護-ffa726?style=flat-square) |
+> | **iOS 15.x 及以下** | n/a | ![Unsupported](https://img.shields.io/badge/不支援-f44336?style=flat-square) |
 >
 > **說明**:上表僅彙整開發者實測與少數社群回饋的結果,**並不保證於所有相同版本的裝置、網路環境或系統組合下皆能正常運作**。iOS 虛擬定位的穩定性高度依賴 iOS 修補版本、pymobiledevice3 對該版本的支援程度、Developer Disk Image 是否成功掛載,以及 Windows 端的驅動、VPN、防火牆、AV 配置。因此「回報可用」僅代表**至少一位使用者在其特定環境下成功運作**,不等同於通用相容性聲明。
 >
