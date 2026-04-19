@@ -56,7 +56,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 > ### 相容性測試狀態
 >
-> | 主版本 | 已驗證版本(新→舊) | 狀態 |
+> | 主版本 | 已驗證版本 | 狀態 |
 > | --- | --- | --- |
 > | **iOS 26.x** | **26.4.1**(開發者實測) · 26.4.1 iPadOS · 26.4 · 26.3.1 · 26.2 · 26.2.1 iPadOS (M1 iPad) | ![Tested](https://img.shields.io/badge/測試可用-4caf50?style=flat-square) ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
 > | **iOS 18.x** | 18.7.7 · 18.7.1 · 18.6.2 · 18.5 iPadOS · 18.1.1 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
