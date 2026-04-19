@@ -65,6 +65,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 > | **26.2.1**(iPadOS,M1 iPad) | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
 > | **18.7.7** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
 > | **18.7.1** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
+> | **18.6.2** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
 > | **18.5**(iPadOS) | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
 > | **18.1.1** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |
 > | **17.6.1** | 社群使用者回報 | ![Reported](https://img.shields.io/badge/回報可用-6c8cff?style=flat-square) |

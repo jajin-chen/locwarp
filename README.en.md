@@ -65,6 +65,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 > | **26.2.1** (iPadOS, M1 iPad) | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
 > | **18.7.7** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
 > | **18.7.1** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
+> | **18.6.2** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
 > | **18.5** (iPadOS) | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
 > | **18.1.1** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
 > | **17.6.1** | Community-reported | ![Reported](https://img.shields.io/badge/Reported-6c8cff?style=flat-square) |
