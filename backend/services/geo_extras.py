@@ -250,8 +250,59 @@ async def nearby_pois(lat: float, lng: float, radius_m: int = 200, limit: int = 
 
 # ── OSRM Table multi-stop optimize ─────────────────────────
 
+# OSRM official demo at router.project-osrm.org caps /table at 100 coordinates
+# per request. Beyond that we skip the call entirely and fall back to a
+# straight-line haversine matrix (good enough for dense Pokemon-GO loops where
+# adjacent waypoints are already a few hundred metres apart).
+OSRM_TABLE_MAX_COORDS = 100
+
+# Typical travel speeds in m/s, used by the haversine fallback to convert
+# distance to duration (the TSP helper only reads relative magnitudes so
+# absolute accuracy doesn't matter, but we want sensible numbers in the API
+# response so the frontend's ETA estimate stays reasonable).
+_HAVERSINE_PROFILE_SPEED_MPS = {
+    "foot": 1.4,
+    "walking": 1.4,
+    "running": 3.0,
+    "bike": 4.5,
+    "cycling": 4.5,
+    "car": 11.0,
+    "driving": 11.0,
+}
+
+
+def haversine_duration_matrix(coords: list[Coordinate], profile: str = "foot") -> list[list[float]]:
+    """Build an NxN duration matrix from straight-line haversine distance.
+
+    Used as a fallback when OSRM /table is unavailable (>100 waypoints, or
+    the demo server is down). Speed is profile-derived so the absolute numbers
+    are still in a useful ballpark for the frontend's ETA display.
+    """
+    speed = _HAVERSINE_PROFILE_SPEED_MPS.get(profile, 1.4)
+    n = len(coords)
+    matrix: list[list[float]] = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = _haversine_m(coords[i].lat, coords[i].lng, coords[j].lat, coords[j].lng)
+            t = d / speed
+            matrix[i][j] = t
+            matrix[j][i] = t
+    return matrix
+
+
 async def osrm_table(coords: list[Coordinate], profile: str = "foot") -> list[list[float]] | None:
-    """Return duration matrix in seconds from OSRM Table API."""
+    """Return duration matrix in seconds from OSRM Table API.
+
+    Returns None when the OSRM call fails OR when there are too many
+    coordinates for the public demo server. Callers fall back to
+    haversine_duration_matrix() in either case.
+    """
+    if len(coords) > OSRM_TABLE_MAX_COORDS:
+        logger.info(
+            "OSRM /table skipped: %d coords exceeds public-demo cap of %d",
+            len(coords), OSRM_TABLE_MAX_COORDS,
+        )
+        return None
     osrm_profile = "foot" if profile in ("foot", "walking", "running") else "car"
     coord_str = ";".join(f"{c.lng},{c.lat}" for c in coords)
     url = f"{OSRM_BASE_URL}/table/v1/{osrm_profile}/{coord_str}?annotations=duration"

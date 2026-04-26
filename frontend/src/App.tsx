@@ -1343,7 +1343,14 @@ const App: React.FC = () => {
                           )
                           if (res?.waypoints?.length) {
                             sim.setWaypoints(res.waypoints)
-                            showToast(t('toast.route_optimized').replace('{min}', String(Math.round(res.total_duration_s / 60))))
+                            const minMsg = t('toast.route_optimized').replace('{min}', String(Math.round(res.total_duration_s / 60)))
+                            // OSRM /table caps at 100 waypoints; the backend
+                            // falls back to a straight-line haversine matrix
+                            // beyond that. Tag the toast so the user knows
+                            // it's an estimate, not a road-distance optimum.
+                            showToast(res.used_estimate
+                              ? `${minMsg} (${t('toast.route_optimize_estimate')})`
+                              : minMsg)
                           }
                         } catch (err: any) {
                           showToast(err?.message || t('toast.route_optimize_failed'))

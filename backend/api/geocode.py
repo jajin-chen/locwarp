@@ -13,6 +13,7 @@ from models.schemas import (
 from services.geocoding import GeocodingService
 from services.geo_extras import (
     get_timezone,
+    haversine_duration_matrix,
     optimize_order_exact,
     optimize_order_nearest_neighbor,
     osrm_table,
@@ -118,14 +119,27 @@ async def real_location():
 
 @router.post("/route-optimize", response_model=RouteOptimizeResponse)
 async def route_optimize(req: RouteOptimizeRequest):
-    """Reorder waypoints to minimize total travel time using OSRM Table."""
+    """Reorder waypoints to minimize total travel time.
+
+    Uses OSRM /table when feasible (<=100 waypoints AND the demo server
+    responds). Otherwise falls back to a straight-line haversine duration
+    matrix — accuracy trades road distance for crow-flight, which is fine
+    for dense Pokemon-GO style loops where adjacent points are already
+    close together. The endpoint always succeeds; no more 503.
+    """
     if len(req.waypoints) < 2:
         raise HTTPException(status_code=400, detail="need >=2 waypoints")
     durations = await osrm_table(req.waypoints, req.profile)
+    used_estimate = False
     if not durations:
-        raise HTTPException(status_code=503, detail="OSRM Table unavailable")
+        durations = haversine_duration_matrix(req.waypoints, req.profile)
+        used_estimate = True
+        logger.info(
+            "route_optimize: using haversine fallback for %d waypoints", len(req.waypoints),
+        )
 
-    # Brute-force optimal up to 8 points, heuristic beyond.
+    # Brute-force optimal up to 8 points, heuristic beyond. With the
+    # haversine matrix the brute-force is still cheap (8! = 40320 perms).
     if len(req.waypoints) <= 8:
         order = optimize_order_exact(durations, req.keep_first)
     else:
@@ -137,10 +151,9 @@ async def route_optimize(req: RouteOptimizeRequest):
         d = durations[a][b] or 0.0
         total_duration += d
 
-    # Distance not directly returned by Table without ?annotations=distance.
-    # Return 0 for distance; frontend can recompute if needed.
     return RouteOptimizeResponse(
         waypoints=[Coordinate(lat=wp.lat, lng=wp.lng) for wp in reordered],
         total_distance_m=0.0,
         total_duration_s=total_duration,
+        used_estimate=used_estimate,
     )

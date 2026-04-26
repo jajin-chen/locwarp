@@ -389,6 +389,7 @@ export const STRINGS = {
   'toast.timezone_diff': { zh: '已進入 {zone} 時區(時差 {hours} 小時,當地 {time})', en: 'Now in {zone} (offset {hours}h, local {time})' },
   'toast.route_optimized': { zh: '路線已最佳化(總時長約 {min} 分)', en: 'Route optimized ({min} min total)' },
   'toast.route_optimize_failed': { zh: '路線最佳化失敗', en: 'Route optimize failed' },
+  'toast.route_optimize_estimate': { zh: '直線估算', en: 'straight-line estimate' },
   'panel.waypoints_optimize': { zh: '最佳順序', en: 'Optimize' },
   'panel.waypoints_optimize_tooltip': { zh: '用 OSRM Table 重新排序路徑點,最小化總移動時間', en: 'Reorder waypoints with OSRM Table to minimize total travel time' },
   'toast.no_waypoints': { zh: '尚未設定路徑點,請在地圖上右鍵添加或使用隨機產生', en: 'No waypoints set, right-click the map to add, or use Random generate' },

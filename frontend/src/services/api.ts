@@ -174,7 +174,7 @@ export async function lookupWeather(lat: number, lng: number): Promise<{ tempC: 
   }
 }
 export const routeOptimize = (waypoints: { lat: number; lng: number }[], profile = 'foot', keep_first = true) =>
-  request<{ waypoints: { lat: number; lng: number }[]; total_distance_m: number; total_duration_s: number }>(
+  request<{ waypoints: { lat: number; lng: number }[]; total_distance_m: number; total_duration_s: number; used_estimate?: boolean }>(
     'POST', '/api/geocode/route-optimize', { waypoints, profile, keep_first },
   )
 

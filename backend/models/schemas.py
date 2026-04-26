@@ -249,3 +249,7 @@ class RouteOptimizeResponse(BaseModel):
     waypoints: list[Coordinate]
     total_distance_m: float
     total_duration_s: float
+    # True when the durations came from a straight-line haversine fallback
+    # (OSRM /table unavailable or too many waypoints). Frontend uses this
+    # to label the result as an estimate vs a road-distance optimum.
+    used_estimate: bool = False
