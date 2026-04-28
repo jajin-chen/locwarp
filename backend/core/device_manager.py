@@ -70,6 +70,9 @@ class _ActiveConnection:
     lockdown: object  # LockdownClient or RemoteServiceDiscoveryService
     ios_version: str
     connection_type: str = "USB"  # "USB" or "Network"
+    name: str = "iPhone"  # Cached DeviceName so discover_devices can surface
+                          # WiFi-tunnel devices that no longer appear in usbmuxd
+                          # after USB is unplugged (RemotePairing tunnel only).
     dvt_provider: Optional[DvtProvider] = None
     tunnel_proxy: Optional[CoreDeviceTunnelProxy] = None
     tunnel_context: object = None  # async context manager for the tunnel
@@ -160,6 +163,38 @@ class DeviceManager:
             except Exception:
                 logger.exception("Failed to query device %s", getattr(raw, "serial", "?"))
 
+        # Surface devices that are in our connection table but did not get
+        # added from usbmuxd above. Happens for the dual-device A-WiFi +
+        # B-USB flow: A is paired via the in-process RemotePairing tunnel
+        # (port 49152), NOT through usbmuxd's iTunes-WiFi-sync path, so
+        # once A's USB cable is unplugged usbmuxd may stop listing A
+        # entirely. Without this fallback `discover_devices()` would
+        # return only B, and the frontend's listDevices refresh on B's
+        # auto-connect broadcast would wipe A out of the device sidebar /
+        # connectedDevices fanout, so the user would see A as if it had
+        # been kicked. Compare against actually-added udids (not
+        # `seen_udids` which is set early for raw-entry dedup) so a
+        # failed lockdown query above doesn't suppress the fallback.
+        added_udids = {d.udid for d in devices}
+        for udid, conn in self._connections.items():
+            if udid in added_udids:
+                continue
+            try:
+                info = DeviceInfo(
+                    udid=udid,
+                    name=conn.name or "iPhone",
+                    ios_version=conn.ios_version or "0.0",
+                    connection_type=conn.connection_type or "Network",
+                )
+                info.is_connected = True
+                devices.append(info)
+                logger.debug(
+                    "Discovered cached %s device %s (%s) iOS %s (no usbmux entry)",
+                    conn.connection_type, info.name, udid, info.ios_version,
+                )
+            except Exception:
+                logger.exception("Failed to surface cached connection for %s", udid)
+
         return devices
 
     # ------------------------------------------------------------------
@@ -203,6 +238,7 @@ class DeviceManager:
             raise
 
         ios_version_str: str = lockdown.all_values.get("ProductVersion", "0.0")
+        device_name: str = lockdown.all_values.get("DeviceName", "iPhone")
         ver = _parse_ios_version(ios_version_str)
 
         if ver < (16, 0):
@@ -217,6 +253,7 @@ class DeviceManager:
         else:
             conn = self._connect_legacy(udid, lockdown, ios_version_str)
         conn.connection_type = connection_type
+        conn.name = device_name
 
         async with self._lock:
             self._connections[udid] = conn
@@ -604,7 +641,14 @@ class DeviceManager:
         props = peer.get("Properties", {})
         udid = props.get("UniqueDeviceID", "")
         ios_version_str = props.get("OSVersion", "0.0")
+        # peer_info usually only carries DeviceClass ("iPhone") not the
+        # user's actual DeviceName. If we already have a USB conn for this
+        # udid, preserve its real name across the USB→WiFi switch so the
+        # device chip / status bar keeps showing the user's chosen name.
         device_name = props.get("DeviceClass", "iPhone")
+        existing = self._connections.get(udid)
+        if existing is not None and existing.name and existing.name != "iPhone":
+            device_name = existing.name
 
         if udid in self._connections:
             await self.disconnect(udid)
@@ -614,6 +658,7 @@ class DeviceManager:
             lockdown=rsd,
             ios_version=ios_version_str,
             connection_type="Network",
+            name=device_name,
             rsd=rsd,
         )
 
