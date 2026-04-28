@@ -34,6 +34,10 @@ backend/wifi_tunnel_info.json
 .DS_Store
 Thumbs.db
 
+# ── Claude Code (per-machine state) ─────────────────
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
 # ── Source images kept in repo root during dev ──────
 # (icon.png / icon.ico are kept in frontend/build/ — committed)
 S__*.png

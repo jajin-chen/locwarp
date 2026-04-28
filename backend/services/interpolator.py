@@ -58,27 +58,31 @@ class RouteInterpolator:
     ) -> list[dict]:
         """Interpolate a sparse polyline into dense, evenly-timed points.
 
-        Parameters
-        ----------
-        coords:
-            Ordered waypoints of the route.
-        speed_mps:
-            Desired travel speed in metres per second.
-        interval_sec:
-            Time gap between generated points (default 1 s).
+        Walks the polyline by cumulative distance, emitting one point every
+        ``step_dist = speed_mps * interval_sec`` metres. This handles three
+        edge cases the old per-segment ``carry`` logic got wrong:
+
+        1. ``step_dist > min_seg_dist``: previously a single step that
+           crossed a segment boundary skipped the entire next segment, and
+           ``carry`` rolled an inflated distance forward, producing emits
+           that effectively traveled at ``min_seg_dist`` per tick instead
+           of ``step_dist``. At ~180+ km/h with the 25 m straight-line
+           densification, this collapsed to zero intermediate emits and
+           the route looked frozen at start.
+        2. Variable segment lengths from OSRM: same boundary-crossing bug
+           skewed effective speed on routes with mixed-length segments.
+        3. step_dist < min_seg_dist remains unchanged in behavior.
 
         Returns
         -------
         list[dict]
-            Each dict contains *lat*, *lng*, *timestamp_offset* (seconds from
-            start), and *bearing* (degrees).
+            Each dict contains *lat*, *lng*, *timestamp_offset* (seconds
+            from start), *bearing* (degrees), and *seg_idx*.
         """
         if not coords:
             return []
 
-        step_dist = speed_mps * interval_sec  # meters per tick
         results: list[dict] = []
-        time_offset = 0.0
 
         # Seed the first point
         results.append(
@@ -98,61 +102,64 @@ class RouteInterpolator:
             }
         )
 
-        carry = 0.0  # leftover distance from previous segment
-        seg_idx = 0
+        step_dist = speed_mps * interval_sec  # meters per tick
+        if step_dist <= 0 or speed_mps <= 0:
+            return results
 
-        while seg_idx < len(coords) - 1:
+        # Walk the polyline by cumulative distance from the start. For each
+        # segment we know its [start_cum, end_cum] range; any emit target
+        # `next_emit_at` that falls inside that range gets interpolated at
+        # the corresponding fractional offset within the segment.
+        cum_at_seg_start = 0.0
+        next_emit_at = step_dist
+        last_seg_idx = 0
+        last_bearing = results[0]["bearing"]
+
+        for seg_idx in range(len(coords) - 1):
             a = coords[seg_idx]
             b = coords[seg_idx + 1]
             seg_dist = RouteInterpolator.haversine(a.lat, a.lng, b.lat, b.lng)
-            seg_bearing = RouteInterpolator.bearing(a.lat, a.lng, b.lat, b.lng)
-
-            if seg_dist == 0:
-                seg_idx += 1
+            if seg_dist <= 0:
                 continue
+            seg_bearing = RouteInterpolator.bearing(a.lat, a.lng, b.lat, b.lng)
+            seg_end_cum = cum_at_seg_start + seg_dist
 
-            # How far along this segment we already are (from carry)
-            pos = carry  # meters from *a* along the segment
-
-            while pos + step_dist <= seg_dist:
-                pos += step_dist
-                time_offset += interval_sec
-                frac = pos / seg_dist
+            while next_emit_at <= seg_end_cum:
+                offset_in_seg = next_emit_at - cum_at_seg_start
+                frac = offset_in_seg / seg_dist
                 lat = a.lat + frac * (b.lat - a.lat)
                 lng = a.lng + frac * (b.lng - a.lng)
                 results.append(
                     {
                         "lat": lat,
                         "lng": lng,
-                        "timestamp_offset": time_offset,
+                        "timestamp_offset": next_emit_at / speed_mps,
                         "bearing": seg_bearing,
                         "seg_idx": seg_idx,
                     }
                 )
+                next_emit_at += step_dist
 
-            # Leftover distance rolls into the next segment
-            carry = seg_dist - pos
-            seg_idx += 1
+            cum_at_seg_start = seg_end_cum
+            last_seg_idx = seg_idx
+            last_bearing = seg_bearing
 
-        # Always include the final waypoint
+        # Always include the final waypoint (its timestamp is the total
+        # polyline length divided by speed, regardless of where the last
+        # tick happened to land).
+        total_distance = cum_at_seg_start
         last = coords[-1]
-        if results:
-            prev = results[-1]
-            if prev["lat"] != last.lat or prev["lng"] != last.lng:
-                remaining = RouteInterpolator.haversine(
-                    prev["lat"], prev["lng"], last.lat, last.lng
-                )
-                if speed_mps > 0:
-                    time_offset += remaining / speed_mps
-                results.append(
-                    {
-                        "lat": last.lat,
-                        "lng": last.lng,
-                        "timestamp_offset": time_offset,
-                        "bearing": results[-1]["bearing"],
-                        "seg_idx": max(len(coords) - 2, 0),
-                    }
-                )
+        prev = results[-1]
+        if prev["lat"] != last.lat or prev["lng"] != last.lng:
+            results.append(
+                {
+                    "lat": last.lat,
+                    "lng": last.lng,
+                    "timestamp_offset": total_distance / speed_mps,
+                    "bearing": last_bearing,
+                    "seg_idx": last_seg_idx,
+                }
+            )
 
         return results
 
