@@ -439,9 +439,18 @@ const App: React.FC = () => {
   // history: 'menu' (map right-click) is the default, 'coord' when the
   // coord-input overlay button fired us. The UI shows different labels
   // depending on source.
+  // Preview pin state. Lives at App level so both the coord-input
+  // overlay (inside MapView) and the bookmark-list (inside ControlPanel)
+  // can drop / clear the same pin. Cleared automatically by any real
+  // teleport so the amber "you're peeking" pin doesn't linger after the
+  // GPS catches up to the same coordinate.
+  const [previewPin, setPreviewPin] = useState<{ lat: number; lng: number } | null>(null)
+  const clearPreviewPin = useCallback(() => setPreviewPin(null), [])
+
   const handleTeleport = useCallback(async (latIn: number, lngIn: number, source: 'menu' | 'coord' = 'menu') => {
     const lat = clampLat(latIn)
     const lng = normalizeLng(lngIn)
+    setPreviewPin(null)
     const udids = device.connectedDevices.map((d) => d.udid)
     if (udids.length >= 2) {
       sim.setCurrentPosition({ lat, lng })
@@ -455,12 +464,16 @@ const App: React.FC = () => {
 
   const mapApiRef = useRef<{ panTo: (lat: number, lng: number, zoom?: number) => void } | null>(null)
   const handleMapPanOnly = useCallback((lat: number, lng: number) => {
-    mapApiRef.current?.panTo(clampLat(lat), normalizeLng(lng))
+    const cl = clampLat(lat)
+    const nl = normalizeLng(lng)
+    mapApiRef.current?.panTo(cl, nl)
+    setPreviewPin({ lat: cl, lng: nl })
   }, [])
 
   const handleNavigate = useCallback(async (latIn: number, lngIn: number, source: 'menu' | 'coord' = 'menu') => {
     const lat = clampLat(latIn)
     const lng = normalizeLng(lngIn)
+    setPreviewPin(null)
     const udids = device.connectedDevices.map((d) => d.udid)
     if (udids.length >= 2) {
       const outcome = await sim.navigateAll(udids, lat, lng)
@@ -1044,6 +1057,7 @@ const App: React.FC = () => {
           bookmarkCategories={bm.categories.map(c => c.name)}
           bookmarkCategoryColors={Object.fromEntries(bm.categories.map(c => [c.name, c.color || '']))}
           onBookmarkClick={(b: any) => handleTeleport(b.lat, b.lng)}
+          onBookmarkPreview={(b: any) => handleMapPanOnly(b.lat, b.lng)}
           onBookmarkAdd={(b: any) => {
             const cat = bm.categories.find(c => c.name === b.category)
             // Reverse-geocode first so custom-coordinate bookmarks also get a
@@ -1512,6 +1526,9 @@ const App: React.FC = () => {
           }))}
           showBookmarkPins={showBookmarkPins}
           onMapReady={(api) => { mapApiRef.current = api }}
+          previewPin={previewPin}
+          onPreviewPinClear={clearPreviewPin}
+          onCoordPreview={handleMapPanOnly}
           recentPlaces={recentPlaces}
           onRecentReFly={(entry) => {
             const isNavigate = entry.kind === 'navigate' || entry.kind === 'coord_navigate'

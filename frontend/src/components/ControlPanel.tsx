@@ -86,6 +86,10 @@ interface ControlPanelProps {
   bookmarkCategories: string[];
   bookmarkCategoryColors?: Record<string, string>;
   onBookmarkClick: (bm: Bookmark) => void;
+  // Camera-only fly: pans the map to the bookmark coordinate without
+  // moving the iPhone GPS. BookmarkList exposes a checkbox letting the
+  // user choose between this and the legacy GPS teleport.
+  onBookmarkPreview?: (bm: Bookmark) => void;
   onBookmarkAdd: (bm: Bookmark) => void;
   onBookmarkDelete: (id: string) => void;
   onBookmarkEdit: (id: string, bm: Partial<Bookmark>) => void;
@@ -226,6 +230,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   bookmarkCategories,
   bookmarkCategoryColors,
   onBookmarkClick,
+  onBookmarkPreview,
   onBookmarkAdd,
   onBookmarkDelete,
   onBookmarkEdit,
@@ -781,6 +786,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   categoryColors={bookmarkCategoryColors}
                   currentPosition={currentPosition}
                   onBookmarkClick={(b) => { onBookmarkClick(b); }}
+                  onBookmarkPreview={onBookmarkPreview}
                   onBookmarkAdd={onBookmarkAdd}
                   onBookmarkDelete={onBookmarkDelete}
                   onBookmarkEdit={onBookmarkEdit}

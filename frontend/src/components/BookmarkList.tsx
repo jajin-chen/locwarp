@@ -31,6 +31,10 @@ interface BookmarkListProps {
   categoryColors?: Record<string, string>;
   currentPosition: Position | null;
   onBookmarkClick: (bm: Bookmark) => void;
+  // Camera-only fly: pans the map to the bookmark coordinate without
+  // moving the iPhone GPS. Used when the "click also flies GPS"
+  // checkbox is unticked. Optional: if not supplied the toggle hides.
+  onBookmarkPreview?: (bm: Bookmark) => void;
   onBookmarkAdd: (bm: Bookmark) => void;
   onBookmarkDelete: (id: string) => void;
   onBookmarkEdit: (id: string, bm: Partial<Bookmark>) => void;
@@ -83,6 +87,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   categoryColors,
   currentPosition,
   onBookmarkClick,
+  onBookmarkPreview,
   onBookmarkAdd,
   onBookmarkDelete,
   onBookmarkEdit,
@@ -170,6 +175,21 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
     }));
     exitMultiSelect();
   };
+  // "Click also flies GPS" toggle persisted in localStorage so the choice
+  // survives restart. Default true = legacy behavior (clicking a bookmark
+  // teleports iPhone). When false, click only pans the map view (preview).
+  const [flyGps, setFlyGpsRaw] = useState<boolean>(() => {
+    try {
+      const v = localStorage.getItem('locwarp.bookmark_fly_gps');
+      // Default to true unless the user has explicitly stored '0'.
+      return v === null ? true : v === '1';
+    } catch { return true; }
+  });
+  const setFlyGps = (v: boolean) => {
+    setFlyGpsRaw(v);
+    try { localStorage.setItem('locwarp.bookmark_fly_gps', v ? '1' : '0'); } catch { /* ignore */ }
+  };
+
   // Sort mode persisted in localStorage so it survives restart.
   type SortMode = 'default' | 'name' | 'date_added' | 'last_used';
   const [sortMode, setSortModeRaw] = useState<SortMode>(() => {
@@ -330,14 +350,20 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
     });
   };
 
-  // Teleport click: flash the bookmark green for 500ms as visual feedback
+  // Click handler: flash the bookmark green for 500ms as visual feedback
   // and apply a 150ms debounce so accidental double-clicks don't fire
-  // teleport twice (which on slow connections would race).
+  // twice (which on slow connections would race the teleport).
+  // When `flyGps` is off and a preview handler is wired, we route to the
+  // camera-only path instead of the GPS teleport.
   const handleBookmarkClick = (bm: Bookmark) => {
     const now = Date.now();
     if (now - lastClickTs.current < 150) return;
     lastClickTs.current = now;
-    onBookmarkClick(bm);
+    if (!flyGps && onBookmarkPreview) {
+      onBookmarkPreview(bm);
+    } else {
+      onBookmarkClick(bm);
+    }
     if (bm.id) {
       setFlashedBmId(bm.id);
       if (flashTimer.current) clearTimeout(flashTimer.current);
@@ -571,6 +597,27 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             style={{ margin: 0 }}
           />
           <span>{t('bm.show_on_map')}</span>
+        </label>
+      )}
+
+      {/* Click-also-flies-GPS toggle. Only useful when the parent wires up
+          the camera-only preview path; otherwise hide so the checkbox
+          doesn't look like a no-op. */}
+      {onBookmarkPreview && (
+        <label
+          title={t('bm.fly_gps_tooltip')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, marginTop: 6,
+            fontSize: 11, color: '#bbb', cursor: 'pointer', userSelect: 'none',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={flyGps}
+            onChange={(e) => setFlyGps(e.target.checked)}
+            style={{ margin: 0 }}
+          />
+          <span>{t('bm.fly_gps')}</span>
         </label>
       )}
 

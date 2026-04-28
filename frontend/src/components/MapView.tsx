@@ -58,6 +58,16 @@ interface MapViewProps {
   // "Locate PC" pan-only flow) can move the map view without going
   // through React state.
   onMapReady?: (api: { panTo: (lat: number, lng: number, zoom?: number) => void }) => void;
+  // Preview-only pin: rendered when the user previews a coord (camera-only
+  // fly) so they can see exactly where they're looking on the map. Distinct
+  // shape + amber color so it doesn't get confused with the red destination
+  // marker. Cleared by the parent when a real teleport / clear runs.
+  previewPin?: Position | null;
+  onPreviewPinClear?: () => void;
+  // Triggered by the coord-input overlay's "Preview" button. The parent
+  // owns both the map-pan and the preview-pin state so we route through
+  // it instead of touching mapRef locally.
+  onCoordPreview?: (lat: number, lng: number) => void;
   // Recent destinations (last 20 teleport / navigate / search actions).
   // Rendered in a topright popover so the user can re-fly in one click.
   recentPlaces?: Array<{ lat: number; lng: number; kind: 'teleport' | 'navigate' | 'search' | 'coord_teleport' | 'coord_navigate'; name: string; ts: number }>;
@@ -111,6 +121,9 @@ const MapView: React.FC<MapViewProps> = ({
   bookmarkPins,
   showBookmarkPins,
   onMapReady,
+  previewPin,
+  onPreviewPinClear,
+  onCoordPreview,
   recentPlaces,
   onRecentReFly,
   onRecentClear,
@@ -143,6 +156,7 @@ const MapView: React.FC<MapViewProps> = ({
   const currentMarkerRef = useRef<L.CircleMarker | null>(null);
   const prevPositionRef = useRef<Position | null>(null);
   const destMarkerRef = useRef<L.Marker | null>(null);
+  const previewMarkerRef = useRef<L.Marker | null>(null);
   const waypointMarkersRef = useRef<L.Marker[]>([]);
   const bookmarkMarkersRef = useRef<L.Marker[]>([]);
   const polylineRef = useRef<L.Polyline | null>(null);
@@ -779,6 +793,64 @@ const MapView: React.FC<MapViewProps> = ({
       destMarkerRef.current = marker;
     }
   }, [destination, dualMode]);
+
+  // Preview pin (camera-only fly target). Amber teardrop with an eye icon
+  // to convey "you're peeking at this coordinate, GPS hasn't actually
+  // moved here". Click the marker to dismiss the pin.
+  const previewSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const sig = previewPin ? `${previewPin.lat.toFixed(7)},${previewPin.lng.toFixed(7)}` : null;
+    if (sig === previewSigRef.current) return;
+    previewSigRef.current = sig;
+
+    if (previewMarkerRef.current) {
+      previewMarkerRef.current.remove();
+      previewMarkerRef.current = null;
+    }
+
+    if (previewPin) {
+      const amberIcon = L.divIcon({
+        className: 'preview-marker',
+        html: `<svg width="36" height="50" viewBox="0 0 36 50">
+          <defs>
+            <filter id="previewShadow" x="-20%" y="-10%" width="140%" height="130%">
+              <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#000" flood-opacity="0.4"/>
+            </filter>
+            <linearGradient id="previewGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#fbbf24"/>
+              <stop offset="100%" stop-color="#d97706"/>
+            </linearGradient>
+          </defs>
+          <ellipse cx="18" cy="47" rx="6" ry="2" fill="#000" opacity="0.2"/>
+          <path d="M18 2C9.7 2 3 8.7 3 17c0 12 15 30 15 30s15-18 15-30C33 8.7 26.3 2 18 2z"
+                fill="url(#previewGrad)" filter="url(#previewShadow)"
+                stroke="rgba(255,255,255,0.7)" stroke-width="1.2"/>
+          <circle cx="18" cy="17" r="7" fill="#ffffff" opacity="0.95"/>
+          <svg x="11" y="10" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2.2">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </svg>`,
+        iconSize: [36, 50],
+        iconAnchor: [18, 47],
+      });
+
+      const marker = L.marker([previewPin.lat, previewPin.lng], {
+        icon: amberIcon,
+        zIndexOffset: 500,
+      }).addTo(map);
+
+      const tip = `${tRef.current('map.preview_pin')} · ${previewPin.lat.toFixed(5)}, ${previewPin.lng.toFixed(5)}`;
+      marker.bindTooltip(tip, { direction: 'top', offset: [0, -48] });
+      if (onPreviewPinClear) {
+        marker.on('click', () => onPreviewPinClear());
+      }
+      previewMarkerRef.current = marker;
+    }
+  }, [previewPin, onPreviewPinClear]);
 
   // Update waypoint markers
   const waypointSigRef = useRef<string>('');
@@ -1466,6 +1538,28 @@ const MapView: React.FC<MapViewProps> = ({
     else onTeleport(parsed.lat, parsed.lng, 'coord');
     setCoordInput('');
   };
+  // Preview-only: pan the map view to the parsed coordinate without
+  // touching the iPhone GPS. Lets the user "peek" at a coordinate before
+  // deciding to teleport. Keeps the input populated so the next click
+  // can promote it to a real teleport / navigate.
+  const submitCoordPreview = () => {
+    const parsed = parseCoordInput(coordInput);
+    if (!parsed) {
+      if (onShowToast) onShowToast(tRef.current('panel.coord_invalid'));
+      return;
+    }
+    if (onCoordPreview) {
+      // Parent owns the pan + preview-pin drop. We let it decide so the
+      // pin and the camera move together for both this overlay and the
+      // bookmark-list "fly camera only" path.
+      onCoordPreview(parsed.lat, parsed.lng);
+      return;
+    }
+    const m = mapRef.current;
+    if (!m) return;
+    const targetZoom = Math.max(m.getZoom(), 16);
+    m.setView([parsed.lat, parsed.lng], targetZoom, { animate: true });
+  };
 
   return (
     <div className="map-container" style={{ position: 'relative', flex: 1 }}>
@@ -1627,6 +1721,26 @@ const MapView: React.FC<MapViewProps> = ({
             <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
           </svg>
           {tRef.current('panel.paste')}
+        </button>
+        <button
+          onClick={submitCoordPreview}
+          disabled={!coordInput.trim()}
+          title={tRef.current('panel.coord_preview_tooltip')}
+          style={{
+            background: 'transparent',
+            color: !coordInput.trim() ? 'rgba(199, 208, 228, 0.4)' : '#c7d0e4',
+            border: `1px solid ${!coordInput.trim() ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.28)'}`,
+            borderRadius: 4,
+            padding: '4px 10px', fontSize: 11, fontWeight: 600,
+            cursor: !coordInput.trim() ? 'not-allowed' : 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+          }}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          {tRef.current('panel.coord_preview')}
         </button>
         <button
           onClick={() => submitCoordGo('teleport')}

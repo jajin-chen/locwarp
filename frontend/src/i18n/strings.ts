@@ -315,6 +315,8 @@ export const STRINGS = {
   'panel.coord_teleport': { zh: '瞬移', en: 'Teleport' },
   'panel.coord_navigate': { zh: '導航', en: 'Navigate' },
   'panel.coord_navigate_tooltip': { zh: '以目前設定的速度從當前位置走到此座標', en: 'Walk from current position at the selected speed' },
+  'panel.coord_preview': { zh: '預覽', en: 'Preview' },
+  'panel.coord_preview_tooltip': { zh: '只把畫面瞬移過去看看,不改變 iPhone 的 GPS 定位', en: 'Pan the map to this coordinate without moving the iPhone GPS' },
   'panel.paste': { zh: '貼上', en: 'Paste' },
   'panel.paste_tooltip': { zh: '從剪貼簿貼上座標', en: 'Paste coordinates from clipboard' },
   'panel.paste_denied': { zh: '無法讀取剪貼簿,請改用 Ctrl+V', en: 'Clipboard read denied — use Ctrl+V instead' },
@@ -435,6 +437,8 @@ export const STRINGS = {
   'bm.sort_distance': { zh: '依距離(近到遠)', en: 'By distance (nearest first)' },
   'bm.sort_no_position': { zh: '需先有目前位置', en: 'need current position' },
   'bm.show_on_map': { zh: '在地圖上顯示所有收藏', en: 'Show all bookmarks on map' },
+  'bm.fly_gps': { zh: '點擊也要飛 GPS (取消打勾則只飛畫面)', en: 'Click also flies GPS (uncheck to only pan the map)' },
+  'bm.fly_gps_tooltip': { zh: '打勾:點座標會把 iPhone 瞬移過去 (預設)。取消打勾:只把畫面飛過去看看,不影響 iPhone 定位。', en: 'When ticked, clicking a bookmark teleports iPhone GPS (default). When unticked, only the map view pans there; iPhone GPS stays put.' },
   'bm.multi_select': { zh: '多選', en: 'Select' },
   'bm.multi_select_tooltip': { zh: '多選模式:勾選多個收藏後一次刪除', en: 'Multi-select mode: tick multiple bookmarks and delete at once' },
   'bm.exit_multi_select': { zh: '取消多選', en: 'Done' },
@@ -465,6 +469,7 @@ export const STRINGS = {
 
   // ── Map extras ──────────────────────────────
   'map.destination': { zh: '目的地', en: 'Destination' },
+  'map.preview_pin': { zh: '預覽位置 (GPS 未飛, 點此釘可關閉)', en: 'Preview location (GPS not moved; click pin to dismiss)' },
   'map.avatar_picker': { zh: '地圖釘', en: 'Map pin' },
 
   // ── Pause settings ──────────────────────────
