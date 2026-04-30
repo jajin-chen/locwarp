@@ -109,15 +109,16 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 - **自動連線**:USB 偵測到新裝置 1 秒內自動配對,直到 2 台上限,**第三台插上完全不理**
 - 地圖維持單一視覺 (兩台已永遠重疊,雙 marker 反而是雜訊),裝置狀態靠 chip 與 StatusBar pill 呈現
 
-### 路徑來源選擇 (v0.2.90+)
+### 路徑來源選擇 (v0.2.90+ / BRouter v0.2.91+)
 
-模式區塊「使用直線路徑」下方多一顆「**路徑來源**」按鈕,點開彈窗可在三家免費路徑生成服務之間切換:
+模式區塊「使用直線路徑」下方多一顆「**路徑來源**」按鈕,點開彈窗可在四家免費路徑生成服務之間切換(全部免 API key、免註冊、免綁卡):
 
 | 引擎 | Endpoint | 說明 |
 | --- | --- | --- |
 | **OSRM 公用 demo**(預設) | `router.project-osrm.org` | 全球涵蓋,無需金鑰,有時整個服務會掛 |
 | **OSRM FOSSGIS** | `routing.openstreetmap.de` | 同樣是 OSRM 引擎,改由 FOSSGIS 託管的鏡像 |
 | **Valhalla** | `valhalla1.openstreetmap.de` | 完全不同的路徑引擎,當 OSRM 兩個節點都掛時最有用 |
+| **BRouter** | `brouter.de` | 第四個獨立引擎(個人營運多年穩定),OSM 資料 + 自家路徑引擎,涵蓋全球,單車 / 健行 / 開車 profile 齊全 |
 
 選擇記在 localStorage,下次自動套用。任何引擎失敗(502 / timeout / NoRoute)時這一段自動退回密化直線,下一段繼續打引擎,不會卡死。勾「使用直線路徑」時整個選擇器會 disable,因為連引擎都不打。
 
@@ -228,7 +229,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 | [websockets](https://websockets.readthedocs.io/) | 12+ | 即時位置/狀態推播給前端 |
 | [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) | 9.9+ | iOS 裝置協議(DVT / RemoteServices / lockdown / LegacyLocationService) |
 | [pydantic](https://docs.pydantic.dev/) | 2+ | 資料驗證(schemas) |
-| [httpx](https://www.python-httpx.org/) | 0.27+ | OSRM / OSRM FOSSGIS / Valhalla / Nominatim / TimezoneDB HTTP 呼叫 |
+| [httpx](https://www.python-httpx.org/) | 0.27+ | OSRM / OSRM FOSSGIS / Valhalla / BRouter / Nominatim / TimezoneDB HTTP 呼叫 |
 | [gpxpy](https://github.com/tkrajina/gpxpy) | 1.6+ | GPX 路線解析 |
 
 ### WiFi Tunnel(整合於 backend,v0.2.3+,iOS 17+ only)
@@ -245,6 +246,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 | [OSRM 公用 demo](https://project-osrm.org/) | backend | 路線規劃 + `/table` 多點優化(walking / driving profile),預設來源 | 否 |
 | [OSRM FOSSGIS 鏡像](https://routing.openstreetmap.de/) | backend | 同 OSRM 引擎,可在「路徑來源」切換為備援 | 否 |
 | [Valhalla(FOSSGIS)](https://valhalla1.openstreetmap.de/) | backend | 不同的路徑引擎,「路徑來源」第三個選項,OSRM 全掛時可用 | 否 |
+| [BRouter](https://brouter.de/) | backend | 第四個獨立引擎,OSM 資料 + 自家路徑引擎,涵蓋全球,單車 / 健行 / 開車 profile 齊全 | 否 |
 | [Nominatim](https://nominatim.openstreetmap.org/) | backend | 正向 / 反向地理編碼、地名查詢(含 POI 智慧 short_name 選擇,預設地址搜尋來源) | 否 |
 | [Google Geocoding API](https://developers.google.com/maps/documentation/geocoding) | backend | 地址搜尋備援來源(可選,免費 10K req/月);使用者於設定輸入自己的 API Key | 是(使用者自備) |
 | [Open-Meteo](https://open-meteo.com/) | **frontend(直連)** | 虛擬位置當地天氣(氣溫 + WMO weather_code);每個用戶自己 IP 各自 10000 req/day | 否 |
