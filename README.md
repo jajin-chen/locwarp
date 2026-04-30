@@ -91,8 +91,8 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 | --- | --- |
 | **Teleport** | 瞬間跳到指定座標 |
 | **Navigate** | 從目前位置沿 OSRM 路線步行/跑步/開車到目的地 |
-| **Route Loop** | 無限循環指定路線,**每圈隨機 5~20 秒停頓** |
-| **Multi-stop** | 依序經過多個停靠點,**每點隨機 5~20 秒停頓**(可自訂) |
+| **Route Loop** | 無限循環指定路線,**每站隨機 5~20 秒停頓**(可自訂) |
+| **Multi-stop** | 依序經過多個停靠點,**每站隨機 5~20 秒停頓**(可自訂) |
 | **Random Walk** | 在指定半徑內隨機漫遊,每段停頓時間可調 |
 | **Joystick** | 以方向 + 力度即時操控,支援 **WASD / 方向鍵** 鍵盤操作 |
 
@@ -138,12 +138,12 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 ### Developer Disk Image
 
 - iOS 17+ 需要 **Personalized DDI** 掛在 iPhone 上才能走 DVT(instruments → dtservicehub)
-- v0.2.58 起 LocWarp **不自動下載、不自動掛載 DDI**(iOS 26.4.1 的 RSD tunnel 撐不住 20MB 上傳導致不穩);改為只檢查 iPhone 上是否已有 DDI,沒有就跳提示請用 Xcode / 愛思助手 / 3uTools / pymobiledevice3 CLI 幫 iPhone 掛過一次後再回來使用
+- v0.2.58 起 LocWarp **不自動下載、不自動掛載 DDI**(iOS 26.4.1 的 RSD tunnel 撐不住 20MB 上傳導致不穩);改為只檢查 iPhone 上是否已有 DDI,沒有就跳提示請先在 iPhone 上掛過一次 DDI 後再回來使用(掛載工具參考下方[疑難排解](#疑難排解)章節)
 
 ### 地圖與輔助
 
 - **地圖定位按鈕**(左上角):一鍵置中目前虛擬位置
-- **圖層切換**:OSM / CartoDB Voyager / ESRI 衛星(右上角)
+- **圖層切換**(右上角):OSM / CartoDB Voyager / ESRI 衛星 / OpenFreeMap Liberty(類 Google Maps 風格向量圖) / NLSC 台灣電子地圖 / GSI 日本地理院地圖
 - **當地天氣**:狀態列顯示虛擬位置的當前天氣 + 溫度(Open-Meteo,動態 SVG 圖示:太陽呼吸、雨滴下落、雪花旋轉、雷電閃爍)
 - **國旗與時區**:瞬移後自動顯示當地國旗,跨時區時 toast 提醒時差
 - **地圖釘 / 使用者頭像**(狀態列):
@@ -158,11 +158,12 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
   - 自訂座標(一格輸入 `lat, lng`)、JSON 全量匯出 / 匯入(合併,不覆蓋)
   - 新增時**自動抓取地名**(短名稱)與**國旗**(reverse geocode)
   - **多選刪除**、**分類顏色自訂**(10 色預設 + HEX 任意色)、搜尋、排序(名稱 / 日期 / 最後使用)
-  - 勾選「在地圖上顯示所有座標」:地圖上會顯示所有收藏的精緻 pin(霓虹玻璃膠囊 + 國旗 + 聚合 Polaroid 卡片)
+  - 勾選「在地圖上顯示所有收藏」:地圖上會顯示所有收藏的精緻 pin(霓虹玻璃膠囊 + 國旗 + 聚合 Polaroid 卡片)
+  - 「點擊也要飛 GPS」勾選控制:打勾時點座標會把 iPhone 瞬移過去(預設);取消打勾則只把畫面飛過去看看,iPhone 定位不變
   - 編輯座標時座標改變會自動刷新國旗
 - **儲存路線 + GPX 匯入 / 匯出**
 - **路徑點 + 路徑線**:地鐵站點風格的 S/1/2/3 標 + 動態箭頭流動線,看得出方向感
-- **地址搜尋**(Nominatim)
+- **地址搜尋**:預設 Nominatim(免費),可在搜尋框旁的設定切換為 **Google Geocoding API**(輸入個人 API Key,完全保存在本機)以取得更精準的中文地名與店家結果
 - **Cooldown 防偵測**:依跳點距離動態延遲,避免異常偵測
 - **座標格式切換**:DD / DMS / DM
 - **右鍵選單自動防出界**:選單會用 `useLayoutEffect` 測量實際尺寸,超出視窗右 / 底邊緣時自動往內推,不會被切
@@ -172,9 +173,9 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 - 啟動時 backend race condition 自動重試(最多 ~20 秒緩衝),無需手動重開
 - WebSocket 即時推播位置、進度、ETA、剩餘距離、裝置連線狀態
 - 斷線自動重連 + banner 自動清除
-- **更新檢查**:啟動時從 GitHub Releases 比對版本,有新版跳對話框(僅提示,不自動下載)
+- **更新檢查**:啟動時從 GitHub Releases 比對版本,有新版時在底部狀態列版本號旁顯示彩色 `NEW` 膠囊提示(不再彈出對話框打斷操作),點擊版本號即跳轉到下載頁
 - **Log 資料夾**按鈕(狀態列):一鍵開啟 `~/.locwarp/logs/` 資料夾,方便將 backend.log 附到 Issue
-- 右下角顯示**目前 App 版本**
+- 右下角顯示**目前 App 版本**(有新版本時旁邊出現流動漸層 `NEW` 膠囊)
 - 介面語言:繁體中文 / English 即時切換
 - **官方 LINE 按鈕**(側邊欄底部):有問題或建議直接聯絡作者
 - 所有狀態(座標收藏、設定、tunnel 資訊)寫在 `~/.locwarp/`
@@ -233,12 +234,16 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 | 服務 | 呼叫端 | 用途 | 需要 API Key |
 | --- | --- | --- | --- |
 | [OSRM](https://project-osrm.org/) | backend | 路線規劃 + `/table` 多點優化(walking / driving profile) | 否 |
-| [Nominatim](https://nominatim.openstreetmap.org/) | backend | 正向 / 反向地理編碼、地名查詢(含 POI 智慧 short_name 選擇) | 否 |
+| [Nominatim](https://nominatim.openstreetmap.org/) | backend | 正向 / 反向地理編碼、地名查詢(含 POI 智慧 short_name 選擇,預設地址搜尋來源) | 否 |
+| [Google Geocoding API](https://developers.google.com/maps/documentation/geocoding) | backend | 地址搜尋備援來源(可選,免費 10K req/月);使用者於設定輸入自己的 API Key | 是(使用者自備) |
 | [Open-Meteo](https://open-meteo.com/) | **frontend(直連)** | 虛擬位置當地天氣(氣溫 + WMO weather_code);每個用戶自己 IP 各自 10000 req/day | 否 |
 | [TimezoneDB](https://timezonedb.com/) | backend | 座標 → 時區 + GMT 偏移,跨時區 toast 提醒 | 是(內建 Key) |
 | [flagcdn.com](https://flagcdn.com/) | frontend | 國旗 PNG(`w20/{cc}.png`、`w40/{cc}.png`) | 否 |
 | [CartoDB Voyager](https://carto.com/) | frontend tile | 地圖底圖(OSM 資料,免費授權) | 否 |
 | [ESRI World Imagery](https://www.esri.com/) | frontend tile | 衛星圖層(圖層切換) | 否 |
+| [OpenFreeMap Liberty](https://openfreemap.org/) | frontend tile | 向量圖層(類 Google Maps 風格,經 MapLibre GL 渲染) | 否 |
+| [NLSC 國土測繪中心](https://maps.nlsc.gov.tw/) | frontend tile | 台灣電子地圖(政府公開資料) | 否 |
+| [GSI 国土地理院](https://www.gsi.go.jp/) | frontend tile | 日本地理院地圖 | 否 |
 | OpenStreetMap raster | frontend tile | 標準 OSM 圖層(主要) | 否 |
 | [GitHub Releases](https://github.com/keezxc1223/locwarp/releases) | frontend | 啟動時檢查新版本(純 HTTP,無遙測) | 否 |
 

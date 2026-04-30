@@ -92,7 +92,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 | --- | --- |
 | **Teleport** | Instantly jump to a coordinate |
 | **Navigate** | Walk / run / drive along an OSRM route to a destination |
-| **Route Loop** | Loop a closed route indefinitely, with a **random 5–20 s pause** each lap |
+| **Route Loop** | Loop a closed route indefinitely, with a **random 5–20 s pause** at each station (configurable) |
 | **Multi-stop** | Sequentially visit waypoints, with a **random 5–20 s pause** at each stop (configurable) |
 | **Random Walk** | Wander randomly within a radius, with configurable pause between legs |
 | **Joystick** | Realtime direction + intensity control; supports **WASD / arrow keys** |
@@ -139,12 +139,12 @@ The world is bucketed into 1° x 1° grid cells with a per-region OSRM-coverage 
 ### Developer Disk Image
 
 - iOS 17+ requires the **Personalized DDI** to be mounted on the iPhone for DVT (instruments → dtservicehub) to work
-- Since v0.2.58 LocWarp **no longer auto-downloads or auto-mounts the DDI** (iOS 26.4.1's RSD tunnel kept getting reset during the 20 MB upload, leaving the device in an InvalidService loop). LocWarp now only checks whether the DDI is already mounted; if not, it shows a hint asking the user to mount it once via Xcode / 愛思助手 / 3uTools / pymobiledevice3 CLI and reconnect
+- Since v0.2.58 LocWarp **no longer auto-downloads or auto-mounts the DDI** (iOS 26.4.1's RSD tunnel kept getting reset during the 20 MB upload, leaving the device in an InvalidService loop). LocWarp now only checks whether the DDI is already mounted; if not, it shows a hint asking the user to mount it once externally and reconnect (see [Troubleshooting](#troubleshooting) below for tools)
 
 ### Map & Utilities
 
 - **Recenter button** (top-left): centers the map on the current virtual position
-- **Tile layer switcher**: OSM / CartoDB Voyager / ESRI Satellite (top-right)
+- **Tile layer switcher** (top-right): OSM / CartoDB Voyager / ESRI Satellite / OpenFreeMap Liberty (Google-Maps-style vector tiles) / NLSC (Taiwan) / GSI (Japan)
 - **Local weather**: status bar shows current weather + temp for the virtual location (Open-Meteo, animated SVG icons: breathing sun, falling rain, spinning snow, flashing lightning)
 - **Country flag & timezone**: flag appears automatically after teleport; a toast warns about time-zone diff when moving across zones
 - **Map pin / user avatar** (status bar):
@@ -160,10 +160,11 @@ The world is bucketed into 1° x 1° grid cells with a per-region OSRM-coverage 
   - Auto-fills **place name** (short) and **country flag** on add (reverse geocode)
   - **Multi-select delete**, **per-category color picker** (10 presets + arbitrary HEX), search, sort (name / date / last-used)
   - "Show all on map" toggle: renders every bookmark as a neon-glass capsule pin (with flag) plus Polaroid-style cluster cards when they overlap
+  - "Click also flies GPS" toggle: when ticked, clicking a bookmark teleports the iPhone (default); when unticked, only the map view pans there and the iPhone GPS stays put
   - Editing coordinates re-fetches the country flag automatically
 - **Saved routes** with **GPX import / export**
 - **Waypoint + route line**: subway-station style S/1/2/3 markers + animated flowing-arrow polyline for clear direction sense
-- **Address search** (Nominatim)
+- **Address search**: Nominatim by default (free); you can switch to **Google Geocoding API** in the settings panel (paste your own API key, stored locally only) for more accurate Chinese place names and POI results
 - **Cooldown anti-detection**: dynamic delay based on teleport distance
 - **Coordinate format switching**: DD / DMS / DM
 - **Right-click menu auto-clamps**: `useLayoutEffect` measures the real menu size and nudges it inward when it would overflow the right / bottom edge
@@ -173,9 +174,9 @@ The world is bucketed into 1° x 1° grid cells with a per-region OSRM-coverage 
 - Auto-retry on startup races (up to ~20 s window), no manual relaunch required
 - Real-time WebSocket push for position, progress, ETA, remaining distance, device connection state
 - Auto-reconnect on disconnect + banner auto-dismiss
-- **Update check**: at startup, compares against the latest GitHub Release and shows a dialog if a newer version exists (prompt only, never auto-downloads)
+- **Update check**: at startup, compares against the latest GitHub Release. When a newer version exists, a colourful animated `NEW` pill appears next to the version number in the bottom status bar (no popup interrupting your workflow); clicking the version takes you to the download page
 - **Open Log Folder** button (status bar): opens `~/.locwarp/logs/` so you can attach `backend.log` to bug reports
-- Current app version shown in the bottom-right corner
+- Current app version shown in the bottom-right corner (with a flowing-gradient `NEW` pill beside it when an update is available)
 - UI language: 繁體中文 / English, switchable on the fly
 - **Official LINE button** (sidebar bottom): contact the author with questions or feedback
 - All state (bookmarks, settings, tunnel info) lives in `~/.locwarp/`
@@ -233,12 +234,16 @@ The world is bucketed into 1° x 1° grid cells with a per-region OSRM-coverage 
 | Service | Caller | Purpose | Key required |
 | --- | --- | --- | --- |
 | [OSRM](https://project-osrm.org/) | backend | Routing + `/table` multi-stop optimization (walking / driving profiles) | No |
-| [Nominatim](https://nominatim.openstreetmap.org/) | backend | Forward / reverse geocoding, place-name lookup (with POI-aware short_name picker) | No |
+| [Nominatim](https://nominatim.openstreetmap.org/) | backend | Default forward / reverse geocoding, place-name lookup (with POI-aware short_name picker) | No |
+| [Google Geocoding API](https://developers.google.com/maps/documentation/geocoding) | backend | Optional secondary geocoding source (10K req/month free); user supplies their own API key in settings | Yes (user-supplied) |
 | [Open-Meteo](https://open-meteo.com/) | **frontend (direct)** | Current weather at virtual location (temp + WMO weather_code); each user has their own 10,000 req/day per IP | No |
 | [TimezoneDB](https://timezonedb.com/) | backend | Coords → timezone + GMT offset, cross-zone toast | Yes (bundled) |
 | [flagcdn.com](https://flagcdn.com/) | frontend | Country flag PNGs (`w20/{cc}.png`, `w40/{cc}.png`) | No |
 | [CartoDB Voyager](https://carto.com/) | frontend tile | Map tiles (OSM data, redistributable license) | No |
 | [ESRI World Imagery](https://www.esri.com/) | frontend tile | Satellite layer (tile switcher) | No |
+| [OpenFreeMap Liberty](https://openfreemap.org/) | frontend tile | Vector tiles (Google-Maps-style, rendered via MapLibre GL) | No |
+| [NLSC (Taiwan)](https://maps.nlsc.gov.tw/) | frontend tile | Taiwan official basemap (government open data) | No |
+| [GSI (Japan)](https://www.gsi.go.jp/) | frontend tile | Japan Geospatial Information Authority basemap | No |
 | OpenStreetMap raster | frontend tile | Default OSM layer | No |
 | [GitHub Releases](https://github.com/keezxc1223/locwarp/releases) | frontend | Startup version check (plain HTTP, no telemetry) | No |
 
