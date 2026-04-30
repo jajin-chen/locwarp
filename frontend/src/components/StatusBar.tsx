@@ -7,6 +7,7 @@ import { useT } from '../i18n';
 import LangToggle from './LangToggle';
 import pkg from '../../package.json';
 import { WeatherIcon, categorize, labelKeyFor } from './WeatherIcon';
+import { useUpdateCheck } from './UpdateChecker';
 
 const DEVICE_COLORS = ['#4285f4', '#ff9800'];
 const DEVICE_LETTERS = ['A', 'B'];
@@ -99,6 +100,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
   tempC = null,
 }) => {
   const t = useT();
+  const { latest: updateLatest, releaseUrl: updateUrl } = useUpdateCheck();
   const [cooldownDisplay, setCooldownDisplay] = useState(cooldown);
   const [copied, setCopied] = useState(false);
   // Initial-position dialog state (React modal replaces unavailable
@@ -545,9 +547,40 @@ const StatusBar: React.FC<StatusBarProps> = ({
           {new Date().toLocaleTimeString(undefined, { hour12: false })}
         </span>
         <div style={{ width: 1, height: 12, background: 'rgba(255,255,255,0.12)' }} />
-        <span style={{ fontSize: 10, opacity: 0.45, fontFamily: 'monospace' }}>
-          v{APP_VERSION}
-        </span>
+        {updateLatest && updateUrl ? (
+          <a
+            href={updateUrl}
+            target="_blank"
+            rel="noreferrer"
+            title={t('update.title')}
+            onClick={(e) => {
+              try {
+                const anyWin: any = window;
+                if (anyWin.locwarp?.openExternal) {
+                  e.preventDefault();
+                  anyWin.locwarp.openExternal(updateUrl);
+                }
+              } catch { /* fall back to default link nav */ }
+            }}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '1px 4px', borderRadius: 4,
+              textDecoration: 'none', cursor: 'pointer',
+            }}
+          >
+            <span className="lw-update-pill">NEW</span>
+            <span style={{
+              fontSize: 10, opacity: 0.7, fontFamily: 'monospace',
+              color: '#e8eaf0',
+            }}>
+              v{APP_VERSION}
+            </span>
+          </a>
+        ) : (
+          <span style={{ fontSize: 10, opacity: 0.45, fontFamily: 'monospace' }}>
+            v{APP_VERSION}
+          </span>
+        )}
       </div>
 
       {locatePcOpen && createPortal((

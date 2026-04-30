@@ -18,7 +18,6 @@ import JoystickPad from './components/JoystickPad'
 import EtaBar from './components/EtaBar'
 import PauseControl from './components/PauseControl'
 import StatusBar from './components/StatusBar'
-import UpdateChecker from './components/UpdateChecker'
 import { DeviceChipRow } from './components/DeviceChipRow'
 import type { FanoutOutcome } from './hooks/useSimulation'
 
@@ -1986,8 +1985,6 @@ const App: React.FC = () => {
           onLocatePcFly={handleTeleport}
           onLocatePcPanOnly={handleMapPanOnly}
         />
-
-        <UpdateChecker />
 
         {toastMsg && (
           <div

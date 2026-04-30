@@ -2845,3 +2845,29 @@ input:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .locwarp-library-btn svg { animation: none; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Update-available NEW pill — D5 rainbow gradient flow.
+   Sits next to the version number in the status bar; the entire link
+   is what the user clicks to open the latest release page.
+   ───────────────────────────────────────────────────────────────────── */
+.lw-update-pill {
+  display: inline-block;
+  background: linear-gradient(90deg, #6c8cff, #36d399, #f4c542, #ff7a59, #6c8cff);
+  background-size: 300% 100%;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: 8px;
+  line-height: 1;
+  animation: lw-update-pill-cycle 4s linear infinite;
+}
+@keyframes lw-update-pill-cycle {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lw-update-pill { animation: none; background-position: 0% 50%; }
+}
