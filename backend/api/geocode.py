@@ -26,8 +26,19 @@ geocoding_service = GeocodingService()
 
 
 @router.get("/search", response_model=list[GeocodingResult])
-async def search_address(q: str, limit: int = 5):
-    return await geocoding_service.search(q, limit)
+async def search_address(
+    q: str,
+    limit: int = 5,
+    provider: str = "nominatim",
+    google_key: str | None = None,
+):
+    """Forward geocode.
+
+    `provider` is one of ``nominatim`` (default, free, no key) or
+    ``google`` (requires `google_key`, 10k events/month free tier on
+    Google's Essentials plan).
+    """
+    return await geocoding_service.search(q, limit, provider, google_key)
 
 
 @router.get("/reverse", response_model=GeocodingResult | None)

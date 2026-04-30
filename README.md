@@ -8,10 +8,6 @@
 </p>
 
 <p align="center">
-  <a href="https://ko-fi.com/haoooooo" target="_blank">
-    <img src="https://img.shields.io/badge/Ko--fi-請我喝咖啡-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white" alt="Ko-fi" height="40">
-  </a>
-  &nbsp;&nbsp;
   <a href="https://lin.ee/UwdCrmf" target="_blank">
     <img src="https://img.shields.io/badge/LINE-加我好友-06C755?style=for-the-badge&logo=line&logoColor=white" alt="LINE" height="40">
   </a>
@@ -21,8 +17,8 @@
   </a>
 </p>
 
-> 如果 LocWarp 有幫到你, 歡迎[請我喝杯咖啡](https://ko-fi.com/haoooooo)支持 ☕  
-> 沒有 PayPal 想要支持的話, 也可以[加 LINE](https://lin.ee/UwdCrmf) 跟我聯絡, 或用下方 USDT 地址直接斗內。
+> 有問題或想聯絡作者, 歡迎[加 LINE](https://lin.ee/UwdCrmf)。  
+> 想支持開發者, 可以用下方 USDT 地址直接斗內。
 
 ### USDT 斗內 (TRC-20 / TRON 鏈)
 
@@ -180,7 +176,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 - **Log 資料夾**按鈕(狀態列):一鍵開啟 `~/.locwarp/logs/` 資料夾,方便將 backend.log 附到 Issue
 - 右下角顯示**目前 App 版本**
 - 介面語言:繁體中文 / English 即時切換
-- **Ko-fi 贊助按鈕**(側邊欄底部):開源作者支持
+- **官方 LINE 按鈕**(側邊欄底部):有問題或建議直接聯絡作者
 - 所有狀態(座標收藏、設定、tunnel 資訊)寫在 `~/.locwarp/`
 
 ---

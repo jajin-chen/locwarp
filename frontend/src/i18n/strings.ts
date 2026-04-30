@@ -103,7 +103,7 @@ export const STRINGS = {
   'group.action_all_failed': { zh: '{action} 失敗', en: '{action} failed on all devices' },
 
   // ── Device chip ──────────────────────────────
-  'device.add_device': { zh: '新增裝置', en: 'Add device' },
+  'device.add_device': { zh: '掃描 iPhone', en: 'Scan iPhone' },
   'device.max_reached': { zh: '已連接最多 3 台', en: 'Maximum 3 devices connected' },
   'device.chip_disconnect': { zh: '中斷此裝置', en: 'Disconnect this device' },
   'device.chip_restore': { zh: '還原此裝置', en: 'Restore this device' },
@@ -227,6 +227,10 @@ export const STRINGS = {
     en: "Done. On the iPhone: fully close Settings (swipe up from bottom), reopen it → Privacy & Security → scroll down to find Developer Mode. If it appears, turn it on yourself.",
   },
   'dev_mode.reveal_failed': { zh: '顯示開發者模式失敗', en: 'Reveal Developer Mode failed' },
+  'dev_mode.reveal_card_sub': {
+    zh: '在 iPhone 設定中找不到此選項時點此',
+    en: "Tap if the option is missing in iPhone Settings",
+  },
   'wifi.tunnel_active': { zh: 'Active', en: 'Active' },
   'wifi.tunnel_active_count': { zh: '使用中 ({n}/{max})', en: 'Active ({n}/{max})' },
   'wifi.tunnel_add_another': { zh: '新增另一台', en: 'Add another' },
@@ -260,6 +264,12 @@ export const STRINGS = {
   'map.recent_clear': { zh: '清空', en: 'Clear' },
   'map.recent_clear_tooltip': { zh: '清空最近紀錄', en: 'Clear the recent list' },
   'map.recent_clear_confirm': { zh: '確定清空', en: 'Confirm' },
+  'support.contact_caption': {
+    zh: '如果 LocWarp 有幫到你\n歡迎請我喝杯咖啡支持',
+    en: 'If LocWarp helped you,\nfeel free to buy me a coffee',
+  },
+  'support.line_label': { zh: '官方 LINE', en: 'Official LINE' },
+  'support.line_tooltip': { zh: '加 LINE 聯絡作者', en: 'Contact author on LINE' },
   'recent.kind_teleport': { zh: '瞬移', en: 'Teleport' },
   'recent.kind_navigate': { zh: '導航', en: 'Navigate' },
   'recent.kind_search': { zh: '地址', en: 'Address' },
@@ -466,6 +476,33 @@ export const STRINGS = {
   'search.placeholder': { zh: '搜尋地址...', en: 'Search address...' },
   'search.searching': { zh: '搜尋中...', en: 'Searching...' },
   'search.no_results': { zh: '無搜尋結果', en: 'No results' },
+  'search.settings_title': { zh: '地址搜尋來源', en: 'Search provider' },
+  'search.settings_btn_free': { zh: '搜尋來源:免費版 (點擊設定)', en: 'Provider: Free (click to configure)' },
+  'search.settings_btn_google': { zh: '搜尋來源:Google (點擊設定)', en: 'Provider: Google (click to configure)' },
+  'search.provider_free_short': { zh: '免費', en: 'Free' },
+  'search.provider_free_label': { zh: '免費版 (Nominatim)', en: 'Free (Nominatim)' },
+  'search.provider_free_desc': {
+    zh: '全球 OSM 開放資料,不用 API Key,精準度普通 (台灣巷弄、新建社區命中率較低)',
+    en: 'Global OSM open data, no API key needed; moderate accuracy (weak on Taiwan alleys / new addresses)',
+  },
+  'search.provider_google_label': { zh: 'Google Geocoding', en: 'Google Geocoding' },
+  'search.provider_google_desc': {
+    zh: '全球門牌級高精準度,需自備 Google Cloud API Key',
+    en: 'Global street-level accuracy. Requires your own Google Cloud API Key.',
+  },
+  'search.privacy_hint': {
+    zh: 'Key 只保存在本機 localStorage,不會上傳到任何伺服器',
+    en: 'Key is stored only in local localStorage and never uploaded to any server',
+  },
+  'search.signup_label': { zh: '申請 Geocoding API', en: 'Get Geocoding API key' },
+  'search.provider_google_quota_hint': {
+    zh: 'Google API 每月免費額度 10,000 次,超過後依官方計費 (US$5 / 1000 次)。請自行至 Google Cloud Console 設定每日配額上限避免帳單意外。',
+    en: 'Google API free tier: 10,000 events/month. Beyond that, US$5 per 1,000. Set a daily quota cap in Google Cloud Console to avoid surprise bills.',
+  },
+  'search.save_key': { zh: '儲存', en: 'Save' },
+  'search.clear_key': { zh: '清除 Key', en: 'Clear key' },
+  'search.key_saved_hint': { zh: '已儲存 Key (尾碼 …{tail})', en: 'Key saved (ending …{tail})' },
+  'search.api_key_label': { zh: 'API Key', en: 'API Key' },
 
   // ── Device status extra ──────────────────────
   'device.connect_failed': { zh: '連線失敗', en: 'Connection failed' },
@@ -480,7 +517,7 @@ export const STRINGS = {
 
   // ── Pause settings ──────────────────────────
   'pause.multi_stop': { zh: '每站隨機暫停', en: 'Random pause at each stop' },
-  'pause.loop': { zh: '每圈隨機暫停', en: 'Random pause between laps' },
+  'pause.loop': { zh: '每站隨機暫停', en: 'Random pause at each stop' },
   'loop.lap_count_label': { zh: '圈數', en: 'Laps' },
   'loop.lap_count_placeholder': { zh: '無限', en: '∞' },
   'loop.lap_count_tooltip': { zh: '跑完指定圈數後自動停止。留空 = 無限圈', en: 'Auto-stop after this many laps. Empty = unlimited.' },

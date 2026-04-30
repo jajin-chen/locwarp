@@ -51,14 +51,27 @@ function currentLang(): 'zh' | 'en' {
   return (typeof navigator !== 'undefined' && navigator.language?.toLowerCase().startsWith('zh')) ? 'zh' : 'en'
 }
 
+// Tack a "did you forget Developer Mode?" hint onto any error mentioning
+// pymobiledevice3's InvalidService — that's almost always the cause of
+// that exception (Developer Mode disabled / not visible on the iPhone).
+function maybeAttachDevModeHint(msg: string): string {
+  if (/InvalidService/i.test(msg)) {
+    const hint = currentLang() === 'zh'
+      ? ' (請檢查 iPhone 開發者模式是否已啟用:設定 → 隱私權與安全性 → 開發者模式)'
+      : ' (Check that Developer Mode is enabled on the iPhone: Settings → Privacy & Security → Developer Mode)'
+    return msg + hint
+  }
+  return msg
+}
+
 function formatError(detail: unknown, fallback: string): string {
-  if (typeof detail === 'string') return detail
+  if (typeof detail === 'string') return maybeAttachDevModeHint(detail)
   if (detail && typeof detail === 'object') {
     const d = detail as { code?: string; message?: string }
     if (d.code && ERROR_I18N[d.code]) return ERROR_I18N[d.code][currentLang()]
-    if (d.message) return d.message
+    if (d.message) return maybeAttachDevModeHint(d.message)
   }
-  return fallback
+  return maybeAttachDevModeHint(fallback)
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -153,8 +166,27 @@ export const getCoordFormat = () => request<any>('GET', '/api/location/settings/
 export const setCoordFormat = (format: string) =>
   request<any>('PUT', '/api/location/settings/coord-format', { format })
 
-// Geocoding
-export const searchAddress = (q: string) => request<any[]>('GET', `/api/geocode/search?q=${encodeURIComponent(q)}`)
+// Geocoding — forward search.
+//
+// Provider + API key are read from localStorage on every call so the
+// caller doesn't have to thread them through the component tree. If
+// the user picked Google but never saved a key, fall back to nominatim
+// silently rather than letting the backend 400.
+export const searchAddress = (q: string) => {
+  let provider = 'nominatim'
+  let googleKey = ''
+  try {
+    provider = localStorage.getItem('locwarp.geocode_provider') || 'nominatim'
+    googleKey = localStorage.getItem('locwarp.google_geocode_key') || ''
+  } catch { /* storage disabled */ }
+  if (provider === 'google' && !googleKey) provider = 'nominatim'
+  const params = new URLSearchParams({ q })
+  if (provider === 'google') {
+    params.set('provider', 'google')
+    params.set('google_key', googleKey)
+  }
+  return request<any[]>('GET', `/api/geocode/search?${params.toString()}`)
+}
 export const reverseGeocode = (lat: number, lng: number) =>
   request<any>('GET', `/api/geocode/reverse?lat=${lat}&lng=${lng}`)
 export const lookupTimezone = (lat: number, lng: number) =>

@@ -585,18 +585,16 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
       {/* Show-all-on-map toggle */}
       {onShowOnMapChange && (
         <label
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6, marginTop: 8,
-            fontSize: 11, color: '#bbb', cursor: 'pointer', userSelect: 'none',
-          }}
+          className="lw-checkbox"
+          style={{ display: 'flex', marginTop: 8, fontSize: 11.5 }}
         >
           <input
             type="checkbox"
             checked={showOnMap}
             onChange={(e) => onShowOnMapChange(e.target.checked)}
-            style={{ margin: 0 }}
           />
-          <span>{t('bm.show_on_map')}</span>
+          <span className="lw-checkbox-box"></span>
+          <span className="lw-checkbox-label">{t('bm.show_on_map')}</span>
         </label>
       )}
 
@@ -605,19 +603,17 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
           doesn't look like a no-op. */}
       {onBookmarkPreview && (
         <label
+          className="lw-checkbox"
           title={t('bm.fly_gps_tooltip')}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6, marginTop: 6,
-            fontSize: 11, color: '#bbb', cursor: 'pointer', userSelect: 'none',
-          }}
+          style={{ display: 'flex', marginTop: 6, fontSize: 11.5 }}
         >
           <input
             type="checkbox"
             checked={flyGps}
             onChange={(e) => setFlyGps(e.target.checked)}
-            style={{ margin: 0 }}
           />
-          <span>{t('bm.fly_gps')}</span>
+          <span className="lw-checkbox-box"></span>
+          <span className="lw-checkbox-label">{t('bm.fly_gps')}</span>
         </label>
       )}
 

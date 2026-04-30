@@ -450,17 +450,17 @@ class DeviceManager:
             return
 
         logger.warning(
-            "Personalized DDI is NOT mounted on %s. LocWarp will not attempt "
-            "to auto-mount (v0.2.58+). User must mount DDI via Xcode / 3uTools / "
-            "愛思助手 / pymobiledevice3 CLI first, then reconnect.", conn.udid,
+            "Personalized DDI is NOT mounted on %s. LocWarp will not "
+            "auto-mount; please mount DDI for this iPhone first, then "
+            "reconnect.", conn.udid,
         )
         try:
             from api.websocket import broadcast
             await broadcast("ddi_not_mounted", {
                 "udid": conn.udid,
                 "hint": (
-                    "iPhone 上未偵測到 DDI。請先用 Xcode、3uTools、愛思助手或 pymobiledevice3 CLI "
-                    "幫這支 iPhone 掛一次 DDI,然後再回來用 LocWarp;或者重開 iPhone 後再試。"
+                    "iPhone 上未偵測到 DDI。請先為這支 iPhone 掛載一次 DDI(Developer Disk Image),"
+                    "再重新連接 LocWarp;或先重開 iPhone 後再試。"
                 ),
             })
         except Exception:

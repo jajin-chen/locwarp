@@ -239,7 +239,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
         if (major < 16) return null
         return (
           <button
-            className="action-btn"
+            className="dev-mode-card"
             onClick={async () => {
               if (!onRevealDeveloperMode) return
               setRevealingDevMode(true)
@@ -250,10 +250,26 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
               }
             }}
             disabled={revealingDevMode}
-            style={{ width: '100%', fontSize: 12, marginBottom: 6, padding: '6px 10px' }}
+            style={{ marginBottom: 8 }}
             title={t('dev_mode.reveal_tooltip')}
           >
-            {revealingDevMode ? t('dev_mode.reveal_working') : t('dev_mode.reveal_button')}
+            <span className="ic-wrap">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="5" y="2" width="14" height="20" rx="2" />
+                <line x1="12" y1="18" x2="12" y2="18" />
+              </svg>
+            </span>
+            <span className="text">
+              <span className="title">
+                {revealingDevMode ? t('dev_mode.reveal_working') : t('dev_mode.reveal_button')}
+              </span>
+              <span className="sub">{t('dev_mode.reveal_card_sub')}</span>
+            </span>
+            {!revealingDevMode && (
+              <svg className="arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            )}
           </button>
         )
       })()}

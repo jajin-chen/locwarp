@@ -406,6 +406,261 @@ textarea:focus {
   border-color: var(--accent-blue);
 }
 
+/* =====================================================================
+   Themed number / generic inputs (.lw-input)
+   Used for waypoint radius / count, lap count, pause min/max — anywhere
+   we previously had a default-styled <input> that visually clashed with
+   the dark glassy theme.
+   ===================================================================== */
+.lw-input {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: monospace;
+  padding: 4px 8px;
+  outline: none;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+  -moz-appearance: textfield; /* hide spinner arrows in Firefox */
+}
+.lw-input::-webkit-outer-spin-button,
+.lw-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.lw-input:hover {
+  border-color: var(--border-light);
+}
+.lw-input:focus {
+  border-color: var(--accent-blue);
+  background: var(--bg-surface);
+  box-shadow: 0 0 0 3px rgba(108, 140, 255, 0.12);
+}
+.lw-input::placeholder {
+  color: var(--text-muted);
+}
+.lw-input:disabled {
+  opacity: 0.45; cursor: not-allowed;
+}
+
+/* =====================================================================
+   Themed checkbox (.lw-checkbox)
+   The native <input type="checkbox"> on Windows looks like Win95. This
+   wraps it in a label so we can paint a custom box that matches the
+   palette while keeping native a11y / keyboard focus.
+   Usage:
+     <label class="lw-checkbox">
+       <input type="checkbox" checked={x} onChange={...} />
+       <span class="lw-checkbox-box"></span>
+       <span class="lw-checkbox-label">標籤文字</span>
+     </label>
+   ===================================================================== */
+.lw-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: color var(--transition-fast);
+}
+.lw-checkbox:hover { color: var(--text-primary); }
+.lw-checkbox > input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0; height: 0;
+}
+.lw-checkbox-box {
+  width: 16px; height: 16px;
+  border: 1.5px solid var(--border-light);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+  position: relative;
+}
+.lw-checkbox-box::after {
+  content: '';
+  width: 9px; height: 5px;
+  border: 2px solid #fff;
+  border-top: 0;
+  border-right: 0;
+  transform: rotate(-45deg) translate(0, -1px) scale(0);
+  transition: transform 0.16s cubic-bezier(0.65, 0, 0.35, 1);
+}
+.lw-checkbox > input:checked ~ .lw-checkbox-box {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  box-shadow: 0 2px 6px rgba(108, 140, 255, 0.32);
+}
+.lw-checkbox > input:checked ~ .lw-checkbox-box::after {
+  transform: rotate(-45deg) translate(0, -1px) scale(1);
+}
+.lw-checkbox > input:focus-visible ~ .lw-checkbox-box {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+.lw-checkbox > input:disabled ~ .lw-checkbox-box {
+  opacity: 0.4; cursor: not-allowed;
+}
+
+/* =====================================================================
+   Bulk-paste shimmer button (Variant D from mockup)
+   Used in the route editor and on the map next to the library star.
+   Subtle gradient + recurring sheen that travels across the surface.
+   ===================================================================== */
+.route-paste-shimmer {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, rgba(108, 140, 255, 0.22), rgba(78, 205, 196, 0.20));
+  border: 1px solid rgba(108, 140, 255, 0.42);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s;
+  white-space: nowrap;
+}
+.route-paste-shimmer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+  transform: translateX(-100%);
+  animation: route-paste-sheen 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes route-paste-sheen {
+  0% { transform: translateX(-100%); }
+  55%, 100% { transform: translateX(100%); }
+}
+.route-paste-shimmer:hover {
+  border-color: var(--accent-blue);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(108, 140, 255, 0.32);
+}
+.route-paste-shimmer > * { position: relative; z-index: 1; }
+.route-paste-shimmer svg { color: var(--accent-blue); }
+
+/* =====================================================================
+   Dev-mode reveal — Variant C "vibrant card" from the mockup.
+   Used in DeviceStatus when iOS hides the Developer Mode option.
+   Two-line layout with bright accent + rotating chevron arrow on hover.
+   ===================================================================== */
+.dev-mode-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(108, 140, 255, 0.30), rgba(255, 217, 61, 0.18));
+  border: 1px solid rgba(108, 140, 255, 0.55);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  font-family: inherit;
+  transition: all 0.2s;
+  box-shadow: 0 4px 18px rgba(108, 140, 255, 0.22);
+  position: relative;
+  overflow: hidden;
+}
+.dev-mode-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 20% 50%, rgba(108, 140, 255, 0.22), transparent 60%);
+  pointer-events: none;
+}
+.dev-mode-card:hover:not(:disabled) {
+  border-color: var(--accent-blue-hover);
+  transform: translateX(2px);
+  box-shadow: 0 6px 22px rgba(108, 140, 255, 0.42);
+}
+.dev-mode-card:disabled { opacity: 0.6; cursor: not-allowed; }
+.dev-mode-card .ic-wrap {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: rgba(108, 140, 255, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  position: relative; z-index: 1;
+}
+.dev-mode-card .text { flex: 1; min-width: 0; position: relative; z-index: 1; }
+.dev-mode-card .title {
+  font-size: 13px; font-weight: 700; color: #fff;
+  display: block; line-height: 1.2;
+}
+.dev-mode-card .sub {
+  font-size: 11px; color: rgba(232, 234, 240, 0.82);
+  margin-top: 2px; line-height: 1.35;
+}
+.dev-mode-card .arrow {
+  color: #fff; flex-shrink: 0; opacity: 0.85;
+  transition: transform 0.2s; position: relative; z-index: 1;
+}
+.dev-mode-card:hover:not(:disabled) .arrow { transform: translateX(3px); }
+
+/* =====================================================================
+   Transport buttons (Start / Stop / Pause / Resume)
+   Bottom-left of the map. Glass-capsule outer container is inline; per-
+   button styling lives here. Mockup S6 base + D8 fill on active state.
+   ===================================================================== */
+.lw-transport-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s, transform 0.12s;
+  white-space: nowrap;
+}
+.lw-transport-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+.lw-transport-btn:active { transform: scale(0.97); }
+.lw-transport-start,
+.lw-transport-resume {
+  background: var(--accent-blue);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(108, 140, 255, 0.4);
+}
+.lw-transport-start:hover,
+.lw-transport-resume:hover {
+  background: var(--accent-blue-hover);
+  color: #fff;
+}
+.lw-transport-stop {
+  color: #ff8a8a;
+}
+.lw-transport-stop:hover {
+  background: rgba(255, 71, 87, 0.18);
+  color: #ff8a8a;
+}
+
 .search-icon {
   position: absolute;
   left: 10px;

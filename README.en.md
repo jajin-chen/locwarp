@@ -8,10 +8,6 @@
 </p>
 
 <p align="center">
-  <a href="https://ko-fi.com/haoooooo" target="_blank">
-    <img src="https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white" alt="Ko-fi" height="40">
-  </a>
-  &nbsp;&nbsp;
   <a href="https://lin.ee/UwdCrmf" target="_blank">
     <img src="https://img.shields.io/badge/LINE-Add%20Friend-06C755?style=for-the-badge&logo=line&logoColor=white" alt="LINE" height="40">
   </a>
@@ -21,8 +17,8 @@
   </a>
 </p>
 
-> If LocWarp has been useful to you, [buy me a coffee](https://ko-fi.com/haoooooo) ☕  
-> No PayPal? Feel free to [reach me on LINE](https://lin.ee/UwdCrmf), or send USDT directly using the address below.
+> Questions or feedback? [Reach me on LINE](https://lin.ee/UwdCrmf).  
+> Want to support development? Send USDT to the address below.
 
 ### USDT tip jar (TRC-20 / TRON network)
 
@@ -181,7 +177,7 @@ The world is bucketed into 1° x 1° grid cells with a per-region OSRM-coverage 
 - **Open Log Folder** button (status bar): opens `~/.locwarp/logs/` so you can attach `backend.log` to bug reports
 - Current app version shown in the bottom-right corner
 - UI language: 繁體中文 / English, switchable on the fly
-- **Ko-fi donate button** (sidebar bottom): support the open-source author
+- **Official LINE button** (sidebar bottom): contact the author with questions or feedback
 - All state (bookmarks, settings, tunnel info) lives in `~/.locwarp/`
 
 ---

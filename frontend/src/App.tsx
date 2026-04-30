@@ -1208,6 +1208,7 @@ const App: React.FC = () => {
                   <span style={{ opacity: 0.7, whiteSpace: 'nowrap' }}>{t('loop.lap_count_label')}</span>
                   <input
                     type="number"
+                    className="lw-input"
                     min={0}
                     placeholder={t('loop.lap_count_placeholder')}
                     value={sim.loopLapCount ?? ''}
@@ -1217,7 +1218,7 @@ const App: React.FC = () => {
                       const n = parseInt(raw, 10)
                       sim.setLoopLapCount(Number.isFinite(n) && n > 0 ? n : null)
                     }}
-                    style={{ width: 60, padding: '2px 4px', fontSize: 11 }}
+                    style={{ width: 70 }}
                     title={t('loop.lap_count_tooltip')}
                   />
                   {sim.lapProgress && (
@@ -1235,10 +1236,11 @@ const App: React.FC = () => {
                   <span style={{ opacity: 0.7, width: 36 }}>{t('panel.waypoints_radius')}</span>
                   <input
                     type="number"
+                    className="lw-input"
                     min={10}
                     value={wpGenRadius}
                     onChange={(e) => setWpGenRadius(Math.max(1, parseInt(e.target.value) || 0))}
-                    style={{ flex: 1, padding: '2px 4px', fontSize: 11 }}
+                    style={{ flex: 1 }}
                   />
                   <span style={{ opacity: 0.5, width: 16 }}>m</span>
                 </div>
@@ -1246,11 +1248,12 @@ const App: React.FC = () => {
                   <span style={{ opacity: 0.7, width: 36 }}>{t('panel.waypoints_count')}</span>
                   <input
                     type="number"
+                    className="lw-input"
                     min={1}
                     max={50}
                     value={wpGenCount}
                     onChange={(e) => setWpGenCount(Math.max(1, parseInt(e.target.value) || 0))}
-                    style={{ flex: 1, padding: '2px 4px', fontSize: 11 }}
+                    style={{ flex: 1 }}
                   />
                   <span style={{ opacity: 0.5, width: 16 }}>{t('panel.points')}</span>
                 </div>
@@ -1268,12 +1271,20 @@ const App: React.FC = () => {
                     title={t('panel.waypoints_gen_all_tooltip')}
                   >{t('panel.waypoints_generate_all')}</button>
                 </div>
+                {/* Bulk paste button — Variant D from the mockup: gradient pill
+                    with an animated shimmer that hints "this is the eye-catcher". */}
                 <button
-                  className="action-btn"
-                  style={{ width: '100%', padding: '3px 8px', fontSize: 11, marginTop: 6 }}
+                  className="route-paste-shimmer"
                   onClick={() => { setRoutePasteText(''); setRoutePasteOpen(true); }}
                   title={t('panel.route_paste_tooltip')}
-                >{t('panel.route_paste_button')}</button>
+                  style={{ width: '100%', marginTop: 8 }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="9" y="2" width="6" height="4" rx="1"/>
+                    <path d="M9 4H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-3"/>
+                  </svg>
+                  {t('panel.route_paste_button')}
+                </button>
               </div>
               {sim.waypoints.length === 0 && (
                 <div style={{ fontSize: 12, opacity: 0.5, padding: '4px 0' }}>
@@ -1526,6 +1537,14 @@ const App: React.FC = () => {
           }}
           onRecentClear={clearRecentList}
           onOpenLibrary={() => setOpenLibraryToken((t) => t + 1)}
+          isRunning={isRunning}
+          isPaused={isPaused}
+          onStart={handleStart}
+          onStop={handleStop}
+          onPause={handlePause}
+          onResume={handleResume}
+          showBulkPasteOnMap={sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop}
+          onBulkPasteOpen={() => { setRoutePasteText(''); setRoutePasteOpen(true); }}
         />
         {avatarPickerOpen && (
           <UserAvatarPicker
