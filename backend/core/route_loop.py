@@ -30,6 +30,7 @@ class RouteLooper:
         pause_min: float = 5.0,
         pause_max: float = 20.0,
         straight_line: bool = False,
+        route_engine: str | None = None,
         lap_count: int | None = None,
     ) -> None:
         """Build a multi-waypoint route that forms a closed loop, then
@@ -59,6 +60,7 @@ class RouteLooper:
         route_data = await engine.route_service.get_multi_route(
             wp_tuples, profile=osrm_profile,
             force_straight=straight_line,
+            engine=route_engine,
         )
 
         coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]
@@ -186,6 +188,7 @@ class RouteLooper:
                     wp_b.lat, wp_b.lng,
                     profile=osrm_profile,
                     force_straight=straight_line,
+                    engine=route_engine,
                 )
                 leg_coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in leg_route["coords"]]
                 if len(leg_coords) >= 2:

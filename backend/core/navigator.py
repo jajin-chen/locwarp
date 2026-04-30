@@ -22,6 +22,7 @@ class Navigator:
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
         straight_line: bool = False,
+        route_engine: str | None = None,
     ) -> None:
         """Get an OSRM route from the current position to *dest*, then
         walk/run/drive along it using the engine's core movement loop.
@@ -50,12 +51,13 @@ class Navigator:
             start.lat, start.lng, dest.lat, dest.lng, profile_name,
         )
 
-        # Fetch route from OSRM
+        # Fetch route from the chosen routing engine
         route_data = await engine.route_service.get_route(
             start.lat, start.lng,
             dest.lat, dest.lng,
             profile=osrm_profile,
             force_straight=straight_line,
+            engine=route_engine,
         )
 
         # Convert [lat, lng] lists to Coordinate objects

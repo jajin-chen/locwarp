@@ -1,4 +1,4 @@
-"""OSRM route planning service."""
+"""Route planning service supporting multiple free routing engines."""
 
 from __future__ import annotations
 
@@ -6,18 +6,53 @@ import logging
 
 import httpx
 
-from config import OSRM_BASE_URL
+from config import (
+    DEFAULT_ROUTE_ENGINE,
+    OSRM_BASE_URL,
+    OSRM_FOSSGIS_BASE_URL,
+    ROUTE_ENGINE_OSRM,
+    ROUTE_ENGINE_OSRM_FOSSGIS,
+    ROUTE_ENGINE_VALHALLA,
+    ROUTE_ENGINES_ALLOWED,
+    VALHALLA_BASE_URL,
+)
 
 logger = logging.getLogger(__name__)
 
-# Map user-facing profile names to OSRM profile slugs
-_PROFILE_MAP = {
+# Map user-facing profile names to the OSRM URL slug used by the demo
+# server (router.project-osrm.org). The demo accepts {car, foot, bike}.
+_OSRM_DEMO_PROFILE = {
     "walking": "foot",
     "running": "foot",
     "driving": "car",
     "foot": "foot",
     "car": "car",
     "bike": "bike",
+    "bicycle": "bike",
+}
+
+# FOSSGIS hosts each profile on its own /routed-X path and uses the
+# canonical OSRM v1 profile names ("driving", "foot", "bike") inside the
+# URL itself. So a "driving" request becomes
+# /routed-car/route/v1/driving/...
+_OSRM_FOSSGIS_PROFILE = {
+    "walking": ("routed-foot", "foot"),
+    "running": ("routed-foot", "foot"),
+    "driving": ("routed-car", "driving"),
+    "foot": ("routed-foot", "foot"),
+    "car": ("routed-car", "driving"),
+    "bike": ("routed-bike", "bike"),
+    "bicycle": ("routed-bike", "bike"),
+}
+
+# Valhalla uses different costing model names than OSRM profiles.
+_VALHALLA_COSTING = {
+    "walking": "pedestrian",
+    "running": "pedestrian",
+    "driving": "auto",
+    "foot": "pedestrian",
+    "car": "auto",
+    "bike": "bicycle",
     "bicycle": "bicycle",
 }
 
@@ -37,8 +72,9 @@ def _haversine_m(a_lat: float, a_lng: float, b_lat: float, b_lng: float) -> floa
 
 
 def _straight_line_fallback(waypoints: list[tuple[float, float]], walking_speed_mps: float = 1.4) -> dict:
-    """Construct a straight-line route as a last resort when OSRM is unreachable.
-    Densifies each segment so the interpolator has enough sample points."""
+    """Construct a straight-line route as a last resort when the routing
+    engine is unreachable. Densifies each segment so the interpolator
+    has enough sample points."""
     coords: list[list[float]] = [[waypoints[0][0], waypoints[0][1]]]
     total_distance = 0.0
     leg_durations: list[float] = []
@@ -62,8 +98,56 @@ def _straight_line_fallback(waypoints: list[tuple[float, float]], walking_speed_
     }
 
 
+def _decode_polyline6(encoded: str) -> list[tuple[float, float]]:
+    """Decode a Valhalla polyline6 string into (lat, lng) pairs.
+
+    Standard Google polyline algorithm with precision 6 (1e-6 degrees)
+    instead of 5. Valhalla returns this in trip.legs[i].shape.
+    """
+    coords: list[tuple[float, float]] = []
+    index = 0
+    lat = 0
+    lng = 0
+    n = len(encoded)
+    while index < n:
+        # latitude
+        shift = 0
+        result = 0
+        while True:
+            b = ord(encoded[index]) - 63
+            index += 1
+            result |= (b & 0x1f) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlat = ~(result >> 1) if result & 1 else (result >> 1)
+        lat += dlat
+        # longitude
+        shift = 0
+        result = 0
+        while True:
+            b = ord(encoded[index]) - 63
+            index += 1
+            result |= (b & 0x1f) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlng = ~(result >> 1) if result & 1 else (result >> 1)
+        lng += dlng
+        coords.append((lat / 1e6, lng / 1e6))
+    return coords
+
+
+def _normalise_engine(engine: str | None) -> str:
+    """Coerce caller-supplied engine string to a known value, falling
+    back to the default if the value is None or unrecognised."""
+    if engine and engine in ROUTE_ENGINES_ALLOWED:
+        return engine
+    return DEFAULT_ROUTE_ENGINE
+
+
 class RouteService:
-    """Thin async wrapper around the OSRM HTTP API."""
+    """Async wrapper around the supported routing engines."""
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -77,12 +161,14 @@ class RouteService:
         end_lng: float,
         profile: str = "foot",
         force_straight: bool = False,
+        engine: str | None = None,
     ) -> dict:
-        """Plan a route between two points via OSRM.
+        """Plan a route between two points via the chosen engine.
 
-        When *force_straight* is True, skip OSRM entirely and serve a
-        densified straight-line route (used by the global "straight-line"
-        toggle for users who want raw bearing-to-point travel).
+        When *force_straight* is True, skip the engine entirely and serve
+        a densified straight-line route (used by the global
+        "straight-line" toggle for users who want raw bearing-to-point
+        travel).
         """
         waypoints = [
             (start_lat, start_lng),
@@ -90,13 +176,14 @@ class RouteService:
         ]
         if force_straight:
             return _straight_line_fallback(waypoints)
-        return await self._fetch_route(waypoints, profile)
+        return await self._fetch_route(waypoints, profile, _normalise_engine(engine))
 
     async def get_multi_route(
         self,
         waypoints: list[tuple[float, float] | list[float] | dict],
         profile: str = "foot",
         force_straight: bool = False,
+        engine: str | None = None,
     ) -> dict:
         """Plan a route through multiple waypoints.
 
@@ -115,64 +202,147 @@ class RouteService:
 
         if force_straight:
             return _straight_line_fallback(normalised)
-        return await self._fetch_route(normalised, profile)
+        return await self._fetch_route(normalised, profile, _normalise_engine(engine))
 
     # ------------------------------------------------------------------
-    # Internal
+    # Internal dispatch
     # ------------------------------------------------------------------
 
     async def _fetch_route(
         self,
         waypoints: list[tuple[float, float]],
         profile: str,
+        engine: str,
     ) -> dict:
-        osrm_profile = _PROFILE_MAP.get(profile, profile)
+        # Per-request fallback only; do NOT cache failures across a
+        # region. A single transient blip (demo-server 502s, etc.)
+        # would otherwise force every subsequent leg of a random walk
+        # onto a straight line for the rest of the cache window.
+        try:
+            if engine == ROUTE_ENGINE_VALHALLA:
+                return await self._fetch_valhalla(waypoints, profile)
+            return await self._fetch_osrm(waypoints, profile, engine)
+        except (httpx.HTTPError, httpx.TimeoutException, RuntimeError) as e:
+            logger.warning(
+                "%s failed (%s); using straight-line fallback for this leg",
+                engine, type(e).__name__,
+            )
+            return _straight_line_fallback(waypoints)
+
+    # ------------------------------------------------------------------
+    # OSRM (demo + FOSSGIS)
+    # ------------------------------------------------------------------
+
+    async def _fetch_osrm(
+        self,
+        waypoints: list[tuple[float, float]],
+        profile: str,
+        engine: str,
+    ) -> dict:
+        if engine == ROUTE_ENGINE_OSRM_FOSSGIS:
+            prefix, osrm_profile = _OSRM_FOSSGIS_PROFILE.get(
+                profile, ("routed-foot", "foot"),
+            )
+            base = f"{OSRM_FOSSGIS_BASE_URL}/{prefix}"
+        else:
+            osrm_profile = _OSRM_DEMO_PROFILE.get(profile, profile)
+            base = OSRM_BASE_URL
 
         # OSRM coordinate pairs are lon,lat (not lat,lon)
-        coords_str = ";".join(
-            f"{lng},{lat}" for lat, lng in waypoints
-        )
-
+        coords_str = ";".join(f"{lng},{lat}" for lat, lng in waypoints)
         url = (
-            f"{OSRM_BASE_URL}/route/v1/{osrm_profile}/{coords_str}"
+            f"{base}/route/v1/{osrm_profile}/{coords_str}"
             "?overview=full&geometries=geojson&steps=true"
             "&annotations=duration,distance"
         )
 
-        logger.debug("OSRM request: %s", url)
+        logger.debug("OSRM request (%s): %s", engine, url)
 
-        # Per-request fallback only; do NOT cache failures across a
-        # region. A single transient OSRM blip (demo-server 502s, etc.)
-        # would otherwise force every subsequent leg of a random walk
-        # onto a straight line for the rest of the cache window.
-        try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                data = resp.json()
-            if data.get("code") != "Ok":
-                msg = data.get("message", "Unknown OSRM error")
-                raise RuntimeError(f"OSRM error: {msg}")
-        except (httpx.HTTPError, httpx.TimeoutException, RuntimeError) as e:
-            logger.warning(
-                "OSRM failed (%s); using straight-line fallback for this leg",
-                type(e).__name__,
-            )
-            return _straight_line_fallback(waypoints)
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+        if data.get("code") != "Ok":
+            msg = data.get("message", "Unknown OSRM error")
+            raise RuntimeError(f"OSRM error: {msg}")
 
         route = data["routes"][0]
         geometry = route["geometry"]  # GeoJSON LineString
-
         # GeoJSON coordinates are [lon, lat]; convert to [lat, lng]
-        coords = [
-            [pt[1], pt[0]] for pt in geometry["coordinates"]
-        ]
-
+        coords = [[pt[1], pt[0]] for pt in geometry["coordinates"]]
         leg_durations = [leg["duration"] for leg in route["legs"]]
 
         return {
             "coords": coords,
             "duration": route["duration"],
             "distance": route["distance"],
+            "leg_durations": leg_durations,
+        }
+
+    # ------------------------------------------------------------------
+    # Valhalla (FOSSGIS)
+    # ------------------------------------------------------------------
+
+    async def _fetch_valhalla(
+        self,
+        waypoints: list[tuple[float, float]],
+        profile: str,
+    ) -> dict:
+        costing = _VALHALLA_COSTING.get(profile, "pedestrian")
+        body = {
+            "locations": [{"lat": lat, "lon": lng} for lat, lng in waypoints],
+            "costing": costing,
+            "directions_options": {"units": "kilometers"},
+        }
+        url = f"{VALHALLA_BASE_URL}/route"
+        logger.debug("Valhalla request: %s body=%s", url, body)
+
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(url, json=body)
+            resp.raise_for_status()
+            data = resp.json()
+
+        trip = data.get("trip")
+        if not trip:
+            raise RuntimeError("Valhalla returned no trip")
+        if trip.get("status") not in (0, None):
+            raise RuntimeError(f"Valhalla error: {trip.get('status_message')}")
+
+        legs = trip.get("legs", [])
+        if not legs:
+            raise RuntimeError("Valhalla returned no legs")
+
+        coords: list[list[float]] = []
+        leg_durations: list[float] = []
+        total_distance_km = 0.0
+        total_time_s = 0.0
+        for i, leg in enumerate(legs):
+            shape = leg.get("shape")
+            if not shape:
+                continue
+            decoded = _decode_polyline6(shape)
+            # Avoid duplicating the seam point between legs.
+            if i > 0 and coords and decoded:
+                decoded = decoded[1:]
+            coords.extend([list(pt) for pt in decoded])
+            summary = leg.get("summary") or {}
+            leg_time = float(summary.get("time", 0.0))
+            leg_durations.append(leg_time)
+            total_time_s += leg_time
+            total_distance_km += float(summary.get("length", 0.0))
+
+        if not coords:
+            raise RuntimeError("Valhalla decoded geometry was empty")
+
+        # Trip-level summary if provided is more authoritative.
+        trip_summary = trip.get("summary") or {}
+        if trip_summary:
+            total_time_s = float(trip_summary.get("time", total_time_s))
+            total_distance_km = float(trip_summary.get("length", total_distance_km))
+
+        return {
+            "coords": coords,
+            "duration": total_time_s,
+            "distance": total_distance_km * 1000.0,  # km → m
             "leg_durations": leg_durations,
         }

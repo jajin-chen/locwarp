@@ -296,6 +296,7 @@ async def navigate(req: NavigateRequest):
         speed_kmh=req.speed_kmh,
         speed_min_kmh=req.speed_min_kmh, speed_max_kmh=req.speed_max_kmh,
         straight_line=req.straight_line,
+        route_engine=req.route_engine,
     ))
     return {"status": "started", "destination": {"lat": req.lat, "lng": req.lng}, "mode": req.mode}
 
@@ -309,6 +310,7 @@ async def loop(req: LoopRequest):
         speed_min_kmh=req.speed_min_kmh, speed_max_kmh=req.speed_max_kmh,
         pause_enabled=req.pause_enabled, pause_min=req.pause_min, pause_max=req.pause_max,
         straight_line=req.straight_line,
+        route_engine=req.route_engine,
         lap_count=req.lap_count,
     ))
     return {"status": "started", "waypoints": len(req.waypoints), "mode": req.mode}
@@ -323,6 +325,7 @@ async def multi_stop(req: MultiStopRequest):
         speed_min_kmh=req.speed_min_kmh, speed_max_kmh=req.speed_max_kmh,
         pause_enabled=req.pause_enabled, pause_min=req.pause_min, pause_max=req.pause_max,
         straight_line=req.straight_line,
+        route_engine=req.route_engine,
     ))
     return {"status": "started", "stops": len(req.waypoints), "mode": req.mode}
 
@@ -337,6 +340,7 @@ async def random_walk(req: RandomWalkRequest):
         pause_enabled=req.pause_enabled, pause_min=req.pause_min, pause_max=req.pause_max,
         seed=req.seed,
         straight_line=req.straight_line,
+        route_engine=req.route_engine,
     ))
     return {"status": "started", "radius_m": req.radius_m, "mode": req.mode}
 

@@ -198,6 +198,7 @@ class SimulationEngine:
         speed_min_kmh: float | None = None,
         speed_max_kmh: float | None = None,
         straight_line: bool = False,
+        route_engine: str | None = None,
     ) -> None:
         """Navigate from current position to *dest*."""
         await self._ensure_stopped()
@@ -207,13 +208,14 @@ class SimulationEngine:
         self._last_sim_args = dict(
             dest=dest, mode=mode, speed_kmh=speed_kmh,
             speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
-            straight_line=straight_line,
+            straight_line=straight_line, route_engine=route_engine,
         )
         await self._run_handler(
             self._navigator.navigate_to(
                 dest, mode, speed_kmh=speed_kmh,
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
                 straight_line=straight_line,
+                route_engine=route_engine,
             ),
             "Navigate",
         )
@@ -229,6 +231,7 @@ class SimulationEngine:
         pause_min: float = 5.0,
         pause_max: float = 20.0,
         straight_line: bool = False,
+        route_engine: str | None = None,
         lap_count: int | None = None,
     ) -> None:
         """Start looping through a closed route."""
@@ -240,14 +243,16 @@ class SimulationEngine:
             waypoints=waypoints, mode=mode, speed_kmh=speed_kmh,
             speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
             pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
-            straight_line=straight_line, lap_count=lap_count,
+            straight_line=straight_line, route_engine=route_engine,
+            lap_count=lap_count,
         )
         await self._run_handler(
             self._looper.start_loop(
                 waypoints, mode, speed_kmh=speed_kmh,
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
                 pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
-                straight_line=straight_line, lap_count=lap_count,
+                straight_line=straight_line, route_engine=route_engine,
+                lap_count=lap_count,
             ),
             "Loop",
         )
@@ -280,6 +285,7 @@ class SimulationEngine:
         pause_min: float = 5.0,
         pause_max: float = 20.0,
         straight_line: bool = False,
+        route_engine: str | None = None,
     ) -> None:
         """Navigate through waypoints with optional stops."""
         await self._ensure_stopped()
@@ -290,14 +296,14 @@ class SimulationEngine:
             waypoints=waypoints, mode=mode, stop_duration=stop_duration, loop=loop,
             speed_kmh=speed_kmh, speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
             pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
-            straight_line=straight_line,
+            straight_line=straight_line, route_engine=route_engine,
         )
         await self._run_handler(
             self._multi_stop.start(
                 waypoints, mode, stop_duration, loop, speed_kmh=speed_kmh,
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
                 pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
-                straight_line=straight_line,
+                straight_line=straight_line, route_engine=route_engine,
             ),
             "Multi-stop",
         )
@@ -315,6 +321,7 @@ class SimulationEngine:
         pause_max: float = 20.0,
         seed: int | None = None,
         straight_line: bool = False,
+        route_engine: str | None = None,
     ) -> None:
         """Begin a random walk within a radius."""
         await self._ensure_stopped()
@@ -329,7 +336,7 @@ class SimulationEngine:
             center=center, radius_m=radius_m, mode=mode,
             speed_kmh=speed_kmh, speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
             pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
-            seed=effective_seed, straight_line=straight_line,
+            seed=effective_seed, straight_line=straight_line, route_engine=route_engine,
         )
         seed = effective_seed
         await self._run_handler(
@@ -339,7 +346,7 @@ class SimulationEngine:
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
                 pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
                 seed=seed,
-                straight_line=straight_line,
+                straight_line=straight_line, route_engine=route_engine,
             ),
             "Random walk",
         )

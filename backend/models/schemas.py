@@ -62,6 +62,7 @@ class NavigateRequest(BaseModel):
     speed_min_kmh: float | None = None
     speed_max_kmh: float | None = None
     straight_line: bool = False
+    route_engine: str | None = None
     udid: str | None = None
 
 
@@ -75,6 +76,7 @@ class LoopRequest(BaseModel):
     pause_min: float = 5.0
     pause_max: float = 20.0
     straight_line: bool = False
+    route_engine: str | None = None
     udid: str | None = None
     # Number of laps to run before auto-stopping. None / 0 / negative means
     # infinite laps (current default behaviour, user stops manually).
@@ -93,6 +95,7 @@ class MultiStopRequest(BaseModel):
     pause_min: float = 5.0
     pause_max: float = 20.0
     straight_line: bool = False
+    route_engine: str | None = None
     udid: str | None = None
 
 
@@ -107,6 +110,7 @@ class RandomWalkRequest(BaseModel):
     pause_min: float = 5.0
     pause_max: float = 20.0
     straight_line: bool = False
+    route_engine: str | None = None
     udid: str | None = None
     # Dual-device group mode: both devices pass the same seed so they pick
     # identical sequences of random destinations, keeping their paths synced.

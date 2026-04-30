@@ -36,6 +36,7 @@ class RandomWalkHandler:
         pause_max: float = 20.0,
         seed: int | None = None,
         straight_line: bool = False,
+        route_engine: str | None = None,
     ) -> None:
         """Begin a random walk around *center* within *radius_m*.
 
@@ -132,6 +133,7 @@ class RandomWalkHandler:
                     dest_lat, dest_lng,
                     profile=osrm_profile,
                     force_straight=straight_line,
+                    engine=route_engine,
                 )
 
                 coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in route_data["coords"]]

@@ -1179,6 +1179,8 @@ const App: React.FC = () => {
           currentWaypointsCount={sim.waypoints.length}
           straightLine={sim.straightLine}
           onStraightLineChange={sim.setStraightLine}
+          routeEngine={sim.routeEngine}
+          onRouteEngineChange={sim.setRouteEngine}
           clickToAddWaypoint={clickToAddWaypoint}
           onClickToAddWaypointChange={setClickToAddWaypoint}
           openLibraryToken={openLibraryToken}

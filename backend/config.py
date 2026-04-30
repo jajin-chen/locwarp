@@ -12,6 +12,23 @@ RECENT_PLACES_FILE = DATA_DIR / "recent_places.json"
 # OSRM
 OSRM_BASE_URL = "https://router.project-osrm.org"
 
+# Routing engines the user can pick from in the UI. 'osrm' = the original
+# demo server (kept as default for backwards compat). 'osrm_fossgis' is
+# the same OSRM software hosted by FOSSGIS at a different URL with split
+# /routed-{car|foot|bike} prefixes per profile. 'valhalla' is a different
+# routing engine entirely (POST JSON, polyline6 geometry).
+ROUTE_ENGINE_OSRM = "osrm"
+ROUTE_ENGINE_OSRM_FOSSGIS = "osrm_fossgis"
+ROUTE_ENGINE_VALHALLA = "valhalla"
+ROUTE_ENGINES_ALLOWED = (
+    ROUTE_ENGINE_OSRM,
+    ROUTE_ENGINE_OSRM_FOSSGIS,
+    ROUTE_ENGINE_VALHALLA,
+)
+DEFAULT_ROUTE_ENGINE = ROUTE_ENGINE_OSRM
+OSRM_FOSSGIS_BASE_URL = "https://routing.openstreetmap.de"
+VALHALLA_BASE_URL = "https://valhalla1.openstreetmap.de"
+
 # Nominatim
 NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org"
 NOMINATIM_USER_AGENT = "LocWarp/0.1"

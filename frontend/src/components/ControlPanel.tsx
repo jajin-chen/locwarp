@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
+import RouteEngineSelector from './RouteEngineSelector';
 
 // Apply-speed button that disables itself for ~1.5 s after a click so a
 // frantic double-tap doesn't fire two consecutive hot-swaps (which used to
@@ -119,6 +120,8 @@ interface ControlPanelProps {
   currentWaypointsCount?: number;
   straightLine?: boolean;
   onStraightLineChange?: (v: boolean) => void;
+  routeEngine?: 'osrm' | 'osrm_fossgis' | 'valhalla';
+  onRouteEngineChange?: (v: 'osrm' | 'osrm_fossgis' | 'valhalla') => void;
   clickToAddWaypoint?: boolean;
   onClickToAddWaypointChange?: (v: boolean) => void;
   // Incremented by any external source (e.g. map top-left library
@@ -260,6 +263,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   currentWaypointsCount = 0,
   straightLine = false,
   onStraightLineChange,
+  routeEngine = 'osrm',
+  onRouteEngineChange,
   clickToAddWaypoint = false,
   onClickToAddWaypointChange,
   openLibraryToken,
@@ -421,6 +426,13 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   {t('panel.straight_line')}
                 </span>
               </label>
+            )}
+            {onRouteEngineChange && (
+              <RouteEngineSelector
+                value={routeEngine}
+                onChange={onRouteEngineChange}
+                disabled={straightLine}
+              />
             )}
             {onClickToAddWaypointChange && (simMode === SimMode.Loop || simMode === SimMode.MultiStop) && (
               <label
