@@ -539,6 +539,56 @@ async def wifi_tunnel_start(req: WifiTunnelStartRequest):
             except (RuntimeError, AttributeError):
                 pass
         if not resolved_udid:
+            # No USB device is currently tracked, but the user may have
+            # previously paired this iPhone via USB — pymobiledevice3
+            # caches a RemotePairing record under
+            # ~/.pymobiledevice3/remote_<udid>.RemotePairing.plist.
+            # Reuse a cached identifier so WiFi tunnel works without
+            # forcing the user to plug USB in again every session.
+            try:
+                from pymobiledevice3.pair_records import iter_remote_paired_identifiers
+                cached = list(iter_remote_paired_identifiers())
+                if len(cached) == 1:
+                    resolved_udid = cached[0]
+                    _tunnel_logger.info(
+                        "No USB tracked; reusing the only cached paired "
+                        "identifier %s for WiFi tunnel",
+                        resolved_udid,
+                    )
+                elif len(cached) > 1:
+                    # Multiple paired devices: pick the most recently
+                    # used record (file mtime) as the best guess. If
+                    # that's the wrong device, the cryptographic
+                    # pair-verify will fail fast and the user can
+                    # retry with USB to disambiguate.
+                    try:
+                        from pymobiledevice3.pair_records import iter_remote_pair_records
+                        records = sorted(
+                            iter_remote_pair_records(),
+                            key=lambda p: p.stat().st_mtime,
+                            reverse=True,
+                        )
+                        if records:
+                            stem = records[0].name
+                            if stem.startswith("remote_"):
+                                stem = stem.split("remote_", 1)[1]
+                            resolved_udid = stem.split(".", 1)[0]
+                            _tunnel_logger.info(
+                                "No USB tracked; %d cached identifiers, "
+                                "trying most recent: %s",
+                                len(cached), resolved_udid,
+                            )
+                    except Exception:
+                        _tunnel_logger.debug(
+                            "Could not pick most-recent cached identifier",
+                            exc_info=True,
+                        )
+            except Exception:
+                _tunnel_logger.debug(
+                    "Could not enumerate cached paired identifiers",
+                    exc_info=True,
+                )
+        if not resolved_udid:
             resolved_udid = f"pending:{req.ip}:{req.port}"
 
         existing = _tunnels.get(resolved_udid)
