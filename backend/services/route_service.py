@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
 
 import httpx
 
@@ -66,37 +64,6 @@ def _straight_line_fallback(waypoints: list[tuple[float, float]], walking_speed_
 
 class RouteService:
     """Thin async wrapper around the OSRM HTTP API."""
-
-    # Per-region OSRM coverage cache. Keyed by 1°×1° grid cell (≈110 km
-    # square), value is ('ok' | 'down', monotonic_timestamp). 'ok' means
-    # OSRM has data here and a normal request worked. 'down' means a probe
-    # request to this region timed out / failed (no map coverage or area
-    # blocked) so future requests skip OSRM and go straight to fallback.
-    _region_status: dict[tuple[int, int], tuple[str, float]] = {}
-    _region_lock: asyncio.Lock | None = None
-    _REGION_TTL_SECONDS = 600.0  # re-probe a region every 10 minutes
-    _PROBE_TIMEOUT = httpx.Timeout(2.5, connect=2.0)
-
-    @staticmethod
-    def _region_key(lat: float, lng: float) -> tuple[int, int]:
-        """Bucket coordinates into a 1°×1° grid cell."""
-        import math
-        return (int(math.floor(lat)), int(math.floor(lng)))
-
-    @classmethod
-    def _region_state(cls, key: tuple[int, int]) -> str | None:
-        """Return cached status for *key* if still fresh, else None."""
-        rec = cls._region_status.get(key)
-        if rec is None:
-            return None
-        status, checked_at = rec
-        if (time.monotonic() - checked_at) >= cls._REGION_TTL_SECONDS:
-            return None
-        return status
-
-    @classmethod
-    def _mark_region(cls, key: tuple[int, int], status: str) -> None:
-        cls._region_status[key] = (status, time.monotonic())
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -174,22 +141,12 @@ class RouteService:
 
         logger.debug("OSRM request: %s", url)
 
-        # Per-region coverage gate: cache OSRM availability by 1°x1° cell
-        # keyed off the first waypoint. If we previously confirmed this
-        # region is unreachable (no map data / blocked) within TTL, skip
-        # OSRM entirely and serve a straight line instantly. New regions
-        # get a short-timeout probe; on success we use the existing data
-        # and mark 'ok'; on failure we mark 'down' and fall back.
-        first_lat, first_lng = waypoints[0]
-        key = self._region_key(first_lat, first_lng)
-        cached = self._region_state(key)
-        if cached == "down":
-            return _straight_line_fallback(waypoints)
-
-        timeout = _TIMEOUT if cached == "ok" else self._PROBE_TIMEOUT
-
+        # Per-request fallback only; do NOT cache failures across a
+        # region. A single transient OSRM blip (demo-server 502s, etc.)
+        # would otherwise force every subsequent leg of a random walk
+        # onto a straight line for the rest of the cache window.
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 data = resp.json()
@@ -197,16 +154,11 @@ class RouteService:
                 msg = data.get("message", "Unknown OSRM error")
                 raise RuntimeError(f"OSRM error: {msg}")
         except (httpx.HTTPError, httpx.TimeoutException, RuntimeError) as e:
-            self._mark_region(key, "down")
             logger.warning(
-                "OSRM failed for region %s (%s); marking down, using straight-line",
-                key, type(e).__name__,
+                "OSRM failed (%s); using straight-line fallback for this leg",
+                type(e).__name__,
             )
             return _straight_line_fallback(waypoints)
-        else:
-            if cached != "ok":
-                self._mark_region(key, "ok")
-                logger.info("OSRM region %s confirmed ok", key)
 
         route = data["routes"][0]
         geometry = route["geometry"]  # GeoJSON LineString
