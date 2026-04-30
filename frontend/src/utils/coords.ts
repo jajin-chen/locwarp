@@ -12,8 +12,11 @@ const DECORATION_RE = /[()\[\]{}（）【】「」『』"'`°]/g;
 // Decimal-required main pattern. The lookarounds (?<![\d.]) / (?![\d.])
 // stop us from chopping a longer number like "12.345" mid-way and keep us
 // from grabbing the "3" out of a label like "#3" then pairing it with the
-// next number on the line.
-const COORD_DECIMAL_RE = /(?<![\d.])(-?\d+\.\d+)\s*[,;\s]+\s*(-?\d+\.\d+)(?![\d.])/g;
+// next number on the line. The `[^-\d.]+` between the two numbers means
+// any non-numeric junk works as a separator: `, ` / `,lng=` / ` B ` /
+// `:` / arbitrary CJK characters all qualify. `-` is intentionally
+// excluded so a negative sign on the second number stays attached.
+const COORD_DECIMAL_RE = /(?<![\d.])(-?\d+\.\d+)[^-\d.]+(-?\d+\.\d+)(?![\d.])/g;
 
 // Fallback for users who type integer-only coords like "25, 121". Only
 // used when the entire trimmed input is just two numbers, so a stray
