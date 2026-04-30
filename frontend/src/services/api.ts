@@ -34,8 +34,8 @@ const ERROR_I18N: Record<string, { zh: string; en: string }> = {
   remote_pair_failed: { zh: 'RemotePairing 記錄重建失敗, 請以系統管理員身分重啟 LocWarp', en: 'RemotePairing record rebuild failed, restart LocWarp as Administrator' },
   device_lost: { zh: '裝置連線中斷(USB 拔除或 Tunnel 死亡),請重新插上 USB 後再操作', en: 'Device connection lost (USB unplugged or tunnel died), please reconnect USB and try again' },
   max_devices_reached: {
-    zh: '已連接最多 2 台裝置',
-    en: 'Maximum 2 devices connected',
+    zh: '已連接最多 3 台裝置',
+    en: 'Maximum 3 devices connected',
   },
   ios_unsupported: {
     zh: '裝置 iOS 版本過舊,LocWarp 僅支援 iOS 16 以上。請升級 iOS 後再試。',
@@ -83,9 +83,17 @@ export const wifiConnect = (ip: string) => request<any>('POST', '/api/device/wif
 export const wifiScan = () => request<any[]>('GET', '/api/device/wifi/scan')
 export const wifiTunnelStartAndConnect = (ip: string, port = 49152, udid?: string) =>
   request<any>('POST', '/api/device/wifi/tunnel/start-and-connect', { ip, port, ...(udid ? { udid } : {}) })
-export const wifiTunnelStatus = () => request<any>('GET', '/api/device/wifi/tunnel/status')
+export interface TunnelInfo { udid: string; rsd_address?: string; rsd_port?: number; interface?: string; protocol?: string }
+export const wifiTunnelStatus = () =>
+  request<{ tunnels: TunnelInfo[]; running: boolean; rsd_address?: string; rsd_port?: number }>(
+    'GET', '/api/device/wifi/tunnel/status',
+  )
 export const wifiTunnelDiscover = () => request<{ devices: { ip: string; port: number; host: string; name: string }[] }>('GET', '/api/device/wifi/tunnel/discover')
-export const wifiTunnelStop = () => request<any>('POST', '/api/device/wifi/tunnel/stop')
+// udid: stop one specific tunnel; omit to stop all (legacy stop-all)
+export const wifiTunnelStop = (udid?: string) =>
+  request<{ status: string; udid?: string; udids?: string[] }>(
+    'POST', '/api/device/wifi/tunnel/stop', udid ? { udid } : {},
+  )
 export const wifiRepair = () => request<{ status: string; udid: string; name: string; ios_version: string; remote_record_regenerated: boolean }>('POST', '/api/device/wifi/repair')
 export const amfiRevealDeveloperMode = (udid: string) =>
   request<{ status: string }>('POST', `/api/device/${encodeURIComponent(udid)}/amfi/reveal-developer-mode`)

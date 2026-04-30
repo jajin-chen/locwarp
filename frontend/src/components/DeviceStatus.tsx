@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { wifiTunnelDiscover, wifiRepair } from '../services/api';
+import { wifiTunnelDiscover, wifiRepair, type TunnelInfo } from '../services/api';
 import { useT } from '../i18n';
+
+const MAX_TUNNEL_DEVICES = 3;
 
 interface Device {
   id: string;
@@ -24,8 +26,9 @@ interface DeviceStatusProps {
   onScan: () => void | Promise<void>;
   onSelect: (id: string) => void;
   onStartWifiTunnel?: (ip: string, port?: number) => Promise<any>;
-  onStopTunnel?: () => Promise<void>;
+  onStopTunnel?: (udid?: string) => Promise<void>;
   tunnelStatus?: TunnelStatus;
+  tunnels?: TunnelInfo[];
   onWifiConnect?: (ip: string) => Promise<any>;
   onRevealDeveloperMode?: (udid: string) => Promise<void>;
 }
@@ -39,6 +42,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   onStartWifiTunnel,
   onStopTunnel,
   tunnelStatus = { running: false },
+  tunnels = [],
   onWifiConnect,
   onRevealDeveloperMode,
 }) => {
@@ -95,23 +99,34 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   }, []);
   // WiFi tunnel remains iOS 17+ only; iOS 16 devices are supported over USB.
 
+  // Multi-result detect: keep the full list and let the user pick one when
+  // mDNS / subnet scan returns 2+ iPhones. Single result auto-fills as before.
+  const [discoverResults, setDiscoverResults] = useState<Array<{ ip: string; port: number; name: string }>>([]);
   const handleDiscover = async () => {
     setDiscovering(true);
     setTunnelError(null);
+    setDiscoverResults([]);
     try {
       const res = await wifiTunnelDiscover();
-      const first = res?.devices?.[0];
-      if (first) {
-        setTunnelIp(first.ip);
-        setTunnelPort(String(first.port));
-      } else {
+      const list = res?.devices || [];
+      if (list.length === 0) {
         setTunnelError(t('wifi.device_not_detected'));
+      } else if (list.length === 1) {
+        setTunnelIp(list[0].ip);
+        setTunnelPort(String(list[0].port));
+      } else {
+        setDiscoverResults(list.map((d) => ({ ip: d.ip, port: d.port, name: d.name || d.ip })));
       }
     } catch (err: any) {
       setTunnelError(err.message || t('wifi.detect_failed'));
     } finally {
       setDiscovering(false);
     }
+  };
+  const pickDiscoverResult = (r: { ip: string; port: number }) => {
+    setTunnelIp(r.ip);
+    setTunnelPort(String(r.port));
+    setDiscoverResults([]);
   };
 
   return (
@@ -400,14 +415,14 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                   border: '1px solid rgba(255, 193, 7, 0.4)',
                 }}
               >!</span>
-              {tunnelStatus.running && (
+              {tunnels.length > 0 && (
                 <span style={{
                   fontSize: 10, padding: '1px 6px', borderRadius: 3,
                   background: 'rgba(76, 175, 80, 0.15)', color: '#4caf50',
                   display: 'inline-flex', alignItems: 'center', gap: 3,
                 }}>
                   <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#4caf50' }} />
-                  Active
+                  {t('wifi.tunnel_active_count', { n: tunnels.length, max: MAX_TUNNEL_DEVICES })}
                 </span>
               )}
             </span>
@@ -454,7 +469,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                 </button>
                 <button
                   onClick={handleDiscover}
-                  disabled={discovering || tunnelStatus.running}
+                  disabled={discovering || tunnels.length >= MAX_TUNNEL_DEVICES}
                   title={t('wifi.detect_tooltip')}
                   style={{
                     flex: 1, fontSize: 10, padding: '3px 6px', borderRadius: 3,
@@ -491,77 +506,156 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                 </div>
               )}
 
-              {/* iOS 17+ WiFi Tunnel (RSD) */}
-              {onStartWifiTunnel && (
-                tunnelStatus.running ? (
-                  <div>
-                    <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, padding: '4px 6px', background: 'rgba(76, 175, 80, 0.08)', borderRadius: 3 }}>
-                      <div>RSD: {tunnelStatus.rsd_address}:{tunnelStatus.rsd_port}</div>
-                      <div style={{ fontSize: 10, opacity: 0.6, marginTop: 2 }}>{t('wifi.tunnel_usb_can_disconnect')}</div>
-                    </div>
-                    <button
-                      className="action-btn"
-                      onClick={async () => { if (onStopTunnel) await onStopTunnel(); }}
-                      style={{ width: '100%', fontSize: 11, color: '#f44336' }}
-                    >
-                      {t('wifi.tunnel_stop')}
-                    </button>
+              {/* Multi-result discovery picker — appears when /detect returns 2+ iPhones */}
+              {discoverResults.length > 0 && (
+                <div style={{
+                  fontSize: 11, padding: '6px 8px', marginBottom: 8,
+                  background: 'rgba(108, 140, 255, 0.06)',
+                  border: '1px solid rgba(108, 140, 255, 0.3)',
+                  borderRadius: 4,
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4, color: '#6c8cff' }}>
+                    {t('wifi.tunnel_detect_multiple', { n: discoverResults.length })}
                   </div>
-                ) : (
-                  <div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 4 }}>
-                      <span style={{ opacity: 0.7, width: 36 }}>IP</span>
-                      <input
-                        type="text" className="search-input"
-                        placeholder={t('wifi.ip_placeholder')}
-                        value={tunnelIp} onChange={(e) => setTunnelIp(e.target.value)}
-                        style={{ flex: 1, fontSize: 12 }} disabled={tunnelConnecting}
-                      />
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 6 }}>
-                      <span style={{ opacity: 0.7, width: 36 }}>Port</span>
-                      <input
-                        type="text" className="search-input" placeholder="49152"
-                        value={tunnelPort} onChange={(e) => setTunnelPort(e.target.value)}
-                        style={{ flex: 1, fontSize: 12 }} disabled={tunnelConnecting}
-                      />
-                    </label>
-                    <button
-                      className="action-btn primary"
-                      onClick={async () => {
-                        if (!tunnelIp.trim()) return;
-                        setTunnelConnecting(true); setTunnelError(null);
-                        try {
-                          await onStartWifiTunnel(tunnelIp.trim(), parseInt(tunnelPort) || 49152);
-                          // Remember on success
-                          localStorage.setItem('locwarp.tunnel.ip', tunnelIp.trim());
-                          localStorage.setItem('locwarp.tunnel.port', tunnelPort || '49152');
-                        } catch (err: any) {
-                          setTunnelError(err.message || 'WiFi tunnel failed');
-                        } finally { setTunnelConnecting(false); }
-                      }}
-                      disabled={tunnelConnecting || !tunnelIp.trim()}
-                      style={{ width: '100%', fontSize: 12 }}
-                    >
-                      {tunnelConnecting ? (
-                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}>
-                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83" />
-                          </svg>
-                          {t('wifi.tunnel_establishing')}
-                        </span>
-                      ) : t('wifi.tunnel_start')}
-                    </button>
-                    {tunnelError && (
-                      <div style={{ fontSize: 11, color: '#f44336', marginTop: 4, padding: '4px 6px', background: 'rgba(244,67,54,0.1)', borderRadius: 3 }}>
-                        {tunnelError}
+                  {discoverResults.map((r) => (
+                    <div key={`${r.ip}:${r.port}`} style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '4px 0', borderTop: '1px solid rgba(255,255,255,0.06)',
+                    }}>
+                      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <span style={{ opacity: 0.85 }}>{r.ip}</span>
+                        <span style={{ opacity: 0.55, marginLeft: 6 }}>{r.name}</span>
                       </div>
-                    )}
-                    <div style={{ fontSize: 10, opacity: 0.4, marginTop: 6 }}>
-                      {t('wifi.tunnel_admin_hint')}
+                      <button
+                        onClick={() => pickDiscoverResult(r)}
+                        style={{
+                          fontSize: 10, padding: '2px 6px', borderRadius: 3,
+                          border: '1px solid rgba(108, 140, 255, 0.5)',
+                          background: 'rgba(108, 140, 255, 0.12)', color: '#6c8cff',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {t('wifi.tunnel_use_this')}
+                      </button>
                     </div>
-                  </div>
-                )
+                  ))}
+                </div>
+              )}
+
+              {/* iOS 17+ WiFi Tunnel (RSD) — list of active tunnels + add form */}
+              {onStartWifiTunnel && (
+                <>
+                  {tunnels.length > 0 && (
+                    <div style={{ marginBottom: 8 }}>
+                      {tunnels.map((tn) => {
+                        const dev = devices.find((d) => d.id === tn.udid);
+                        const dispName = dev?.name || tn.udid.slice(0, 12);
+                        return (
+                          <div key={tn.udid} style={{
+                            fontSize: 11, padding: '6px 8px', marginBottom: 4,
+                            background: 'rgba(76, 175, 80, 0.08)',
+                            border: '1px solid rgba(76, 175, 80, 0.25)',
+                            borderRadius: 3,
+                            display: 'flex', alignItems: 'center', gap: 6,
+                          }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {dispName}
+                              </div>
+                              <div style={{ fontSize: 10, opacity: 0.6 }}>
+                                RSD {tn.rsd_address}:{tn.rsd_port}
+                              </div>
+                            </div>
+                            <button
+                              onClick={async () => { if (onStopTunnel) await onStopTunnel(tn.udid); }}
+                              style={{
+                                fontSize: 10, padding: '3px 8px', borderRadius: 3,
+                                border: '1px solid rgba(244, 67, 54, 0.45)',
+                                background: 'rgba(244, 67, 54, 0.08)', color: '#f44336',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {t('wifi.tunnel_stop')}
+                            </button>
+                          </div>
+                        );
+                      })}
+                      <div style={{ fontSize: 10, opacity: 0.55, marginTop: 4 }}>
+                        {t('wifi.tunnel_usb_can_disconnect')}
+                      </div>
+                    </div>
+                  )}
+
+                  {tunnels.length >= MAX_TUNNEL_DEVICES ? (
+                    <div style={{
+                      fontSize: 11, padding: '6px 8px', textAlign: 'center',
+                      opacity: 0.5,
+                      border: '1px dashed rgba(255,255,255,0.15)',
+                      borderRadius: 3,
+                    }}>
+                      {t('wifi.tunnel_max_reached', { max: MAX_TUNNEL_DEVICES })}
+                    </div>
+                  ) : (
+                    <div>
+                      {tunnels.length > 0 && (
+                        <div style={{ fontSize: 10, opacity: 0.55, marginBottom: 4, fontWeight: 600 }}>
+                          {t('wifi.tunnel_add_another')}
+                        </div>
+                      )}
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 4 }}>
+                        <span style={{ opacity: 0.7, width: 36 }}>IP</span>
+                        <input
+                          type="text" className="search-input"
+                          placeholder={t('wifi.ip_placeholder')}
+                          value={tunnelIp} onChange={(e) => setTunnelIp(e.target.value)}
+                          style={{ flex: 1, fontSize: 12 }} disabled={tunnelConnecting}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 6 }}>
+                        <span style={{ opacity: 0.7, width: 36 }}>Port</span>
+                        <input
+                          type="text" className="search-input" placeholder="49152"
+                          value={tunnelPort} onChange={(e) => setTunnelPort(e.target.value)}
+                          style={{ flex: 1, fontSize: 12 }} disabled={tunnelConnecting}
+                        />
+                      </label>
+                      <button
+                        className="action-btn primary"
+                        onClick={async () => {
+                          if (!tunnelIp.trim()) return;
+                          setTunnelConnecting(true); setTunnelError(null);
+                          try {
+                            await onStartWifiTunnel(tunnelIp.trim(), parseInt(tunnelPort) || 49152);
+                            localStorage.setItem('locwarp.tunnel.ip', tunnelIp.trim());
+                            localStorage.setItem('locwarp.tunnel.port', tunnelPort || '49152');
+                            setTunnelIp('');
+                          } catch (err: any) {
+                            setTunnelError(err.message || 'WiFi tunnel failed');
+                          } finally { setTunnelConnecting(false); }
+                        }}
+                        disabled={tunnelConnecting || !tunnelIp.trim()}
+                        style={{ width: '100%', fontSize: 12 }}
+                      >
+                        {tunnelConnecting ? (
+                          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}>
+                              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83" />
+                            </svg>
+                            {t('wifi.tunnel_establishing')}
+                          </span>
+                        ) : t('wifi.tunnel_start')}
+                      </button>
+                      {tunnelError && (
+                        <div style={{ fontSize: 11, color: '#f44336', marginTop: 4, padding: '4px 6px', background: 'rgba(244,67,54,0.1)', borderRadius: 3 }}>
+                          {tunnelError}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 10, opacity: 0.4, marginTop: 6 }}>
+                        {t('wifi.tunnel_admin_hint')}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
             </div>

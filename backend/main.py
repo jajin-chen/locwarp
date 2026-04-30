@@ -476,11 +476,11 @@ async def _usbmux_presence_watchdog():
                     logger.exception("watchdog: broadcast (disconnected) failed")
                 continue  # skip appearance logic this tick
 
-            # --- Appearance (auto-connect up to 2 devices, group mode) ---
-            # Auto-connect any USB device not yet connected, up to the dual-
+            # --- Appearance (auto-connect up to 3 devices, group mode) ---
+            # Auto-connect any USB device not yet connected, up to the multi-
             # device cap. The user environment is assumed to only ever have
             # their own iPhones plugged in.
-            MAX_DEVICES = 2
+            MAX_DEVICES = 3
             new_udids_lc = present_usb - connected
             if not new_udids_lc or len(connected) >= MAX_DEVICES:
                 continue

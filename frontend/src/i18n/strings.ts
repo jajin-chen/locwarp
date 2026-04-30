@@ -104,7 +104,7 @@ export const STRINGS = {
 
   // ── Device chip ──────────────────────────────
   'device.add_device': { zh: '新增裝置', en: 'Add device' },
-  'device.max_reached': { zh: '已連接最多 2 台', en: 'Maximum 2 devices connected' },
+  'device.max_reached': { zh: '已連接最多 3 台', en: 'Maximum 3 devices connected' },
   'device.chip_disconnect': { zh: '中斷此裝置', en: 'Disconnect this device' },
   'device.chip_restore': { zh: '還原此裝置', en: 'Restore this device' },
   'device.chip_enable_dev': { zh: '啟用開發者模式', en: 'Enable Developer Mode' },
@@ -228,6 +228,11 @@ export const STRINGS = {
   },
   'dev_mode.reveal_failed': { zh: '顯示開發者模式失敗', en: 'Reveal Developer Mode failed' },
   'wifi.tunnel_active': { zh: 'Active', en: 'Active' },
+  'wifi.tunnel_active_count': { zh: '使用中 ({n}/{max})', en: 'Active ({n}/{max})' },
+  'wifi.tunnel_add_another': { zh: '新增另一台', en: 'Add another' },
+  'wifi.tunnel_max_reached': { zh: '已達最大裝置數 ({max})', en: 'Maximum devices reached ({max})' },
+  'wifi.tunnel_detect_multiple': { zh: '找到 {n} 台,選擇要連的:', en: 'Found {n} iPhones, pick one to use:' },
+  'wifi.tunnel_use_this': { zh: '使用此台', en: 'Use this' },
   'wifi.tunnel_usb_can_disconnect': { zh: 'USB 可拔除', en: 'USB can be disconnected' },
   'wifi.tunnel_admin_hint': { zh: '請使用身分管理員開啟 LocWarp,必須先通過 USB 信任。', en: 'Run LocWarp as Administrator. Device must be paired via USB first.' },
   'wifi.legacy_connect': { zh: 'Connect', en: 'Connect' },
@@ -465,6 +470,7 @@ export const STRINGS = {
   // ── Device status extra ──────────────────────
   'device.connect_failed': { zh: '連線失敗', en: 'Connection failed' },
   'wifi.tunnel_lost_banner': { zh: 'WiFi Tunnel 連線中斷,請重新建立', en: 'Wi-Fi tunnel dropped, please reconnect' },
+  'wifi.tunnel_lost_banner_named': { zh: '{name} 的 WiFi Tunnel 中斷,請重新建立', en: "{name}'s Wi-Fi tunnel dropped, please reconnect" },
   'wifi.legacy_unavailable': { zh: 'iOS 17 以下連線方式目前不可用。', en: 'iOS 17 and below connection mode is not available.' },
 
   // ── Map extras ──────────────────────────────

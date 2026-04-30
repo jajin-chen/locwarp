@@ -36,11 +36,9 @@ export function toastForFanout<T>(
   const statusFor = (udid: string) =>
     outcome.ok.some((o) => o.udid === udid) ? 'OK'
       : outcome.failed.find((f) => f.udid === udid)?.reason ?? 'error'
-  return t('group.action_partial', {
-    action,
-    aStatus: devices[0] ? statusFor(devices[0].udid) : '-',
-    bStatus: devices[1] ? statusFor(devices[1].udid) : '-',
-  })
+  const letters = ['A', 'B', 'C']
+  const parts = devices.slice(0, 3).map((d, i) => `${letters[i]} ${statusFor(d.udid)}`)
+  return `${action}: ${parts.join(', ')}`
 }
 
 import { SimMode, MoveMode } from './hooks/useSimulation'
@@ -990,6 +988,7 @@ const App: React.FC = () => {
           onStartWifiTunnel={device.startWifiTunnel}
           onStopTunnel={device.stopTunnel}
           tunnelStatus={device.tunnelStatus}
+          tunnels={device.tunnels}
           onRevealDeveloperMode={async (udid: string) => {
             try {
               await api.amfiRevealDeveloperMode(udid)

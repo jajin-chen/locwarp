@@ -42,12 +42,12 @@ async def wifi_tunnel_connect(req: WifiTunnelConnectRequest):
     from main import app_state
     from core.device_manager import UnsupportedIosVersionError
     dm = _dm()
-    # Max 2 devices (group mode). connect_wifi_tunnel may reconnect an existing udid;
+    # Max 3 devices (group mode). connect_wifi_tunnel may reconnect an existing udid;
     # we can only cheaply check the pre-state here.
-    if len(dm._connections) >= 2:
+    if len(dm._connections) >= MAX_DEVICES:
         raise HTTPException(
             status_code=409,
-            detail={"code": "max_devices_reached", "message": "已連接最多 2 台裝置"},
+            detail={"code": "max_devices_reached", "message": f"已連接最多 {MAX_DEVICES} 台裝置"},
         )
     try:
         info = await dm.connect_wifi_tunnel(req.rsd_address, req.rsd_port)
@@ -96,12 +96,18 @@ from core.wifi_tunnel import TunnelRunner
 
 _tunnel_logger = logging.getLogger("wifi_tunnel")
 
-# In-process tunnel runner. Serialised by its own asyncio.Lock so concurrent
-# /start or /stop requests never race.
-_tunnel = TunnelRunner()
+# Group-mode device cap. Same value gates USB auto-connect, /wifi/tunnel,
+# /wifi/tunnel/start, /wifi/tunnel/start-and-connect, and /{udid}/connect.
+MAX_DEVICES = 3
 
-# Watchdog task handle (lives at module level since TunnelRunner is now shared).
-_tunnel_watchdog_task: asyncio.Task | None = None
+# Per-device tunnel registry. Each connected iOS 17+ device that uses
+# WiFi (instead of USB) gets its own TunnelRunner. v0.2.83 lifted the
+# previous singleton design so multiple iPhones can run on WiFi at once.
+# Registry mutations go through _tunnels_lock; individual TunnelRunners
+# also keep their own .lock for their own lifecycle (start/stop/wait).
+_tunnels: dict[str, TunnelRunner] = {}
+_tunnel_watchdogs: dict[str, asyncio.Task] = {}
+_tunnels_lock = asyncio.Lock()
 
 
 @router.post("/wifi/repair")
@@ -376,62 +382,84 @@ async def wifi_tunnel_discover():
     return {"devices": unique}
 
 
-async def _cleanup_wifi_connections(caller: str = "unknown") -> list[str]:
-    """Disconnect any Network devices + drop the simulation engine.
-    Broadcasts device_disconnected so the frontend banners/disables context
-    menu items immediately instead of waiting for the next failed action.
-    Returns the UDIDs that were disconnected."""
+async def _cleanup_wifi_connection_for(udid: str, *, caller: str) -> bool:
+    """Disconnect a single WiFi-connected device + drop its sim engine.
+    Broadcasts device_disconnected for that udid so the frontend chip
+    flips to disconnected. Returns True iff a Network connection was found
+    and torn down."""
     from main import app_state
+    dm = _dm()
+    conn = dm._connections.get(udid)
+    if conn is None or getattr(conn, "connection_type", "") != "Network":
+        return False
+    try:
+        await dm.disconnect(udid)
+        _tunnel_logger.info("[%s] Disconnected WiFi device %s", caller, udid)
+    except (OSError, RuntimeError):
+        _tunnel_logger.exception("[%s] Failed to disconnect %s", caller, udid)
+    app_state.simulation_engines.pop(udid, None)
+    if app_state._primary_udid == udid:
+        remaining = next(iter(app_state.simulation_engines.keys()), None)
+        app_state._primary_udid = remaining
+    try:
+        from api.websocket import broadcast
+        await broadcast("device_disconnected", {
+            "udid": udid,
+            "udids": [udid],
+            "reason": "wifi_tunnel_stopped",
+            "remaining_count": len(dm._connections),
+        })
+    except Exception:
+        _tunnel_logger.exception("[%s] WiFi cleanup broadcast failed", caller)
+    return True
+
+
+async def _cleanup_all_wifi_connections(caller: str = "unknown") -> list[str]:
+    """Disconnect every Network device + drop their sim engines. Used by
+    the legacy stop-all flow and shutdown paths."""
     import traceback
     dm = _dm()
-    udids: list[str] = []
-    # v0.2.59 diag: log who called us so we can tell whether the UI hit
-    # /wifi/tunnel/stop, the tunnel watchdog fired after grace, or some
-    # other path we missed. Include the top 5 stack frames (excluding this
-    # function itself) so we can see the full trigger chain.
     stack = traceback.extract_stack(limit=8)[:-1]
     stack_str = " <- ".join(f"{fr.name}@{fr.filename.split(chr(92))[-1]}:{fr.lineno}" for fr in reversed(stack))
     _tunnel_logger.warning(
-        "_cleanup_wifi_connections called (caller=%s); stack: %s",
+        "_cleanup_all_wifi_connections called (caller=%s); stack: %s",
         caller, stack_str,
     )
-    try:
-        udids = [
-            udid for udid, conn in list(dm._connections.items())
-            if getattr(conn, "connection_type", "") == "Network"
-        ]
-        for udid in udids:
-            try:
-                await dm.disconnect(udid)
-                _tunnel_logger.info("Disconnected WiFi device %s", udid)
-            except (OSError, RuntimeError):
-                _tunnel_logger.exception("Failed to disconnect %s", udid)
-        for udid in udids:
-            app_state.simulation_engines.pop(udid, None)
-            if app_state._primary_udid == udid:
-                remaining = next(iter(app_state.simulation_engines.keys()), None)
-                app_state._primary_udid = remaining
-        if udids:
-            try:
-                from api.websocket import broadcast
-                await broadcast("device_disconnected", {
-                    "udids": udids,
-                    "reason": "wifi_tunnel_stopped",
-                    "remaining_count": len(dm._connections),
-                })
-            except Exception:
-                _tunnel_logger.exception("WiFi cleanup: broadcast failed")
-    except Exception:
-        _tunnel_logger.exception("WiFi cleanup step failed")
+    udids = [
+        udid for udid, conn in list(dm._connections.items())
+        if getattr(conn, "connection_type", "") == "Network"
+    ]
+    for udid in udids:
+        await _cleanup_wifi_connection_for(udid, caller=caller)
     return udids
 
 
-async def _tunnel_watchdog(task: asyncio.Task) -> None:
-    """Watch the tunnel task; if it dies unexpectedly (WiFi blip, iPhone
-    locked, admin revoked), clean up any dependent WiFi connections so the
-    UI can recover gracefully. A 5s grace window allows the user to restart
-    the tunnel before we tear down engines."""
+async def _tear_down_tunnel(udid: str, *, caller: str) -> None:
+    """Cancel this udid's watchdog (if any) and stop the runner. Caller
+    decides whether to also clean up the DM connection."""
+    wd = _tunnel_watchdogs.pop(udid, None)
+    if wd is not None and not wd.done():
+        wd.cancel()
+        try:
+            await wd
+        except (asyncio.CancelledError, Exception):
+            pass
+    runner = _tunnels.pop(udid, None)
+    if runner is not None:
+        try:
+            await runner.stop()
+        except Exception:
+            _tunnel_logger.exception("[%s] runner.stop failed for %s", caller, udid)
+
+
+async def _per_tunnel_watchdog(udid: str, runner: TunnelRunner) -> None:
+    """Watch a single device's tunnel. If the runner's task dies (WiFi
+    blip, iPhone locked, admin revoked), give 5s grace then tear down
+    only this device's WiFi connection. Other tunnels continue running."""
     try:
+        task = runner.task
+        if task is None:
+            return
         try:
             await task
         except asyncio.CancelledError:
@@ -439,51 +467,67 @@ async def _tunnel_watchdog(task: asyncio.Task) -> None:
         except BaseException:
             pass
 
-        # Task has ended. If stop() already cleared _tunnel.task, this was an
-        # explicit shutdown — nothing to do.
-        if _tunnel.task is not task:
+        # If the registry was already updated (explicit stop, re-key on
+        # reconnect, etc.) this watchdog is stale.
+        if _tunnels.get(udid) is not runner:
             return
 
-        _tunnel_logger.warning("Tunnel task exited unexpectedly; 5s grace period")
+        _tunnel_logger.warning("Tunnel for %s exited unexpectedly; 5s grace", udid)
         try:
             from api.websocket import broadcast
-            await broadcast("tunnel_degraded", {"reason": "task_exited"})
+            await broadcast("tunnel_degraded", {"udid": udid, "reason": "task_exited"})
         except Exception:
             _tunnel_logger.exception("Failed to emit tunnel_degraded event")
 
         await asyncio.sleep(5.0)
 
-        async with _tunnel.lock:
-            if _tunnel.is_running() and _tunnel.task is not task:
-                _tunnel_logger.info("Tunnel recovered within grace period")
+        async with _tunnels_lock:
+            current = _tunnels.get(udid)
+            if current is not runner:
+                # Replaced or removed during grace; nothing to do.
+                return
+            if current.is_running():
+                _tunnel_logger.info("Tunnel for %s recovered within grace period", udid)
                 try:
                     from api.websocket import broadcast
-                    await broadcast("tunnel_recovered", {})
+                    await broadcast("tunnel_recovered", {"udid": udid})
                 except Exception:
                     pass
                 return
-            if _tunnel.task is task or _tunnel.task is None:
-                await _cleanup_wifi_connections(caller="_tunnel_watchdog_task_exited")
-                _tunnel.task = None
-                _tunnel.info = None
-                try:
-                    from api.websocket import broadcast
-                    await broadcast("tunnel_lost", {"reason": "task_exited"})
-                except Exception:
-                    _tunnel_logger.exception("Failed to emit tunnel_lost event")
+            # Final teardown for this udid only.
+            _tunnels.pop(udid, None)
+            wd = _tunnel_watchdogs.pop(udid, None)
+            if wd is not None and wd is not asyncio.current_task() and not wd.done():
+                wd.cancel()
+            await _cleanup_wifi_connection_for(udid, caller="watchdog_tunnel_died")
+            try:
+                from api.websocket import broadcast
+                await broadcast("tunnel_lost", {"udid": udid, "reason": "task_exited"})
+            except Exception:
+                _tunnel_logger.exception("Failed to emit tunnel_lost event")
     except asyncio.CancelledError:
         raise
 
 
 @router.post("/wifi/tunnel/start")
 async def wifi_tunnel_start(req: WifiTunnelStartRequest):
-    """Start an in-process WiFi tunnel (requires admin)."""
-    global _tunnel_watchdog_task
-    async with _tunnel.lock:
-        if _tunnel.is_running():
-            if _tunnel.info:
-                return {"status": "already_running", **_tunnel.info}
-            return {"status": "already_running"}
+    """Start an in-process WiFi tunnel for one device (requires admin).
+
+    The runner is keyed in _tunnels by udid_hint (req.udid) when provided.
+    If absent, a temp key is used; /wifi/tunnel/start-and-connect will re-
+    key it under the real udid once the RSD handshake reveals the device
+    identity. The tunnel cap is enforced separately from the device cap
+    so we don't accidentally start a 4th tunnel while only 3 devices are
+    visible to dm._connections."""
+    async with _tunnels_lock:
+        # Active runners count toward the cap. Stale entries get pruned
+        # so a crashed tunnel doesn't permanently block reconnect.
+        live_count = sum(1 for r in _tunnels.values() if r.is_running())
+        if live_count >= MAX_DEVICES:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "max_devices_reached", "message": f"已連接最多 {MAX_DEVICES} 台裝置"},
+            )
 
         resolved_udid = req.udid
         if not resolved_udid:
@@ -495,15 +539,23 @@ async def wifi_tunnel_start(req: WifiTunnelStartRequest):
             except (RuntimeError, AttributeError):
                 pass
         if not resolved_udid:
-            resolved_udid = "auto"
+            resolved_udid = f"pending:{req.ip}:{req.port}"
+
+        existing = _tunnels.get(resolved_udid)
+        if existing is not None and existing.is_running():
+            return {"status": "already_running", "udid": resolved_udid, **(existing.info or {})}
+        if existing is not None:
+            # Stale entry — clean it up before reusing the key.
+            await _tear_down_tunnel(resolved_udid, caller="start_replace_stale")
 
         _tunnel_logger.info(
             "Starting WiFi tunnel: udid=%s ip=%s port=%d",
             resolved_udid, req.ip, req.port,
         )
 
+        runner = TunnelRunner()
         try:
-            info = await _tunnel.start(resolved_udid, req.ip, req.port, timeout=20.0)
+            info = await runner.start(resolved_udid, req.ip, req.port, timeout=20.0)
         except asyncio.TimeoutError:
             raise HTTPException(
                 status_code=500,
@@ -515,78 +567,86 @@ async def wifi_tunnel_start(req: WifiTunnelStartRequest):
                 detail={"code": "tunnel_spawn_failed", "message": f"無法啟動 tunnel:{e}"},
             )
 
-        _tunnel_logger.info("WiFi tunnel started: %s", info)
-        if _tunnel_watchdog_task is None or _tunnel_watchdog_task.done():
-            _tunnel_watchdog_task = asyncio.create_task(_tunnel_watchdog(_tunnel.task))
-        return {"status": "started", **info}
+        _tunnels[resolved_udid] = runner
+        _tunnel_watchdogs[resolved_udid] = asyncio.create_task(
+            _per_tunnel_watchdog(resolved_udid, runner)
+        )
+        _tunnel_logger.info("WiFi tunnel started for %s: %s", resolved_udid, info)
+        return {"status": "started", "udid": resolved_udid, **info}
 
 
 @router.get("/wifi/tunnel/status")
 async def wifi_tunnel_status():
-    """Check if the WiFi tunnel is running."""
-    if not _tunnel.is_running():
-        _tunnel.info = None
-        return {"running": False}
-    return {"running": True, **(_tunnel.info or {})}
+    """Return all active WiFi tunnels with their RSD info.
+
+    The response shape is forward-compatible: the canonical payload is
+    `{"tunnels": [{"udid", "rsd_address", "rsd_port", ...}, ...]}`. Legacy
+    fields (`running`, `rsd_address`, `rsd_port`) mirror the FIRST tunnel
+    so older single-tunnel callers keep working until they migrate."""
+    tunnels: list[dict] = []
+    for udid, runner in list(_tunnels.items()):
+        if not runner.is_running():
+            continue
+        tunnels.append({"udid": udid, **(runner.info or {})})
+
+    legacy = {"running": len(tunnels) > 0}
+    if tunnels:
+        legacy.update({k: v for k, v in tunnels[0].items() if k != "udid"})
+    return {"tunnels": tunnels, **legacy}
+
+
+class WifiTunnelStopRequest(BaseModel):
+    udid: str | None = None  # None = stop ALL tunnels (legacy stop-all path)
 
 
 @router.post("/wifi/tunnel/stop")
-async def wifi_tunnel_stop():
-    """Stop the WiFi tunnel and clean up any network-based device
-    connections that were routed through it."""
-    global _tunnel_watchdog_task
-    from main import app_state
+async def wifi_tunnel_stop(req: WifiTunnelStopRequest | None = None):
+    """Stop a specific WiFi tunnel by udid, or all if udid is None.
+
+    Per-udid stop tears down only the named tunnel and its DM
+    connection — other tunnels keep running. The legacy stop-all path
+    (no udid) preserves prior single-tunnel behaviour for callers that
+    haven't migrated yet."""
+    target_udid = req.udid if req else None
     dm = _dm()
 
-    # v0.2.59 diag: log every hit of this endpoint so we can tell if the
-    # UI is unexpectedly POSTing /wifi/tunnel/stop. Include tunnel state
-    # at entry for context.
     _tunnel_logger.warning(
-        "/wifi/tunnel/stop endpoint hit. tunnel.is_running()=%s, network_conns=%d",
-        _tunnel.is_running(),
+        "/wifi/tunnel/stop endpoint hit. target_udid=%s, active_tunnels=%d, network_conns=%d",
+        target_udid,
+        sum(1 for r in _tunnels.values() if r.is_running()),
         sum(1 for c in dm._connections.values() if getattr(c, "connection_type", "") == "Network"),
     )
 
-    # Snapshot which udids were in WiFi conn BEFORE cleanup so the USB
-    # fallback below only targets those specific devices. Without this
-    # snapshot the fallback used to pick any USB-looking device from
-    # discover_devices() and auto-reconnect it, which broke the dual-
-    # device "switch WiFi target from A to B, then stop" flow — A was
-    # still plugged USB, got grabbed by the fallback, and the user saw
-    # their "closed" device pop back up.
-    was_network_udids = [
-        udid for udid, conn in dm._connections.items()
-        if getattr(conn, "connection_type", "") == "Network"
-    ]
+    async with _tunnels_lock:
+        if target_udid is not None:
+            if target_udid not in _tunnels and target_udid not in dm._connections:
+                return {"status": "not_running", "udid": target_udid}
+            udids_to_stop = [target_udid]
+        else:
+            # Stop everything: union of registered tunnels and any orphan
+            # WiFi connections (defensive — shouldn't normally happen).
+            udids_to_stop = list({
+                *_tunnels.keys(),
+                *(udid for udid, c in dm._connections.items()
+                  if getattr(c, "connection_type", "") == "Network"),
+            })
 
-    async with _tunnel.lock:
-        await _cleanup_wifi_connections(caller="wifi_tunnel_stop_endpoint")
-
-        if not _tunnel.is_running():
-            _tunnel.info = None
-            _tunnel.task = None
+        if not udids_to_stop:
             return {"status": "not_running"}
 
-        # Cancel watchdog first so it doesn't race on our cleanup
-        if _tunnel_watchdog_task and not _tunnel_watchdog_task.done():
-            _tunnel_watchdog_task.cancel()
-            _tunnel_watchdog_task = None
+        # Snapshot for the USB fallback step below: only re-attach via USB
+        # the udids that just had a WiFi conn here, AND skip pending: keys
+        # which were only ever placeholders.
+        was_network_udids = [u for u in udids_to_stop if not u.startswith("pending:")]
 
-        try:
-            await _tunnel.stop()
-        except Exception:
-            _tunnel_logger.exception("Failed to stop tunnel task cleanly")
+        for udid in udids_to_stop:
+            await _cleanup_wifi_connection_for(udid, caller="wifi_tunnel_stop_endpoint")
+            await _tear_down_tunnel(udid, caller="wifi_tunnel_stop_endpoint")
 
-    # Try to fall back to USB for ONLY the udids that were just in the
-    # WiFi tunnel. Previously this grabbed any discover_devices entry
-    # whose connection_type wasn't "Network", which misfired in two
-    # ways: it could re-attach a phone the user never asked to use
-    # (other plugged iPhone), and a just-disconnected WiFi-paired phone
-    # could still be visible as non-Network during the ms-scale race
-    # and get reconnected via Network anyway. Require (a) the udid
-    # was actually in the WiFi conn we just tore down AND (b) it
-    # shows as "USB" in usbmuxd right now.
+    # USB fallback: only re-attach udids that were just in WiFi AND show
+    # up as USB right now (covers users plugging in a cable mid-stop).
     try:
+        from main import app_state
         devices = await dm.discover_devices()
         for udid in was_network_udids:
             usb_dev = next(
@@ -605,8 +665,6 @@ async def wifi_tunnel_stop():
                 _tunnel_logger.exception("USB fallback: connect failed for %s", usb_dev.udid)
                 continue
             try:
-                # v0.2.60: drop stale WiFi engine so the new one binds
-                # to the fresh USB lockdown.
                 app_state.simulation_engines.pop(usb_dev.udid, None)
                 await app_state.create_engine_for_device(usb_dev.udid)
                 _tunnel_logger.info("Switched back to USB connection: %s", usb_dev.udid)
@@ -635,31 +693,46 @@ async def wifi_tunnel_stop():
     except Exception:
         _tunnel_logger.exception("USB fallback after tunnel stop failed")
 
-    return {"status": "stopped"}
+    return {"status": "stopped", "udids": udids_to_stop}
 
 
 @router.post("/wifi/tunnel/start-and-connect")
 async def wifi_tunnel_start_and_connect(req: WifiTunnelStartRequest):
-    """Start a WiFi tunnel and immediately connect the device through it."""
+    """Start a WiFi tunnel and immediately connect the device through it.
+
+    Re-keys the runner from any temporary IP-based key to the real udid
+    after dm.connect_wifi_tunnel reveals the device identity. This is the
+    primary entrypoint the frontend uses; /start and /wifi/tunnel exist as
+    separate primitives but are not chained from the UI today."""
     from main import app_state
 
-    # Start the tunnel
+    # Cap check before we even spawn a runner. Counts active runners,
+    # not dm._connections — a tunnel that's mid-handshake but not yet
+    # registered as a device connection still consumes a slot.
+    async with _tunnels_lock:
+        live_count = sum(1 for r in _tunnels.values() if r.is_running())
+        if live_count >= MAX_DEVICES:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "max_devices_reached", "message": f"已連接最多 {MAX_DEVICES} 台裝置"},
+            )
+
     tunnel_result = await wifi_tunnel_start(req)
     if tunnel_result.get("status") not in ("started", "already_running"):
         raise HTTPException(status_code=500, detail="Tunnel failed to start")
 
     rsd_address = tunnel_result.get("rsd_address")
     rsd_port = tunnel_result.get("rsd_port")
+    temp_key = tunnel_result.get("udid")
 
     if not rsd_address or not rsd_port:
         raise HTTPException(status_code=500, detail="Tunnel started but no RSD info available")
 
-    # Connect through the tunnel
     dm = _dm()
-    if len(dm._connections) >= 2:
+    if len(dm._connections) >= MAX_DEVICES:
         raise HTTPException(
             status_code=409,
-            detail={"code": "max_devices_reached", "message": "已連接最多 2 台裝置"},
+            detail={"code": "max_devices_reached", "message": f"已連接最多 {MAX_DEVICES} 台裝置"},
         )
     try:
         info = await dm.connect_wifi_tunnel(rsd_address, rsd_port)
@@ -675,6 +748,32 @@ async def wifi_tunnel_start_and_connect(req: WifiTunnelStartRequest):
         # kicked as device_lost within 8 seconds of the WiFi switch.
         app_state.simulation_engines.pop(info.udid, None)
         await app_state.create_engine_for_device(info.udid)
+
+        # Re-key the runner from temp_key (often "pending:ip:port") to
+        # the real udid so per-udid stop / status / watchdog keep working.
+        if temp_key and temp_key != info.udid:
+            async with _tunnels_lock:
+                runner = _tunnels.pop(temp_key, None)
+                old_wd = _tunnel_watchdogs.pop(temp_key, None)
+                if old_wd is not None and not old_wd.done():
+                    old_wd.cancel()
+                if runner is not None and runner.is_running():
+                    # Replace any pre-existing entry under the real udid
+                    # (defensive — shouldn't happen in normal flow).
+                    prior = _tunnels.pop(info.udid, None)
+                    if prior is not None and prior is not runner:
+                        try:
+                            await prior.stop()
+                        except Exception:
+                            pass
+                    prior_wd = _tunnel_watchdogs.pop(info.udid, None)
+                    if prior_wd is not None and not prior_wd.done():
+                        prior_wd.cancel()
+                    _tunnels[info.udid] = runner
+                    _tunnel_watchdogs[info.udid] = asyncio.create_task(
+                        _per_tunnel_watchdog(info.udid, runner)
+                    )
+
         return {
             "status": "connected",
             "udid": info.udid,
@@ -685,6 +784,14 @@ async def wifi_tunnel_start_and_connect(req: WifiTunnelStartRequest):
             "rsd_port": rsd_port,
         }
     except Exception as e:
+        # On failure, tear down the runner we just started so we don't
+        # leave a zombie tunnel + leaked watchdog.
+        if temp_key:
+            try:
+                async with _tunnels_lock:
+                    await _tear_down_tunnel(temp_key, caller="start_and_connect_failed")
+            except Exception:
+                pass
         raise HTTPException(status_code=500, detail=f"Tunnel started but connection failed: {e}")
 
 
@@ -768,11 +875,11 @@ async def connect_device(udid: str):
     from main import app_state
     from core.device_manager import UnsupportedIosVersionError
     dm = _dm()
-    # Max 2 devices (group mode). Allow re-connect of an already-connected udid.
-    if udid not in dm._connections and len(dm._connections) >= 2:
+    # Group-mode device cap. Allow re-connect of an already-connected udid.
+    if udid not in dm._connections and len(dm._connections) >= MAX_DEVICES:
         raise HTTPException(
             status_code=409,
-            detail={"code": "max_devices_reached", "message": "已連接最多 2 台裝置"},
+            detail={"code": "max_devices_reached", "message": f"已連接最多 {MAX_DEVICES} 台裝置"},
         )
     try:
         await dm.connect(udid)

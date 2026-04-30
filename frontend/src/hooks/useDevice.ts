@@ -3,6 +3,7 @@ import {
   listDevices, connectDevice, disconnectDevice,
   wifiConnect, wifiScan,
   wifiTunnelStartAndConnect, wifiTunnelStatus, wifiTunnelStop,
+  type TunnelInfo,
 } from '../services/api'
 import type { WsMessage } from './useWebSocket'
 
@@ -197,7 +198,15 @@ export function useDevice(subscribe?: WsSubscribe) {
     }
   }, [])
 
-  const [tunnelStatus, setTunnelStatus] = useState<{ running: boolean; rsd_address?: string; rsd_port?: number }>({ running: false })
+  // v0.2.83: WiFi tunnel state went from a singleton to a per-device list.
+  // Each connected iOS 17+ WiFi device gets its own runner on the backend;
+  // `tunnels` mirrors that list. `tunnelStatus` is kept as a derived
+  // singleton (mirrors first tunnel) for any leftover single-tunnel callers
+  // until they migrate.
+  const [tunnels, setTunnels] = useState<TunnelInfo[]>([])
+  const tunnelStatus = tunnels.length > 0
+    ? { running: true, rsd_address: tunnels[0].rsd_address, rsd_port: tunnels[0].rsd_port }
+    : { running: false }
 
   const startWifiTunnel = useCallback(
     async (ip: string, port = 49152) => {
@@ -215,7 +224,14 @@ export function useDevice(subscribe?: WsSubscribe) {
           const filtered = prev.filter((d) => d.udid !== info.udid)
           return [...filtered, info]
         })
-        setTunnelStatus({ running: true, rsd_address: res.rsd_address, rsd_port: res.rsd_port })
+        setTunnels((prev) => {
+          const filtered = prev.filter((tn) => tn.udid !== res.udid)
+          return [...filtered, {
+            udid: res.udid,
+            rsd_address: res.rsd_address,
+            rsd_port: res.rsd_port,
+          }]
+        })
         return info
       } catch (err) {
         console.error('WiFi tunnel failed:', err)
@@ -228,18 +244,23 @@ export function useDevice(subscribe?: WsSubscribe) {
   const checkTunnelStatus = useCallback(async () => {
     try {
       const res = await wifiTunnelStatus()
-      setTunnelStatus(res)
+      setTunnels(Array.isArray(res?.tunnels) ? res.tunnels : [])
       return res
     } catch {
-      setTunnelStatus({ running: false })
-      return { running: false }
+      setTunnels([])
+      return { tunnels: [], running: false }
     }
   }, [])
 
-  const stopTunnel = useCallback(async () => {
+  // udid: stop one specific tunnel; omit to stop all.
+  const stopTunnel = useCallback(async (udid?: string) => {
     try {
-      await wifiTunnelStop()
-      setTunnelStatus({ running: false })
+      await wifiTunnelStop(udid)
+      if (udid) {
+        setTunnels((prev) => prev.filter((tn) => tn.udid !== udid))
+      } else {
+        setTunnels([])
+      }
     } catch (err) {
       console.error('Failed to stop tunnel:', err)
     }
@@ -276,7 +297,7 @@ export function useDevice(subscribe?: WsSubscribe) {
   return {
     devices, connectedDevice, scanning, scan, connect, disconnect,
     connectWifi, scanWifi, wifiScanning, wifiDevices,
-    startWifiTunnel, checkTunnelStatus, stopTunnel, tunnelStatus,
+    startWifiTunnel, checkTunnelStatus, stopTunnel, tunnelStatus, tunnels,
     connectedDevices, primaryDevice,
   }
 }
