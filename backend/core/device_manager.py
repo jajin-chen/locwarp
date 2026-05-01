@@ -31,7 +31,9 @@ from pymobiledevice3.services.dvt.instruments.location_simulation import Locatio
 from pymobiledevice3.services.simulate_location import DtSimulateLocation
 from pymobiledevice3.usbmux import list_devices
 
+from config import DEVICE_NAMES_FILE
 from models.schemas import DeviceInfo
+from services.json_safe import safe_load_json, safe_write_json
 from services.location_service import (
     DvtLocationService,
     LegacyLocationService,
@@ -61,6 +63,32 @@ def _parse_ios_version(version_string: str) -> tuple[int, ...]:
     except (ValueError, AttributeError):
         logger.warning("Unable to parse iOS version '%s', assuming 0.0", version_string)
         return (0, 0)
+
+
+def _load_device_name_cache() -> Dict[str, str]:
+    """Load the persisted UDID → DeviceName map. Returns empty dict on any failure."""
+    raw = safe_load_json(DEVICE_NAMES_FILE)
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items() if isinstance(v, str) and v}
+
+
+def _remember_device_name(udid: str, name: str) -> None:
+    """Persist a real DeviceName for *udid* if it isn't a generic fallback.
+
+    The cache only stores user-set names. We deliberately skip the
+    DeviceClass fallback ("iPhone") and "Unknown" so a once-known real
+    name isn't overwritten by a later degraded read.
+    """
+    if not udid or not name:
+        return
+    if name in ("iPhone", "iPad", "iPod touch", "Unknown"):
+        return
+    cache = _load_device_name_cache()
+    if cache.get(udid) == name:
+        return
+    cache[udid] = name
+    safe_write_json(DEVICE_NAMES_FILE, cache)
 
 
 @dataclass
@@ -142,9 +170,11 @@ class DeviceManager:
                 active_conn = self._connections.get(raw.serial)
                 if active_conn:
                     conn_type = active_conn.connection_type
+                device_name = all_values.get("DeviceName", "Unknown")
+                _remember_device_name(raw.serial, device_name)
                 info = DeviceInfo(
                     udid=raw.serial,
-                    name=all_values.get("DeviceName", "Unknown"),
+                    name=device_name,
                     ios_version=all_values.get("ProductVersion", "0.0"),
                     connection_type=conn_type,
                 )
@@ -239,6 +269,7 @@ class DeviceManager:
 
         ios_version_str: str = lockdown.all_values.get("ProductVersion", "0.0")
         device_name: str = lockdown.all_values.get("DeviceName", "iPhone")
+        _remember_device_name(udid, device_name)
         ver = _parse_ios_version(ios_version_str)
 
         if ver < (16, 0):
@@ -641,14 +672,31 @@ class DeviceManager:
         props = peer.get("Properties", {})
         udid = props.get("UniqueDeviceID", "")
         ios_version_str = props.get("OSVersion", "0.0")
-        # peer_info usually only carries DeviceClass ("iPhone") not the
-        # user's actual DeviceName. If we already have a USB conn for this
-        # udid, preserve its real name across the USB→WiFi switch so the
-        # device chip / status bar keeps showing the user's chosen name.
-        device_name = props.get("DeviceClass", "iPhone")
-        existing = self._connections.get(udid)
-        if existing is not None and existing.name and existing.name != "iPhone":
-            device_name = existing.name
+        # peer_info["Properties"] only carries DeviceClass ("iPhone"), not
+        # the user-set DeviceName ("Ivy's iPhone"). RSD.connect() already
+        # opens a lockdown service over the tunnel internally and exposes
+        # the result as rsd.all_values, so the live DeviceName is right
+        # there for free. We still keep two fallbacks for the edge case
+        # where the lockdown sub-service failed (e.g. RemoteXPC variants
+        # that don't advertise it): a still-active USB conn's cached name,
+        # then the persisted ~/.locwarp/device_names.json populated
+        # whenever USB or discovery saw a real DeviceName.
+        all_values = getattr(rsd, "all_values", None) or {}
+        device_name = all_values.get("DeviceName") or ""
+        if not device_name:
+            existing = self._connections.get(udid)
+            if existing is not None and existing.name and existing.name != "iPhone":
+                device_name = existing.name
+        if not device_name:
+            cached = _load_device_name_cache().get(udid)
+            if cached:
+                device_name = cached
+        if not device_name:
+            device_name = props.get("DeviceClass", "iPhone")
+        # Live DeviceName from the WiFi tunnel is just as authoritative as
+        # USB, so feed it back into the persistent cache too — covers the
+        # "user renamed the device since last USB plug" case.
+        _remember_device_name(udid, device_name)
 
         if udid in self._connections:
             await self.disconnect(udid)
