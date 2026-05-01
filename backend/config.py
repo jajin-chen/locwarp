@@ -9,7 +9,7 @@ BOOKMARKS_FILE = DATA_DIR / "bookmarks.json"
 ROUTES_FILE = DATA_DIR / "routes.json"
 RECENT_PLACES_FILE = DATA_DIR / "recent_places.json"
 # Persisted UDID → DeviceName cache. Populated whenever USB / usbmuxd
-# exposes the user's actual DeviceName ("Ivy's iPhone") so a later
+# exposes the user's actual DeviceName (e.g. "My iPhone") so a later
 # WiFi-only session — where peer_info only carries DeviceClass ("iPhone")
 # — can still display the user's chosen name.
 DEVICE_NAMES_FILE = DATA_DIR / "device_names.json"

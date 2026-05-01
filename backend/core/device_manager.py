@@ -673,7 +673,7 @@ class DeviceManager:
         udid = props.get("UniqueDeviceID", "")
         ios_version_str = props.get("OSVersion", "0.0")
         # peer_info["Properties"] only carries DeviceClass ("iPhone"), not
-        # the user-set DeviceName ("Ivy's iPhone"). RSD.connect() already
+        # the user-set DeviceName (e.g. "My iPhone"). RSD.connect() already
         # opens a lockdown service over the tunnel internally and exposes
         # the result as rsd.all_values, so the live DeviceName is right
         # there for free. We still keep two fallbacks for the edge case
