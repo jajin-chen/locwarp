@@ -61,11 +61,18 @@
     padding: 5px 10px; font-size: 12px; line-height: 1; backdrop-filter: blur(8px);
     display: inline-flex; align-items: center; gap: 6px;
   }
-  #topbar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  #topbar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
   #topbar .dot.off { background: var(--danger); }
   #topbar .dot.busy { background: var(--warn); }
-  #topbar .device { color: var(--muted); font-size: 11px; }
   #topbar .mode-pill { color: var(--accent); font-size: 11px; background: var(--accent-soft); border-color: rgba(108,140,255,0.4); }
+  #topbar .device-pills {
+    pointer-events: auto;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  }
+  #topbar .dev-name { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #topbar .dev-state { color: var(--muted); font-size: 10px; margin-left: 2px; }
+  #topbar .pill.no-device { color: var(--muted); }
+  #topbar .pill.is-primary { border-color: rgba(108,140,255,0.45); }
 
   /* PIN gate */
   #gate {
@@ -252,9 +259,8 @@
 <div id="map"></div>
 
 <div id="topbar">
-  <span class="pill"><span class="dot off" id="dot"></span><span id="state-label">未連線</span></span>
   <span class="pill mode-pill" id="action-mode-pill" style="display:none"></span>
-  <span class="pill device" id="device-label" style="display:none"></span>
+  <span id="device-pills" class="device-pills"></span>
 </div>
 
 <div id="actions">
@@ -573,61 +579,77 @@
   // yet" without an extra HTTP round-trip per user click.
   let lastStatus = null;
   let lastState = '';
+  const STATE_LABEL = {
+    idle: '待命', teleporting: '跳點中', navigating: '導航中',
+    looping: '循環中', joystick: '搖桿', random_walk: '隨機漫遊',
+    multi_stop: '多點', paused: '暫停', reconnecting: '重連中',
+    disconnected: '已斷線',
+  };
+  const pillsHost = document.getElementById('device-pills');
+
+  function renderDevicePills(devices) {
+    pillsHost.innerHTML = '';
+    if (!devices || devices.length === 0) {
+      const pill = document.createElement('span');
+      pill.className = 'pill no-device';
+      pill.innerHTML = '<span class="dot off"></span><span>未連接 iPhone</span>';
+      pillsHost.appendChild(pill);
+      return;
+    }
+    // Stable ordering: primary first, then the rest in original order.
+    const ordered = [...devices].sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0));
+    ordered.forEach((d) => {
+      const pill = document.createElement('span');
+      pill.className = 'pill' + (d.is_primary ? ' is-primary' : '');
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      const busy = d.state && d.state !== 'idle' && d.state !== 'teleporting' && d.state !== 'disconnected';
+      const offline = !d.state || d.state === 'disconnected';
+      if (offline) dot.classList.add('off');
+      else if (busy) dot.classList.add('busy');
+      pill.appendChild(dot);
+      const name = document.createElement('span');
+      name.className = 'dev-name';
+      name.textContent = d.name || d.udid.slice(0, 8);
+      pill.appendChild(name);
+      const state = document.createElement('span');
+      state.className = 'dev-state';
+      state.textContent = '· ' + (STATE_LABEL[d.state] || d.state || '?');
+      pill.appendChild(state);
+      pillsHost.appendChild(pill);
+    });
+  }
+
   async function pollStatus() {
     try {
       const s = await api('/api/phone/status');
       lastStatus = s;
-      const dot = document.getElementById('dot');
-      const lbl = document.getElementById('state-label');
-      const dev = document.getElementById('device-label');
-      if (!s.connected) {
-        dot.classList.add('off'); dot.classList.remove('busy');
-        lbl.textContent = '未連接 iPhone';
-        dev.style.display = 'none';
-      } else {
-        dot.classList.remove('off');
-        const busy = s.state && s.state !== 'idle' && s.state !== 'teleporting' && s.state !== 'disconnected';
-        dot.classList.toggle('busy', !!busy);
-        const stateMap = {
-          idle: '待命', teleporting: '跳點中', navigating: '導航中',
-          looping: '循環中', joystick: '搖桿', random_walk: '隨機漫遊',
-          multi_stop: '多點', paused: '暫停', reconnecting: '重連中',
-          disconnected: '已斷線',
-        };
-        lbl.textContent = stateMap[s.state] || s.state;
-        if (s.devices && s.devices.length) {
-          const d = s.devices[0];
-          dev.textContent = (d.name || d.udid.slice(0, 8)) + ' · ' + (d.connection_type || '').toLowerCase();
-          dev.style.display = '';
-        } else {
-          dev.style.display = 'none';
-        }
-        if (s.current_position) {
-          // Suppress the green pin if this position is the same one we
-          // restored from — backend keeps current_position post-restore
-          // so a re-start has a starting point, but visually the user
-          // expects the pin gone until they teleport / navigate again.
-          const cp = s.current_position;
-          const isRestored = restoredPos &&
-            Math.abs(restoredPos.lat - cp.lat) < 1e-7 &&
-            Math.abs(restoredPos.lng - cp.lng) < 1e-7;
-          if (isRestored) {
-            clearCurrentPin();
-          } else {
-            restoredPos = null;
-            setCurrentPin(cp.lat, cp.lng);
-            if (lastState !== s.state && (s.state === 'teleporting' || s.state === 'idle')) {
-              map.setView([cp.lat, cp.lng], Math.max(map.getZoom(), 15));
-            }
-          }
-        } else {
+      renderDevicePills(s.devices || []);
+      if (s.connected && s.current_position) {
+        // Suppress the green pin if this position is the same one we
+        // restored from — backend keeps current_position post-restore
+        // so a re-start has a starting point, but visually the user
+        // expects the pin gone until they teleport / navigate again.
+        const cp = s.current_position;
+        const isRestored = restoredPos &&
+          Math.abs(restoredPos.lat - cp.lat) < 1e-7 &&
+          Math.abs(restoredPos.lng - cp.lng) < 1e-7;
+        if (isRestored) {
           clearCurrentPin();
+        } else {
+          restoredPos = null;
+          setCurrentPin(cp.lat, cp.lng);
+          if (lastState !== s.state && (s.state === 'teleporting' || s.state === 'idle')) {
+            map.setView([cp.lat, cp.lng], Math.max(map.getZoom(), 15));
+          }
         }
-        // Polyline mirrors what the desktop UI shows. Cleared by the
-        // backend when the sim stops, so checking truthy is enough —
-        // no client-side state-machine to expire it.
-        setRoutePath(s.route_path);
+      } else {
+        clearCurrentPin();
       }
+      // Polyline mirrors what the desktop UI shows. Cleared by the
+      // backend when the sim stops, so checking truthy is enough —
+      // no client-side state-machine to expire it.
+      setRoutePath(s.route_path);
       lastState = s.state;
     } catch (e) { /* silently */ }
   }

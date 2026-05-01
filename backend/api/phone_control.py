@@ -228,21 +228,36 @@ async def phone_status(
     x_locwarp_token: str | None = Header(default=None, alias="X-LocWarp-Token"),
     t: str | None = None,
 ):
+    """Per-device status snapshot. The phone UI renders one pill per
+    entry in `devices`, each showing its own name + sim state, so
+    group-mode users see all connected iPhones at once. The top-level
+    `state` / `current_position` / `route_path` still mirror the
+    primary engine for the map view (single marker, single polyline)."""
     _check_token(_resolve_token(request, x_locwarp_token, t))
     from main import app_state
     dm = app_state.device_manager
-    eng = app_state.simulation_engine
     devices_info = []
     try:
         for udid, conn in dm._connections.items():
-            devices_info.append({
+            entry = {
                 "udid": udid,
                 "name": getattr(conn, "name", "") or "",
                 "connection_type": getattr(conn, "connection_type", "USB"),
-            })
+                "state": "disconnected",
+                "is_primary": udid == app_state._primary_udid,
+            }
+            dev_eng = app_state.simulation_engines.get(udid)
+            if dev_eng is not None:
+                try:
+                    ds = dev_eng.get_status()
+                    entry["state"] = ds.state.value if ds.state else "idle"
+                except Exception:
+                    logger.debug("status: per-device get_status failed for %s", udid, exc_info=True)
+            devices_info.append(entry)
     except Exception:
         logger.debug("status: device enumeration failed", exc_info=True)
 
+    eng = app_state.simulation_engine
     if eng is None:
         return {
             "connected": False,
