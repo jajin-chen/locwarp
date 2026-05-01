@@ -137,7 +137,9 @@ The choice is persisted in localStorage. When any engine fails (502 / timeout / 
 
 ### Phone Web Control (v0.2.96+)
 
-Operate LocWarp from your phone without walking back to the computer. The "**Phone control**" button in the bottom status bar opens a modal showing a LAN URL and a 6-digit PIN. Open the URL in any phone browser on the same Wi-Fi, enter the PIN, and the phone gets a mobile-friendly map with seven actions:
+Operate LocWarp from your phone without walking back to the computer. The "**Phone control**" button in the bottom status bar opens a modal showing a LAN URL and a 6-digit PIN. Open the URL in any phone browser, enter the PIN, and the phone gets a mobile-friendly map with seven actions:
+
+> **Prerequisite**: the phone must be connected to the **same Wi-Fi network as the desktop** (cellular alone can't reach the desktop's LAN IP), and the Windows firewall must allow inbound connections to port 8777. How the desktop talks to the iPhone (USB or Wi-Fi Tunnel) doesn't matter, as long as one of them is up.
 
 | Action | Behaviour |
 | --- | --- |
