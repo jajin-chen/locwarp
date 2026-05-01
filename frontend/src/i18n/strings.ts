@@ -7,6 +7,7 @@ export const STRINGS = {
   // ── Generic ──────────────────────────────────
   'generic.save': { zh: '儲存', en: 'Save' },
   'generic.cancel': { zh: '取消', en: 'Cancel' },
+  'generic.close': { zh: '關閉', en: 'Close' },
   'generic.delete': { zh: '刪除', en: 'Delete' },
   'generic.rename': { zh: '重新命名', en: 'Rename' },
   'generic.confirm': { zh: '確定', en: 'OK' },
@@ -59,6 +60,19 @@ export const STRINGS = {
   'status.set_initial_cleared': { zh: '已清除自訂畫面中心,下次啟動回到預設值', en: 'Custom default view cleared. Next launch uses the built-in default.' },
   'status.avatar': { zh: '地圖釘', en: 'Map pin' },
   'status.avatar_tooltip': { zh: '更換地圖釘 (使用者頭像)', en: 'Change map pin / user avatar' },
+
+  // Phone control: lets a phone on the same WiFi operate LocWarp via a small mobile web page.
+  'phone.button': { zh: '手機操控', en: 'Phone control' },
+  'phone.tooltip': { zh: '在同 WiFi 下用手機操控 LocWarp (網址 + PIN)', en: 'Operate LocWarp from your phone on the same WiFi (URL + PIN)' },
+  'phone.modal_title': { zh: '手機操控配對', en: 'Phone control pairing' },
+  'phone.help': { zh: '手機與電腦連到同一個 WiFi,在手機瀏覽器輸入下方網址,再輸入 PIN 即可開始操控。', en: 'Connect your phone to the same WiFi, open the URL below in the phone browser, then enter the PIN to start controlling.' },
+  'phone.lan_url': { zh: '網址', en: 'URL' },
+  'phone.no_lan': { zh: '偵測不到內網 IP', en: 'No LAN IP detected' },
+  'phone.copy_pin': { zh: '點一下複製 PIN', en: 'Click to copy PIN' },
+  'phone.copy_url': { zh: '點一下複製網址', en: 'Click to copy URL' },
+  'phone.copied': { zh: '已複製', en: 'Copied' },
+  'phone.rotate': { zh: '重新產生', en: 'Regenerate' },
+  'phone.rotated': { zh: '已重新產生 PIN / QR', en: 'PIN / QR regenerated' },
 
   // Avatar picker panel
   'avatar.title': { zh: '地圖釘 / 使用者頭像', en: 'Map pin / User avatar' },
@@ -183,7 +197,7 @@ export const STRINGS = {
   'device.scan_none': { zh: '未偵測到', en: 'Not found' },
   'device.scan_tooltip': { zh: '掃描 USB 裝置', en: 'Scan USB devices' },
   'wifi.section_title': { zh: 'WiFi 無線連線', en: 'Wi-Fi Connection' },
-  'wifi.section_hint': { zh: '(USB 模式不用連線)', en: '(USB mode: no connection needed)' },
+  'wifi.section_hint': { zh: '(用 USB 連線不需要點這裡)', en: '(skip this if connected via USB)' },
   'device.ios_unsupported_label': { zh: 'iOS {version} 不支援(需 iOS 16+)', en: 'iOS {version} not supported (requires iOS 16+)' },
   'wifi.warning_label': { zh: '注意事項', en: 'Notice' },
   'wifi.warning_title': { zh: '慎用:USB 拔除模式相容性說明', en: 'Caution: USB-free mode compatibility' },
@@ -387,6 +401,10 @@ export const STRINGS = {
   'panel.route_engine_brouter_desc': { zh: 'BRouter(brouter.de)。第四個獨立引擎,個人營運多年穩定,涵蓋全球,單車 / 健行 / 開車 profile 齊全。', en: 'BRouter (brouter.de). A fourth independent engine, run by a single maintainer for years, global coverage, with full bike / hike / car profiles.' },
   'panel.click_waypoint': { zh: '左鍵設置路徑點', en: 'Left-click to add waypoints' },
   'panel.click_waypoint_tooltip': { zh: '打開後在地圖上點左鍵即新增路徑點', en: 'When on, left-click the map to append a waypoint' },
+  'panel.jump_mode': { zh: '點對點跳躍', en: 'Point-to-point jump' },
+  'panel.jump_mode_tooltip': { zh: '不走路、直接逐點瞬移,每點停留設定的秒數,適合採果掃點', en: 'Skip walking and teleport stop-to-stop with a fixed dwell at each point' },
+  'panel.jump_interval': { zh: '間隔', en: 'Interval' },
+  'panel.jump_interval_seconds': { zh: '秒', en: 's' },
   'panel.address_search': { zh: '地址搜尋', en: 'Address Search' },
   'panel.library': { zh: '收藏座標與路線', en: 'Bookmarks & Routes' },
   'panel.library_drag_hint': { zh: '收藏座標與路線 · 拖曳此處移動', en: 'Bookmarks & Routes · Drag to move' },

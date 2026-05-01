@@ -139,6 +139,11 @@ class SimulationEngine:
         # waypoints rather than OSRM-densified polyline points.
         self._user_waypoints: list[Coordinate] = []
         self._user_waypoint_next: int = 0
+        # Most recent route polyline (list of {lat, lng}) captured from
+        # `route_path` emissions. Polled by the phone-control HTTP
+        # endpoint so the phone map can draw the same path the desktop
+        # WebSocket subscribers see.
+        self._last_route_path: list[dict] | None = None
         # Set by apply_speed so route_loop / multi_stop know to reuse the
         # applied profile on the next lap instead of re-resolving from the
         # original request (which would revert speed every lap).
@@ -233,6 +238,8 @@ class SimulationEngine:
         straight_line: bool = False,
         route_engine: str | None = None,
         lap_count: int | None = None,
+        jump_mode: bool = False,
+        jump_interval: float = 6.0,
     ) -> None:
         """Start looping through a closed route."""
         await self._ensure_stopped()
@@ -245,6 +252,7 @@ class SimulationEngine:
             pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
             straight_line=straight_line, route_engine=route_engine,
             lap_count=lap_count,
+            jump_mode=jump_mode, jump_interval=jump_interval,
         )
         await self._run_handler(
             self._looper.start_loop(
@@ -253,6 +261,7 @@ class SimulationEngine:
                 pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
                 straight_line=straight_line, route_engine=route_engine,
                 lap_count=lap_count,
+                jump_mode=jump_mode, jump_interval=jump_interval,
             ),
             "Loop",
         )
@@ -286,6 +295,8 @@ class SimulationEngine:
         pause_max: float = 20.0,
         straight_line: bool = False,
         route_engine: str | None = None,
+        jump_mode: bool = False,
+        jump_interval: float = 6.0,
     ) -> None:
         """Navigate through waypoints with optional stops."""
         await self._ensure_stopped()
@@ -297,6 +308,7 @@ class SimulationEngine:
             speed_kmh=speed_kmh, speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
             pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
             straight_line=straight_line, route_engine=route_engine,
+            jump_mode=jump_mode, jump_interval=jump_interval,
         )
         await self._run_handler(
             self._multi_stop.start(
@@ -304,6 +316,7 @@ class SimulationEngine:
                 speed_min_kmh=speed_min_kmh, speed_max_kmh=speed_max_kmh,
                 pause_enabled=pause_enabled, pause_min=pause_min, pause_max=pause_max,
                 straight_line=straight_line, route_engine=route_engine,
+                jump_mode=jump_mode, jump_interval=jump_interval,
             ),
             "Multi-stop",
         )
@@ -415,6 +428,7 @@ class SimulationEngine:
             await self._emit("state_change", {"state": self.state.value})
 
         self._paused_from = None
+        self._last_route_path = None
         logger.info("Simulation stopped")
 
     def capture_resumable_snapshot(self) -> dict | None:
@@ -511,6 +525,19 @@ class SimulationEngine:
 
     async def _emit(self, event_type: str, data: dict) -> None:
         """Send an event to the WebSocket callback, if one is registered."""
+        # Cache the most recent route polyline so HTTP-only consumers
+        # (the phone control page polls /api/phone/status without a WS
+        # subscription) can render the same line the desktop UI shows.
+        # Cleared by stop / restore so the cached polyline doesn't outlive
+        # the simulation it belongs to.
+        if event_type == "route_path":
+            coords = data.get("coords") if isinstance(data, dict) else None
+            if isinstance(coords, list):
+                self._last_route_path = [
+                    {"lat": float(c["lat"]), "lng": float(c["lng"])}
+                    for c in coords
+                    if isinstance(c, dict) and "lat" in c and "lng" in c
+                ]
         if self.event_callback is not None:
             try:
                 await self.event_callback(event_type, data)

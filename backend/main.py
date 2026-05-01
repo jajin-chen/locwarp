@@ -593,6 +593,7 @@ from api.bookmarks import router as bookmarks_router
 from api.recent import router as recent_router
 from api.websocket import router as ws_router
 from api.system import router as system_router
+from api.phone_control import router as phone_router
 
 app.include_router(device_router)
 app.include_router(location_router)
@@ -602,6 +603,7 @@ app.include_router(system_router)
 app.include_router(bookmarks_router)
 app.include_router(recent_router)
 app.include_router(ws_router)
+app.include_router(phone_router)
 
 
 @app.get("/")

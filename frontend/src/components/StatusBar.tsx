@@ -5,6 +5,7 @@ import type { RuntimesMap } from '../hooks/useSimulation';
 import type { DeviceInfo } from '../hooks/useDevice';
 import { useT } from '../i18n';
 import LangToggle from './LangToggle';
+import PhoneControlButton from './PhoneControl';
 import pkg from '../../package.json';
 import { WeatherIcon, categorize, labelKeyFor } from './WeatherIcon';
 import { useUpdateCheck } from './UpdateChecker';
@@ -486,6 +487,8 @@ const StatusBar: React.FC<StatusBarProps> = ({
               {t('status.locate_pc')}
             </button>
           )}
+          {/* 手機操控 — opens the phone-control pairing modal */}
+          <PhoneControlButton />
           {/* 地圖釘 / 使用者頭像 — opens the avatar picker panel */}
           {onOpenAvatarPicker && (
             <button

@@ -1686,6 +1686,24 @@ const MapView: React.FC<MapViewProps> = ({
   // prefixes are all discarded so users don't have to hand-clean copies
   // from Google Maps / chat / spreadsheets.
   const [coordInput, setCoordInput] = useState('');
+  // Lifts the coord-input strip to clear the bottom status bar. The
+  // status bar wraps to extra rows when the window narrows (flexWrap),
+  // so its rendered height varies. We observe it directly so the strip
+  // sits exactly 12px above whatever height it ends up.
+  const [statusBarHeight, setStatusBarHeight] = useState<number>(38);
+  useEffect(() => {
+    const el = document.querySelector('.status-bar') as HTMLElement | null;
+    if (!el) return;
+    const update = () => setStatusBarHeight(Math.ceil(el.getBoundingClientRect().height));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    window.addEventListener('resize', update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, []);
   const submitCoordGo = (kind: 'teleport' | 'navigate' = 'teleport') => {
     const parsed = parseCoord(coordInput);
     if (!parsed) {
@@ -1725,13 +1743,15 @@ const MapView: React.FC<MapViewProps> = ({
 
       {/* Bottom-left stack: Bulk-paste (route/multi only) > Transport >
           Coord-input. Single flex column at bottom-left, fixed gap so the
-          rows don't drift apart based on container height. Lifted above
-          the bottom status bar so it doesn't get covered. */}
+          rows don't drift apart based on container height. Sits exactly
+          above the bottom status bar — height tracked dynamically so a
+          wrapped (multi-row) status bar doesn't overlap this strip when
+          the window is narrow. */}
       <div
         style={{
           position: 'absolute',
           left: 12,
-          bottom: 84,
+          bottom: statusBarHeight + 22,
           zIndex: 851,
           display: 'flex',
           flexDirection: 'column',

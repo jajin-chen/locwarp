@@ -124,6 +124,13 @@ interface ControlPanelProps {
   onRouteEngineChange?: (v: 'osrm' | 'osrm_fossgis' | 'valhalla' | 'brouter') => void;
   clickToAddWaypoint?: boolean;
   onClickToAddWaypointChange?: (v: boolean) => void;
+  // Jump mode: when toggled on for Loop / MultiStop, the device teleports
+  // point-to-point with a fixed dwell interval instead of walking the
+  // routed path. Used for fruit-farm sniping.
+  jumpMode?: boolean;
+  onJumpModeChange?: (v: boolean) => void;
+  jumpInterval?: number;
+  onJumpIntervalChange?: (v: number) => void;
   // Incremented by any external source (e.g. map top-left library
   // button) to request the library panel be opened. useEffect on the
   // value toggles libraryOpen=true so the parent doesn't have to own
@@ -267,6 +274,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onRouteEngineChange,
   clickToAddWaypoint = false,
   onClickToAddWaypointChange,
+  jumpMode = false,
+  onJumpModeChange,
+  jumpInterval = 6,
+  onJumpIntervalChange,
   openLibraryToken,
   openLibraryTab,
 }) => {
@@ -457,6 +468,58 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   {t('panel.click_waypoint')}
                 </span>
               </label>
+            )}
+            {onJumpModeChange && (simMode === SimMode.Loop || simMode === SimMode.MultiStop) && (
+              <div
+                style={{
+                  gridColumn: '1 / -1',
+                  padding: '6px 10px',
+                  background: jumpMode ? 'rgba(77, 210, 138, 0.10)' : 'transparent',
+                  border: `1px solid ${jumpMode ? 'rgba(77, 210, 138, 0.32)' : 'transparent'}`,
+                  borderRadius: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <label
+                  className="lw-checkbox"
+                  title={t('panel.jump_mode_tooltip')}
+                  style={{ fontSize: 11, padding: 0, background: 'transparent', border: 'none' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={jumpMode}
+                    onChange={(e) => onJumpModeChange(e.target.checked)}
+                  />
+                  <span className="lw-checkbox-box"></span>
+                  <span className="lw-checkbox-label" style={{ lineHeight: 1.15 }}>
+                    {t('panel.jump_mode')}
+                  </span>
+                </label>
+                {jumpMode && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, opacity: 0.85 }}>
+                    {t('panel.jump_interval')}
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      value={jumpInterval}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value)
+                        if (Number.isFinite(v) && v >= 0 && onJumpIntervalChange) onJumpIntervalChange(v)
+                      }}
+                      style={{
+                        width: 60, padding: '2px 6px', fontSize: 11,
+                        background: '#0f1218', color: '#e6e8ee',
+                        border: '1px solid rgba(255,255,255,0.12)', borderRadius: 4,
+                      }}
+                    />
+                    <span style={{ opacity: 0.7 }}>{t('panel.jump_interval_seconds')}</span>
+                  </span>
+                )}
+              </div>
             )}
           </div>
         )}

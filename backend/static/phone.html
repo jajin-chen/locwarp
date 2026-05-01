@@ -1,0 +1,904 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
+<title>LocWarp Phone Control</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<style>
+  :root {
+    --bg: #0e1015;
+    --panel: rgba(20,24,32,0.92);
+    --panel-solid: #1b2027;
+    --border: #2a3140;
+    --accent: #6c8cff;
+    --accent-soft: rgba(108,140,255,0.18);
+    --danger: #ef5d5d;
+    --warn: #f0b34a;
+    --ok: #4dd28a;
+    --text: #e6e8ee;
+    --muted: #97a0b3;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  /* Total page-zoom lockout. `pan-x pan-y` lets the user scroll/pan
+     but explicitly disables the pinch gesture, so the browser never
+     zooms the page (which would throw the FAB / top-bar / +/- buttons
+     out of the visual viewport — and on iOS Safari that zoom state
+     also persists across page refresh, so the user can never recover
+     without manually pinching back out). Leaflet's own pinch-to-zoom
+     for the map keeps working because it listens to touchstart /
+     touchmove directly and doesn't rely on the browser's default
+     pinch behaviour. */
+  html, body { touch-action: pan-x pan-y; }
+  #map { touch-action: none; }
+  button, input, .pill, #fab, #actions .btn, #sheet, .modal,
+  #search-results .item {
+    touch-action: manipulation;
+  }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text);
+               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", sans-serif;
+               overscroll-behavior: none;
+               -webkit-text-size-adjust: 100%;
+               text-size-adjust: 100%; }
+  #map { position: fixed; inset: 0; background: #1a1d22; }
+  .leaflet-container { background: #1a1d22; font-family: inherit; }
+  .leaflet-control-attribution { font-size: 9px !important; opacity: 0.55; }
+
+  /* Top status bar — anchored to the right so it doesn't sit on top
+     of Leaflet's +/- zoom controls in the top-left corner. */
+  #topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 5000;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px;
+    background: linear-gradient(180deg, rgba(14,16,21,0.6), rgba(14,16,21,0));
+    pointer-events: none;
+    display: flex; align-items: center; gap: 6px;
+    justify-content: flex-end;
+  }
+  #topbar .pill {
+    pointer-events: auto;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 999px;
+    padding: 5px 10px; font-size: 12px; line-height: 1; backdrop-filter: blur(8px);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  #topbar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  #topbar .dot.off { background: var(--danger); }
+  #topbar .dot.busy { background: var(--warn); }
+  #topbar .device { color: var(--muted); font-size: 11px; }
+  #topbar .mode-pill { color: var(--accent); font-size: 11px; background: var(--accent-soft); border-color: rgba(108,140,255,0.4); }
+
+  /* PIN gate */
+  #gate {
+    position: fixed; inset: 0; z-index: 2000;
+    background: rgba(8,10,14,0.96); display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  #gate .card {
+    width: 100%; max-width: 320px; background: var(--panel-solid);
+    border: 1px solid var(--border); border-radius: 18px; padding: 22px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+  #gate h1 { font-size: 18px; margin: 0 0 6px; font-weight: 600; }
+  #gate p { font-size: 13px; color: var(--muted); margin: 0 0 16px; line-height: 1.5; }
+  #gate input {
+    width: 100%; font-size: 28px; letter-spacing: 8px; text-align: center;
+    background: #0f1218; color: var(--text); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 12px; outline: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  #gate input:focus { border-color: var(--accent); }
+  #gate button {
+    width: 100%; margin-top: 12px; padding: 12px; border-radius: 12px;
+    border: none; background: var(--accent); color: #fff; font-size: 15px;
+    font-weight: 600; cursor: pointer;
+  }
+  #gate button:disabled { opacity: 0.5; }
+  #gate .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 18px; }
+
+  /* FAB + compact menu */
+  #fab {
+    position: fixed; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+    z-index: 5100;
+    width: 52px; height: 52px; border-radius: 50%;
+    background: var(--accent); border: none; color: #fff;
+    box-shadow: 0 6px 18px rgba(108,140,255,0.5);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: transform 0.18s ease, background 0.18s ease;
+  }
+  #fab.open { transform: rotate(45deg); background: #2a3140; box-shadow: 0 6px 18px rgba(0,0,0,0.5); }
+  #fab svg { width: 24px; height: 24px; }
+
+  #actions {
+    position: fixed; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    z-index: 5100;
+    display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+    pointer-events: none;
+  }
+  #actions .btn {
+    pointer-events: none;  /* enabled only when #actions.open */
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel-solid); color: var(--text);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 5px 10px 5px 5px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+    font-size: 12px; font-weight: 500;
+    transform: translateX(20px); opacity: 0;
+    transition: transform 0.2s ease, opacity 0.16s ease;
+    cursor: pointer; white-space: nowrap;
+    visibility: hidden;
+  }
+  #actions.open .btn { transform: translateX(0); opacity: 1; pointer-events: auto; visibility: visible; }
+  #actions .btn .ic {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-soft); color: var(--accent); flex-shrink: 0;
+  }
+  #actions .btn .ic svg { width: 16px; height: 16px; }
+  #actions .btn[data-kind="navigate"] .ic { background: rgba(77,210,138,0.18); color: var(--ok); }
+  #actions .btn[data-kind="joystick"] .ic { background: rgba(244,143,177,0.18); color: #f48fb1; }
+  #actions .btn[data-kind="search"] .ic { background: rgba(150,140,220,0.18); color: #b39ddb; }
+  #actions .btn[data-kind="coord"] .ic { background: rgba(108,140,255,0.18); color: var(--accent); }
+  #actions .btn[data-kind="stop"] .ic { background: rgba(240,179,74,0.18); color: var(--warn); }
+  #actions .btn[data-kind="restore"] .ic { background: rgba(239,93,93,0.18); color: var(--danger); }
+
+  /* Confirm sheet */
+  #sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200;
+    background: var(--panel-solid); border-top: 1px solid var(--border);
+    border-radius: 18px 18px 0 0;
+    padding: 18px 18px calc(env(safe-area-inset-bottom, 0px) + 18px);
+    box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
+    transform: translateY(110%); transition: transform 0.22s ease;
+  }
+  #sheet.open { transform: translateY(0); }
+  #sheet h2 { font-size: 16px; margin: 0 0 6px; }
+  #sheet .coord { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+  #sheet .row { display: flex; gap: 10px; }
+  #sheet button {
+    flex: 1; padding: 12px; border-radius: 12px; border: none;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  #sheet .primary { background: var(--accent); color: #fff; }
+  #sheet .ghost { background: #2a3140; color: var(--text); }
+  #sheet .mode-row { display: flex; gap: 6px; margin-bottom: 12px; }
+  #sheet .mode-row button {
+    flex: 1; padding: 8px; font-size: 12px; font-weight: 500;
+    border-radius: 8px; background: #2a3140; color: var(--muted);
+  }
+  #sheet .mode-row button.active { background: var(--accent-soft); color: var(--accent); border: 1px solid rgba(108,140,255,0.4); }
+  #sheet .custom-speed { margin-bottom: 12px; }
+  #sheet .custom-speed label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  #sheet .custom-speed input {
+    width: 100%; padding: 8px 10px; font-size: 16px;
+    background: #0f1218; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; outline: none;
+  }
+  #sheet .custom-speed input:focus { border-color: var(--accent); }
+
+  /* Toast — above all modals so error feedback is always readable */
+  #toast {
+    position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 50px);
+    transform: translate(-50%, -16px); z-index: 1600;
+    background: var(--panel-solid); border: 1px solid var(--border);
+    border-radius: 999px; padding: 8px 14px; font-size: 12px;
+    opacity: 0; transition: opacity 0.18s, transform 0.18s;
+    pointer-events: none; max-width: calc(100% - 32px); text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #toast.err { border-color: rgba(239,93,93,0.6); }
+
+  /* Generic modal overlay (search / coord) */
+  .modal {
+    position: fixed; inset: 0; z-index: 1400;
+    background: rgba(8,10,14,0.78); backdrop-filter: blur(4px);
+    display: none; align-items: flex-start; justify-content: center;
+    padding: 80px 16px 16px;
+  }
+  .modal.open { display: flex; }
+  .modal .card {
+    width: 100%; max-width: 400px;
+    background: var(--panel-solid); border: 1px solid var(--border);
+    border-radius: 14px; padding: 16px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+  }
+  .modal h3 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+  .modal label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  /* font-size MUST be >= 16px or iOS Safari force-zooms the page on
+     focus, which drops every fixed-positioned overlay (FAB / topbar /
+     zoom +/-) out of the visual viewport until the user pinches back. */
+  .modal input[type="text"], .modal input[type="number"] {
+    width: 100%; padding: 10px 12px; font-size: 16px;
+    background: #0f1218; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; outline: none;
+    margin-bottom: 10px;
+  }
+  .modal input:focus { border-color: var(--accent); }
+  .modal .btn-row { display: flex; gap: 8px; margin-top: 6px; }
+  .modal .btn-row button {
+    flex: 1; padding: 10px; border-radius: 8px; border: none;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .modal .primary { background: var(--accent); color: #fff; }
+  .modal .ghost { background: #2a3140; color: var(--text); }
+
+  /* Search results list */
+  #search-results { max-height: 50vh; overflow-y: auto; margin-bottom: 8px; }
+  #search-results .item {
+    padding: 10px 8px; border-bottom: 1px solid rgba(255,255,255,0.06);
+    cursor: pointer; font-size: 13px;
+  }
+  #search-results .item:hover, #search-results .item:active { background: var(--accent-soft); }
+  #search-results .item .name { font-weight: 500; }
+  #search-results .item .full { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  #search-results .empty { color: var(--muted); font-size: 12px; text-align: center; padding: 20px; }
+
+  /* Pending pin marker */
+  .pending-pin {
+    width: 28px; height: 28px; border-radius: 50% 50% 50% 0;
+    background: var(--accent); transform: rotate(-45deg) translate(7px, -7px);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    border: 2px solid #fff;
+  }
+  .current-pin {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--ok); border: 3px solid #fff;
+    box-shadow: 0 0 0 3px rgba(77,210,138,0.3), 0 4px 10px rgba(0,0,0,0.4);
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="topbar">
+  <span class="pill"><span class="dot off" id="dot"></span><span id="state-label">未連線</span></span>
+  <span class="pill mode-pill" id="action-mode-pill" style="display:none"></span>
+  <span class="pill device" id="device-label" style="display:none"></span>
+</div>
+
+<div id="actions">
+  <div class="btn" data-kind="teleport">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2 L4 22 L12 18 L20 22 Z" />
+    </svg></span>
+    <span>瞬移</span>
+  </div>
+  <div class="btn" data-kind="navigate">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="3 11 22 2 13 21 11 13 3 11" />
+    </svg></span>
+    <span>導航到這裡</span>
+  </div>
+  <div class="btn" data-kind="search">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="7" /><path d="m21 21-5-5" />
+    </svg></span>
+    <span>搜尋地址</span>
+  </div>
+  <div class="btn" data-kind="coord">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg></span>
+    <span>座標飛</span>
+  </div>
+  <div class="btn" data-kind="stop">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg></span>
+    <span>停止</span>
+  </div>
+  <div class="btn" data-kind="restore">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" />
+    </svg></span>
+    <span>還原</span>
+  </div>
+</div>
+
+<button id="fab" aria-label="開啟功能">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+</button>
+
+<div id="sheet" role="dialog" aria-modal="true">
+  <h2 id="sheet-title">確認動作?</h2>
+  <div class="coord" id="sheet-coord"></div>
+  <div class="mode-row" id="sheet-modes" style="display:none">
+    <button data-mode="walking" data-kmh="10.8" class="active">走路(10.8km/h)</button>
+    <button data-mode="running" data-kmh="19.8">腳踏車(19.8km/h)</button>
+    <button data-mode="driving" data-kmh="60">開車(60km/h)</button>
+  </div>
+  <div class="custom-speed" id="sheet-custom" style="display:none">
+    <label for="sheet-custom-input">自訂速度 (km/h)</label>
+    <input type="number" id="sheet-custom-input" inputmode="decimal" min="0.1" max="300" step="0.5" placeholder="留空使用上方預設" />
+  </div>
+  <div class="row">
+    <button class="ghost" id="sheet-cancel">取消</button>
+    <button class="primary" id="sheet-ok">確定</button>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<!-- Search modal -->
+<div class="modal" id="search-modal">
+  <div class="card">
+    <h3>搜尋地址</h3>
+    <input type="text" id="search-input" placeholder="輸入地名或地址" autocomplete="off" />
+    <div id="search-results"></div>
+    <div class="btn-row">
+      <button class="ghost" id="search-close">關閉</button>
+    </div>
+  </div>
+</div>
+
+<!-- Coord-fly modal -->
+<div class="modal" id="coord-modal">
+  <div class="card">
+    <h3>座標飛</h3>
+    <input type="text" id="coord-input" placeholder="貼上座標,例如 25.0375, 121.5637" autocomplete="off" />
+    <div class="btn-row">
+      <button class="ghost" id="coord-close">取消</button>
+      <button class="primary" id="coord-go">飛過去</button>
+    </div>
+  </div>
+</div>
+
+<div id="gate" style="display:none">
+  <div class="card">
+    <h1>輸入 PIN</h1>
+    <p>在桌面 LocWarp 上點「手機操控」按鈕,把畫面顯示的 6 位數 PIN 輸入這裡。</p>
+    <input id="pin-input" inputmode="numeric" maxlength="6" pattern="[0-9]*" placeholder="------" autocomplete="off" />
+    <button id="pin-submit" disabled>連線</button>
+    <div class="err" id="pin-err"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+(function() {
+  // ── Browser zoom guards (mobile + desktop) ─────────────────
+  // Goal: lock the *browser* zoom at 1.0 so the FAB / topbar / +/-
+  // overlays never get scrolled out of the visual viewport. Leaflet's
+  // own map zoom keeps working because it listens to wheel / touch
+  // events directly and we let those through inside #map.
+  //
+  // Why this matters: Chrome remembers page-zoom per-origin, so once
+  // the user accidentally hits Ctrl+wheel or trackpad-pinches the
+  // page, every refresh of `http://<lan-ip>/phone` re-applies that
+  // zoom. The fixed-position overlays then sit outside the visible
+  // window and the user thinks the UI is "broken".
+  //
+  // We can't programmatically reset Chrome's per-origin zoom, but we
+  // CAN block every input that triggers it.
+
+  // 1. iOS Safari pinch (gesture events) — only blocked outside #map
+  //    so Leaflet's pinch-to-zoom-map keeps working.
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach((ev) => {
+    document.addEventListener(ev, (e) => {
+      const target = e.target;
+      if (target && target.closest && target.closest('#map')) return;
+      e.preventDefault();
+    }, { passive: false });
+  });
+
+  // 2. iOS Safari double-tap-to-zoom — same scope rule.
+  let lastTouchEnd = 0;
+  document.addEventListener('touchend', (e) => {
+    const target = e.target;
+    if (target && target.closest && target.closest('#map')) return;
+    const now = Date.now();
+    if (now - lastTouchEnd < 350) e.preventDefault();
+    lastTouchEnd = now;
+  }, { passive: false });
+
+  // 3. Desktop Ctrl+wheel and trackpad pinch (Chromium reports the
+  //    latter as wheel events with ctrlKey=true). Block everywhere
+  //    EXCEPT the map — Leaflet handles its own scroll-wheel zoom via
+  //    plain wheel events without ctrlKey, so blocking ctrl-wheel
+  //    only doesn't break it.
+  document.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    const target = e.target;
+    if (target && target.closest && target.closest('#map')) return;
+    e.preventDefault();
+  }, { passive: false });
+
+  // 4. Desktop Ctrl/Cmd + (+ / - / =) keyboard zoom. Ctrl+0 (reset)
+  //    is left alone so the user can recover if they hit zoom via
+  //    the browser menu or another tab path we didn't intercept.
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key === '+' || e.key === '-' || e.key === '=') {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  // 5. If we boot up already-zoomed (because Chrome restored a prior
+  //    per-origin zoom level from before this fix shipped), surface a
+  //    one-time hint so the user knows how to recover.
+  setTimeout(() => {
+    const vv = window.visualViewport;
+    if (vv && vv.scale > 1.05) {
+      const tip = document.createElement('div');
+      tip.textContent = '畫面被縮放,請按 Ctrl+0 (Mac: Cmd+0) 重置,或兩指縮回正常';
+      tip.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;' +
+        'background:#ef5d5d;color:#fff;padding:10px 14px;font-size:13px;' +
+        'text-align:center;font-weight:600;';
+      document.body.appendChild(tip);
+      setTimeout(() => tip.remove(), 8000);
+    }
+  }, 800);
+
+  // ── Token ─────────────────────────────────────────────────
+  // Token is obtained ONLY via PIN entry; stored in localStorage so a
+  // page refresh doesn't force the user to re-type the PIN.
+  let token = null;
+  function loadStoredToken() {
+    try { return localStorage.getItem('locwarp.phone.token'); } catch (e) { return null; }
+  }
+  function storeToken(t) { try { localStorage.setItem('locwarp.phone.token', t); } catch (e) {} }
+  function clearStoredToken() { try { localStorage.removeItem('locwarp.phone.token'); } catch (e) {} }
+
+  // ── Toast ─────────────────────────────────────────────────
+  let toastTimer = null;
+  function toast(msg, kind) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.toggle('err', kind === 'err');
+    el.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+  }
+
+  // ── API ───────────────────────────────────────────────────
+  async function api(path, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({ 'Content-Type': 'application/json' },
+                                 opts.headers || {},
+                                 token ? { 'X-LocWarp-Token': token } : {});
+    if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+    const res = await fetch(path, opts);
+    if (res.status === 401) {
+      token = null; clearStoredToken(); showGate();
+      throw new Error('unauthorized');
+    }
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { const j = await res.json(); detail = (j.detail && (j.detail.message || j.detail)) || detail; } catch (e) {}
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
+    return res.json();
+  }
+
+  // ── Map ───────────────────────────────────────────────────
+  const map = L.map('map', { zoomControl: true, attributionControl: true })
+    .setView([25.0375, 121.5637], 14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap',
+  }).addTo(map);
+
+  let currentMarker = null;
+  let pendingMarker = null;
+  let routePolyline = null;
+  let pendingMode = null; // 'teleport' | 'navigate'
+  // After a Restore, the backend deliberately keeps current_position so
+  // the desktop user can restart a sim without re-teleporting — but on
+  // the phone that means the green pin doesn't go away. Track the last
+  // restored position locally so we can hide the pin until the user's
+  // next action moves it elsewhere.
+  let restoredPos = null;
+  function clearCurrentPin() {
+    if (currentMarker) { currentMarker.remove(); currentMarker = null; }
+  }
+
+  function setRoutePath(coords) {
+    if (!coords || coords.length < 2) {
+      if (routePolyline) { routePolyline.remove(); routePolyline = null; }
+      return;
+    }
+    const latlngs = coords.map((c) => [c.lat, c.lng]);
+    if (routePolyline) {
+      routePolyline.setLatLngs(latlngs);
+    } else {
+      routePolyline = L.polyline(latlngs, {
+        color: '#6c8cff', weight: 4, opacity: 0.85,
+      }).addTo(map);
+    }
+  }
+
+  // Pull the first valid lat/lng pair out of arbitrary text. Mirrors the
+  // desktop ControlPanel coord-fly parser so the user can paste lines
+  // like "(-33.41902, -70.70187) 一般火" / "#3\n35.018, 135.584" without
+  // hand-cleaning. Falls back to a plain "25, 121" integer pair.
+  function parseCoord(raw) {
+    const cleaned = String(raw || '').replace(/[()\[\]{}（）【】「」『』"'`°]/g, ' ');
+    const decRe = /(?<![\d.])(-?\d+\.\d+)[^-\d.]+(-?\d+\.\d+)(?![\d.])/g;
+    let m;
+    while ((m = decRe.exec(cleaned)) !== null) {
+      const lat = parseFloat(m[1]);
+      const lng = parseFloat(m[2]);
+      if (Number.isFinite(lat) && lat >= -90 && lat <= 90 &&
+          Number.isFinite(lng) && lng >= -180 && lng <= 180) {
+        return { lat, lng };
+      }
+    }
+    const intRe = /^(-?\d+(?:\.\d+)?)\s*[,;\s]+\s*(-?\d+(?:\.\d+)?)$/;
+    const fb = cleaned.trim().match(intRe);
+    if (fb) {
+      const lat = parseFloat(fb[1]);
+      const lng = parseFloat(fb[2]);
+      if (Number.isFinite(lat) && lat >= -90 && lat <= 90 &&
+          Number.isFinite(lng) && lng >= -180 && lng <= 180) {
+        return { lat, lng };
+      }
+    }
+    return null;
+  }
+
+  function setCurrentPin(lat, lng) {
+    if (currentMarker) currentMarker.setLatLng([lat, lng]);
+    else {
+      currentMarker = L.marker([lat, lng], {
+        icon: L.divIcon({ className: '', html: '<div class="current-pin"></div>',
+                         iconSize: [18, 18], iconAnchor: [9, 9] }),
+        interactive: false,
+      }).addTo(map);
+    }
+  }
+  function setPendingPin(lat, lng) {
+    if (pendingMarker) pendingMarker.setLatLng([lat, lng]);
+    else {
+      pendingMarker = L.marker([lat, lng], {
+        icon: L.divIcon({ className: '', html: '<div class="pending-pin"></div>',
+                         iconSize: [28, 28], iconAnchor: [4, 28] }),
+        interactive: false,
+      }).addTo(map);
+    }
+  }
+  function clearPendingPin() {
+    if (pendingMarker) { pendingMarker.remove(); pendingMarker = null; }
+  }
+
+  map.on('click', (e) => {
+    if (!pendingMode) return;
+    setPendingPin(e.latlng.lat, e.latlng.lng);
+    openSheet(pendingMode, e.latlng.lat, e.latlng.lng);
+  });
+
+  // ── Status polling ────────────────────────────────────────
+  // Cached so the navigate flow can guard against "no virtual location
+  // yet" without an extra HTTP round-trip per user click.
+  let lastStatus = null;
+  let lastState = '';
+  async function pollStatus() {
+    try {
+      const s = await api('/api/phone/status');
+      lastStatus = s;
+      const dot = document.getElementById('dot');
+      const lbl = document.getElementById('state-label');
+      const dev = document.getElementById('device-label');
+      if (!s.connected) {
+        dot.classList.add('off'); dot.classList.remove('busy');
+        lbl.textContent = '未連接 iPhone';
+        dev.style.display = 'none';
+      } else {
+        dot.classList.remove('off');
+        const busy = s.state && s.state !== 'idle' && s.state !== 'teleporting' && s.state !== 'disconnected';
+        dot.classList.toggle('busy', !!busy);
+        const stateMap = {
+          idle: '待命', teleporting: '跳點中', navigating: '導航中',
+          looping: '循環中', joystick: '搖桿', random_walk: '隨機漫遊',
+          multi_stop: '多點', paused: '暫停', reconnecting: '重連中',
+          disconnected: '已斷線',
+        };
+        lbl.textContent = stateMap[s.state] || s.state;
+        if (s.devices && s.devices.length) {
+          const d = s.devices[0];
+          dev.textContent = (d.name || d.udid.slice(0, 8)) + ' · ' + (d.connection_type || '').toLowerCase();
+          dev.style.display = '';
+        } else {
+          dev.style.display = 'none';
+        }
+        if (s.current_position) {
+          // Suppress the green pin if this position is the same one we
+          // restored from — backend keeps current_position post-restore
+          // so a re-start has a starting point, but visually the user
+          // expects the pin gone until they teleport / navigate again.
+          const cp = s.current_position;
+          const isRestored = restoredPos &&
+            Math.abs(restoredPos.lat - cp.lat) < 1e-7 &&
+            Math.abs(restoredPos.lng - cp.lng) < 1e-7;
+          if (isRestored) {
+            clearCurrentPin();
+          } else {
+            restoredPos = null;
+            setCurrentPin(cp.lat, cp.lng);
+            if (lastState !== s.state && (s.state === 'teleporting' || s.state === 'idle')) {
+              map.setView([cp.lat, cp.lng], Math.max(map.getZoom(), 15));
+            }
+          }
+        } else {
+          clearCurrentPin();
+        }
+        // Polyline mirrors what the desktop UI shows. Cleared by the
+        // backend when the sim stops, so checking truthy is enough —
+        // no client-side state-machine to expire it.
+        setRoutePath(s.route_path);
+      }
+      lastState = s.state;
+    } catch (e) { /* silently */ }
+  }
+
+  // ── FAB / actions ─────────────────────────────────────────
+  const fab = document.getElementById('fab');
+  const actions = document.getElementById('actions');
+  const actionPill = document.getElementById('action-mode-pill');
+  function setOpen(open) {
+    fab.classList.toggle('open', open);
+    actions.classList.toggle('open', open);
+  }
+  fab.addEventListener('click', () => setOpen(!fab.classList.contains('open')));
+
+  function showActionMode(label) {
+    actionPill.textContent = label;
+    actionPill.style.display = label ? '' : 'none';
+  }
+
+  document.querySelectorAll('#actions .btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const kind = btn.getAttribute('data-kind');
+      setOpen(false);
+      if (kind === 'teleport') {
+        pendingMode = 'teleport';
+        showActionMode('點地圖選位置 (瞬移)');
+      } else if (kind === 'navigate') {
+        // Navigate routes from the *current* virtual position. If the
+        // user hasn't teleported yet there's no origin, so guard here
+        // instead of letting the backend silently start a sim that
+        // can't move (the previous behaviour confused users into
+        // thinking nav had worked).
+        const cur = lastStatus && lastStatus.current_position;
+        if (!cur || !lastStatus.connected) {
+          toast('還沒有虛擬位置,請先瞬移或飛座標', 'err');
+          return;
+        }
+        pendingMode = 'navigate';
+        showActionMode('點地圖選位置 (導航)');
+      } else if (kind === 'stop') {
+        openSheet('stop');
+      } else if (kind === 'restore') {
+        openSheet('restore');
+      } else if (kind === 'search') {
+        openSearch();
+      } else if (kind === 'coord') {
+        openCoord();
+      }
+    });
+  });
+
+  // ── Confirm sheet ─────────────────────────────────────────
+  const sheet = document.getElementById('sheet');
+  const sheetTitle = document.getElementById('sheet-title');
+  const sheetCoord = document.getElementById('sheet-coord');
+  const sheetOk = document.getElementById('sheet-ok');
+  const sheetCancel = document.getElementById('sheet-cancel');
+  const sheetModes = document.getElementById('sheet-modes');
+  const sheetCustom = document.getElementById('sheet-custom');
+  const sheetCustomInput = document.getElementById('sheet-custom-input');
+  let pendingAction = null;
+  let navigateMode = 'walking';
+
+  sheetModes.querySelectorAll('button').forEach((b) => {
+    b.addEventListener('click', () => {
+      navigateMode = b.getAttribute('data-mode');
+      sheetModes.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+    });
+  });
+
+  function openSheet(kind, lat, lng) {
+    pendingAction = { kind, lat, lng };
+    sheetModes.style.display = 'none';
+    sheetCustom.style.display = 'none';
+    if (kind === 'teleport') {
+      sheetTitle.textContent = '確認瞬移?';
+      sheetCoord.textContent = lat.toFixed(6) + ', ' + lng.toFixed(6);
+    } else if (kind === 'navigate') {
+      sheetTitle.textContent = '確認導航到這裡?';
+      sheetCoord.textContent = lat.toFixed(6) + ', ' + lng.toFixed(6);
+      sheetModes.style.display = '';
+      sheetCustom.style.display = '';
+    } else if (kind === 'stop') {
+      sheetTitle.textContent = '停止目前移動?';
+      sheetCoord.textContent = '保留虛擬位置,只停止路線動畫';
+    } else if (kind === 'restore') {
+      sheetTitle.textContent = '還原真實 GPS?';
+      sheetCoord.textContent = '清除虛擬定位,iPhone 回到真實位置';
+    }
+    sheet.classList.add('open');
+  }
+  function closeSheet() {
+    sheet.classList.remove('open');
+    pendingAction = null;
+    pendingMode = null;
+    showActionMode('');
+    clearPendingPin();
+  }
+  sheetCancel.addEventListener('click', closeSheet);
+
+  sheetOk.addEventListener('click', async () => {
+    if (!pendingAction) return;
+    const a = pendingAction;
+    sheetOk.disabled = true;
+    try {
+      if (a.kind === 'teleport') {
+        await api('/api/phone/teleport', { method: 'POST', body: { lat: a.lat, lng: a.lng } });
+        toast('已送出瞬移');
+      } else if (a.kind === 'navigate') {
+        // Custom km/h takes precedence; an empty box falls back to the
+        // selected mode's preset (walking / running / driving).
+        const customRaw = sheetCustomInput.value.trim();
+        const customKmh = customRaw === '' ? null : parseFloat(customRaw);
+        const body = { lat: a.lat, lng: a.lng, mode: navigateMode };
+        if (customKmh !== null && Number.isFinite(customKmh) && customKmh > 0) {
+          body.speed_kmh = customKmh;
+        }
+        await api('/api/phone/navigate', { method: 'POST', body });
+        toast(customKmh ? `已開始導航 (${customKmh} km/h)` : '已開始導航');
+      } else if (a.kind === 'stop') {
+        await api('/api/phone/stop', { method: 'POST' });
+        toast('已停止');
+      } else if (a.kind === 'restore') {
+        // Capture the current position before the restore so subsequent
+        // status polls know to hide the (now-stale) green pin.
+        try {
+          const cur = await api('/api/phone/status');
+          if (cur.current_position) restoredPos = { ...cur.current_position };
+        } catch (e) { /* ignore; restore still proceeds */ }
+        await api('/api/phone/restore', { method: 'POST' });
+        clearCurrentPin();
+        toast('已還原 GPS');
+      }
+      closeSheet();
+      pollStatus();
+    } catch (e) {
+      toast('失敗: ' + e.message, 'err');
+    } finally {
+      sheetOk.disabled = false;
+    }
+  });
+
+  // ── Search modal ──────────────────────────────────────────
+  const searchModal = document.getElementById('search-modal');
+  const searchInput = document.getElementById('search-input');
+  const searchResults = document.getElementById('search-results');
+  document.getElementById('search-close').addEventListener('click', () => searchModal.classList.remove('open'));
+  function openSearch() {
+    searchInput.value = '';
+    searchResults.innerHTML = '';
+    searchModal.classList.add('open');
+    setTimeout(() => searchInput.focus(), 100);
+  }
+  let searchTimer = null;
+  searchInput.addEventListener('input', () => {
+    if (searchTimer) clearTimeout(searchTimer);
+    const q = searchInput.value.trim();
+    if (q.length < 2) { searchResults.innerHTML = ''; return; }
+    searchTimer = setTimeout(async () => {
+      try {
+        const r = await api('/api/phone/geocode?q=' + encodeURIComponent(q));
+        renderSearchResults(r);
+      } catch (e) {
+        searchResults.innerHTML = '<div class="empty">搜尋失敗: ' + e.message + '</div>';
+      }
+    }, 350);
+  });
+  function renderSearchResults(items) {
+    if (!items || items.length === 0) {
+      searchResults.innerHTML = '<div class="empty">沒有結果</div>';
+      return;
+    }
+    searchResults.innerHTML = '';
+    items.forEach((it) => {
+      const d = document.createElement('div');
+      d.className = 'item';
+      d.innerHTML = '<div class="name"></div><div class="full"></div>';
+      d.querySelector('.name').textContent = it.short_name || it.display_name;
+      d.querySelector('.full').textContent = it.display_name;
+      d.addEventListener('click', () => {
+        searchModal.classList.remove('open');
+        setPendingPin(it.lat, it.lng);
+        map.setView([it.lat, it.lng], Math.max(map.getZoom(), 15));
+        openSheet('teleport', it.lat, it.lng);
+      });
+      searchResults.appendChild(d);
+    });
+  }
+
+  // ── Coord modal (single-line auto-parse, mirrors desktop) ────
+  const coordModal = document.getElementById('coord-modal');
+  const coordInput = document.getElementById('coord-input');
+  document.getElementById('coord-close').addEventListener('click', () => coordModal.classList.remove('open'));
+  function openCoord() {
+    coordInput.value = '';
+    coordModal.classList.add('open');
+    setTimeout(() => coordInput.focus(), 100);
+  }
+  async function submitCoord() {
+    const parsed = parseCoord(coordInput.value);
+    if (!parsed) { toast('讀不到有效座標', 'err'); return; }
+    const { lat, lng } = parsed;
+    coordModal.classList.remove('open');
+    try {
+      await api('/api/phone/teleport', { method: 'POST', body: { lat, lng } });
+      toast('已飛到 ' + lat.toFixed(5) + ', ' + lng.toFixed(5));
+      map.setView([lat, lng], Math.max(map.getZoom(), 15));
+      pollStatus();
+    } catch (e) {
+      toast('失敗: ' + e.message, 'err');
+    }
+  }
+  document.getElementById('coord-go').addEventListener('click', submitCoord);
+  coordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitCoord(); });
+
+  // ── PIN gate ─────────────────────────────────────────────
+  const gate = document.getElementById('gate');
+  const pinInput = document.getElementById('pin-input');
+  const pinSubmit = document.getElementById('pin-submit');
+  const pinErr = document.getElementById('pin-err');
+
+  function showGate() {
+    gate.style.display = '';
+    pinInput.value = '';
+    pinErr.textContent = '';
+    setTimeout(() => pinInput.focus(), 100);
+  }
+  function hideGate() { gate.style.display = 'none'; }
+
+  pinInput.addEventListener('input', () => {
+    pinInput.value = pinInput.value.replace(/\D/g, '').slice(0, 6);
+    pinSubmit.disabled = pinInput.value.length !== 6;
+    pinErr.textContent = '';
+  });
+  pinInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !pinSubmit.disabled) pinSubmit.click();
+  });
+  pinSubmit.addEventListener('click', async () => {
+    pinSubmit.disabled = true;
+    pinErr.textContent = '';
+    try {
+      const r = await fetch('/api/phone/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pinInput.value }),
+      });
+      if (!r.ok) {
+        pinErr.textContent = 'PIN 不正確';
+        pinSubmit.disabled = false;
+        return;
+      }
+      const j = await r.json();
+      token = j.token;
+      storeToken(token);
+      hideGate();
+      pollStatus();
+    } catch (e) {
+      pinErr.textContent = '連線失敗,請重試';
+      pinSubmit.disabled = false;
+    }
+  });
+
+  // ── Boot ──────────────────────────────────────────────────
+  async function boot() {
+    token = loadStoredToken();
+    if (!token) { showGate(); return; }
+    try { await pollStatus(); } catch (e) {}
+  }
+  boot();
+  setInterval(() => { if (token) pollStatus(); }, 2000);
+})();
+</script>
+</body>
+</html>

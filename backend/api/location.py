@@ -312,6 +312,7 @@ async def loop(req: LoopRequest):
         straight_line=req.straight_line,
         route_engine=req.route_engine,
         lap_count=req.lap_count,
+        jump_mode=req.jump_mode, jump_interval=req.jump_interval,
     ))
     return {"status": "started", "waypoints": len(req.waypoints), "mode": req.mode}
 
@@ -326,6 +327,7 @@ async def multi_stop(req: MultiStopRequest):
         pause_enabled=req.pause_enabled, pause_min=req.pause_min, pause_max=req.pause_max,
         straight_line=req.straight_line,
         route_engine=req.route_engine,
+        jump_mode=req.jump_mode, jump_interval=req.jump_interval,
     ))
     return {"status": "started", "stops": len(req.waypoints), "mode": req.mode}
 

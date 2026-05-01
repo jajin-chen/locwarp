@@ -33,6 +33,8 @@ class MultiStopNavigator:
         pause_max: float = 20.0,
         straight_line: bool = False,
         route_engine: str | None = None,
+        jump_mode: bool = False,
+        jump_interval: float = 6.0,
     ) -> None:
         """Navigate through *waypoints* one leg at a time.
 
@@ -52,6 +54,20 @@ class MultiStopNavigator:
 
         if len(waypoints) < 2:
             raise ValueError("At least 2 waypoints are required for multi-stop")
+
+        # Jump mode: teleport point-to-point with a fixed dwell interval.
+        # Skips OSRM routing and the normal "near first waypoint?" preamble
+        # because the user wants to land exactly on each stop, in order,
+        # without walking. Honors loop=True to repeat. stop_duration /
+        # pause_* are ignored — jump_interval is the dwell time.
+        if jump_mode:
+            await _run_jump_multistop(
+                engine,
+                waypoints,
+                interval=max(0.0, float(jump_interval)),
+                loop=loop,
+            )
+            return
 
         if engine.current_position is None:
             raise RuntimeError(
@@ -284,3 +300,99 @@ class MultiStopNavigator:
         dlat = math.radians(b.lat - a.lat)
         dlng = math.radians(b.lng - a.lng) * math.cos(math.radians(a.lat))
         return 6_371_000 * math.sqrt(dlat ** 2 + dlng ** 2)
+
+
+async def _run_jump_multistop(
+    engine,
+    waypoints: list[Coordinate],
+    *,
+    interval: float,
+    loop: bool,
+) -> None:
+    """Teleport sequentially through *waypoints*, dwelling *interval* seconds
+    at each stop. When *loop* is True, repeats from the first stop after
+    reaching the last. Stops cleanly when ``engine._stop_event`` is set."""
+    engine.state = SimulationState.MULTI_STOP
+    engine.total_segments = len(waypoints)
+    engine.lap_count = 0
+    engine.segment_index = 0
+    engine.distance_traveled = 0.0
+    engine.distance_remaining = 0.0
+    engine._user_waypoints = list(waypoints)
+    engine._user_waypoint_next = 1 if len(waypoints) > 1 else 0
+
+    await engine._emit("route_path", {
+        "coords": [{"lat": wp.lat, "lng": wp.lng} for wp in waypoints],
+    })
+    await engine._emit("state_change", {
+        "state": engine.state.value,
+        "waypoints": [{"lat": wp.lat, "lng": wp.lng} for wp in waypoints],
+        "stop_duration": 0,
+        "loop": loop,
+    })
+
+    logger.info(
+        "Jump multi-stop started: %d waypoints, interval=%.1fs, loop=%s",
+        len(waypoints), interval, loop,
+    )
+
+    async def _dwell() -> bool:
+        if interval <= 0:
+            return engine._stop_event.is_set()
+        try:
+            await asyncio.wait_for(engine._stop_event.wait(), timeout=interval)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    running = True
+    while running and not engine._stop_event.is_set():
+        for i, wp in enumerate(waypoints):
+            if engine._stop_event.is_set():
+                break
+            await engine._set_position(wp.lat, wp.lng)
+            engine.segment_index = i
+            engine._user_waypoint_next = min(i + 1, len(waypoints))
+            await engine._emit("position_update", {
+                "lat": wp.lat, "lng": wp.lng,
+                "speed_mps": 0.0,
+                "progress": (i + 1) / max(len(waypoints), 1),
+                "segment_index": i,
+                "total_segments": len(waypoints),
+                "lap_count": engine.lap_count,
+                "distance_traveled": 0.0,
+                "distance_remaining": 0.0,
+                "eta_seconds": 0.0,
+                "eta_arrival": "",
+                "is_paused": False,
+            })
+            await engine._emit("user_waypoint_advance", {
+                "current_index": i,
+                "next_index": min(i + 1, len(waypoints) - 1),
+            })
+            await engine._emit("stop_reached", {
+                "index": i + 1,
+                "total": len(waypoints),
+                "lat": wp.lat, "lng": wp.lng,
+            })
+            # Don't dwell after the very last stop on a non-looping run -
+            # the simulation is finished, so dwelling there would just delay
+            # the IDLE transition without serving any purpose.
+            is_last = (i == len(waypoints) - 1)
+            if is_last and not loop:
+                continue
+            if await _dwell():
+                break
+
+        if not loop or engine._stop_event.is_set():
+            running = False
+        else:
+            engine.lap_count += 1
+            await engine._emit("lap_complete", {"lap": engine.lap_count})
+            logger.info("Jump multi-stop lap %d complete", engine.lap_count)
+
+    if engine.state == SimulationState.MULTI_STOP:
+        engine.state = SimulationState.IDLE
+        await engine._emit("multi_stop_complete", {"laps": engine.lap_count})
+        await engine._emit("state_change", {"state": engine.state.value})
+    logger.info("Jump multi-stop finished after %d laps", engine.lap_count)

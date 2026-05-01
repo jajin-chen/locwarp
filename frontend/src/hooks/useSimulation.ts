@@ -213,6 +213,27 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
       else localStorage.removeItem('locwarp.loop.lap_count')
     } catch { /* ignore quota errors */ }
   }, [])
+
+  // Jump mode (point-to-point teleport with fixed dwell). Persisted per-mode
+  // so the user's preference for Loop and MultiStop is restored on reload.
+  const [jumpMode, setJumpModeRaw] = useState<boolean>(() => {
+    try { return localStorage.getItem('locwarp.jump.mode') === '1' } catch { return false }
+  })
+  const setJumpMode = useCallback((v: boolean) => {
+    setJumpModeRaw(v)
+    try { localStorage.setItem('locwarp.jump.mode', v ? '1' : '0') } catch { /* ignore */ }
+  }, [])
+  const [jumpInterval, setJumpIntervalRaw] = useState<number>(() => {
+    try {
+      const n = parseFloat(localStorage.getItem('locwarp.jump.interval') || '6')
+      return Number.isFinite(n) && n >= 0 ? n : 6
+    } catch { return 6 }
+  })
+  const setJumpInterval = useCallback((v: number) => {
+    const clamped = Number.isFinite(v) && v >= 0 ? v : 6
+    setJumpIntervalRaw(clamped)
+    try { localStorage.setItem('locwarp.jump.interval', String(clamped)) } catch { /* ignore */ }
+  }, [])
   // What's *actually* running on the device — set when a route handler
   // starts or when applySpeed succeeds. Used by the status bar so the
   // user doesn't see a typed-or-preset-selected speed before it has
@@ -397,15 +418,15 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         break
       }
       case 'ddi_not_mounted': {
-        // v0.2.58: backend no longer auto-mounts DDI. It just checks
-        // and tells us iPhone has no DDI. Show the hint so the user
-        // can mount it themselves via Xcode / 3uTools.
+        // Backend reports the DDI isn't mounted. Silently dismiss the
+        // mount-progress overlay; we no longer surface the hint as a
+        // banner because most users on iOS 17+ have DDI auto-mounted by
+        // a prior tool and the warning fires spuriously after every
+        // reconnect. Users who genuinely lack DDI will see the failure
+        // when an action (teleport / navigate) actually returns an
+        // error from the device.
         setDdiMounting(false)
         setDdiStage(null)
-        const hint = wsMessage.data?.hint
-        if (typeof hint === 'string') {
-          setError(hint)
-        }
         break
       }
       case 'tunnel_lost': {
@@ -574,7 +595,7 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         // and break the backend↔UI seg_idx mapping for highlighting.
         setProgress(0)
         setLapProgress(null)
-        const res = await api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseLoop.enabled, pause_min: pauseLoop.min, pause_max: pauseLoop.max }, undefined, straightLine, loopLapCount, routeEngine)
+        const res = await api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseLoop.enabled, pause_min: pauseLoop.min, pause_max: pauseLoop.max }, undefined, straightLine, loopLapCount, routeEngine, { jump_mode: jumpMode, jump_interval: jumpInterval })
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
         setEffectiveSpeed({ kmh: customSpeedKmh ?? MODE_DEFAULT_KMH[moveMode], min: speedMinKmh, max: speedMaxKmh })
         return res
@@ -583,7 +604,7 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         throw err
       }
     },
-    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseMultiStop, pauseLoop, pauseRandomWalk, straightLine, loopLapCount, routeEngine],
+    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseMultiStop, pauseLoop, pauseRandomWalk, straightLine, loopLapCount, routeEngine, jumpMode, jumpInterval],
   )
 
   const multiStop = useCallback(
@@ -593,7 +614,7 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         _setMode(SimMode.MultiStop)
         // See startLoop — do not overwrite UI waypoints with the backend route.
         setProgress(0)
-        const res = await api.multiStop(wps, moveMode, stopDuration, loop, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseMultiStop.enabled, pause_min: pauseMultiStop.min, pause_max: pauseMultiStop.max }, undefined, straightLine, routeEngine)
+        const res = await api.multiStop(wps, moveMode, stopDuration, loop, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseMultiStop.enabled, pause_min: pauseMultiStop.min, pause_max: pauseMultiStop.max }, undefined, straightLine, routeEngine, { jump_mode: jumpMode, jump_interval: jumpInterval })
         setStatus((prev) => ({ ...prev, running: true, paused: false }))
         setEffectiveSpeed({ kmh: customSpeedKmh ?? MODE_DEFAULT_KMH[moveMode], min: speedMinKmh, max: speedMaxKmh })
         return res
@@ -602,7 +623,7 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         throw err
       }
     },
-    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseMultiStop, pauseLoop, pauseRandomWalk, straightLine, routeEngine],
+    [moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseMultiStop, pauseLoop, pauseRandomWalk, straightLine, routeEngine, jumpMode, jumpInterval],
   )
 
   const randomWalk = useCallback(
@@ -799,12 +820,12 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
   const startLoopAll = useCallback(async (udids: string[], wps: LatLng[]) => {
     await preSyncStart(udids)
     setLapProgress(null)
-    return fanout(udids, 'loop', (u) => api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseLoop.enabled, pause_min: pauseLoop.min, pause_max: pauseLoop.max }, u, straightLine, loopLapCount, routeEngine))
-  }, [fanout, preSyncStart, moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseLoop, straightLine, loopLapCount, routeEngine])
+    return fanout(udids, 'loop', (u) => api.startLoop(wps, moveMode, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseLoop.enabled, pause_min: pauseLoop.min, pause_max: pauseLoop.max }, u, straightLine, loopLapCount, routeEngine, { jump_mode: jumpMode, jump_interval: jumpInterval }))
+  }, [fanout, preSyncStart, moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseLoop, straightLine, loopLapCount, routeEngine, jumpMode, jumpInterval])
   const multiStopAll = useCallback(async (udids: string[], wps: LatLng[], dur: number, loop: boolean) => {
     await preSyncStart(udids)
-    return fanout(udids, 'multistop', (u) => api.multiStop(wps, moveMode, dur, loop, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseMultiStop.enabled, pause_min: pauseMultiStop.min, pause_max: pauseMultiStop.max }, u, straightLine, routeEngine))
-  }, [fanout, preSyncStart, moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseMultiStop, straightLine, routeEngine])
+    return fanout(udids, 'multistop', (u) => api.multiStop(wps, moveMode, dur, loop, { speed_kmh: customSpeedKmh, speed_min_kmh: speedMinKmh, speed_max_kmh: speedMaxKmh }, { pause_enabled: pauseMultiStop.enabled, pause_min: pauseMultiStop.min, pause_max: pauseMultiStop.max }, u, straightLine, routeEngine, { jump_mode: jumpMode, jump_interval: jumpInterval }))
+  }, [fanout, preSyncStart, moveMode, customSpeedKmh, speedMinKmh, speedMaxKmh, pauseMultiStop, straightLine, routeEngine, jumpMode, jumpInterval])
   const randomWalkAll = useCallback(async (udids: string[], center: LatLng, r: number) => {
     await preSyncStart(udids)
     // Shared seed → both engines produce identical destination sequences.
@@ -913,6 +934,10 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     lapProgress,
     loopLapCount,
     setLoopLapCount,
+    jumpMode,
+    setJumpMode,
+    jumpInterval,
+    setJumpInterval,
     effectiveSpeed,
     applySpeed,
     error,
