@@ -41,7 +41,7 @@ class AppState:
 
     def __init__(self):
         self.device_manager = DeviceManager()
-        # Per-udid simulation engines (group mode, max 2). The legacy
+        # Per-udid simulation engines (group mode, max 3). The legacy
         # `simulation_engine` attribute still returns the most-recently-
         # created engine for single-device call sites that have not yet
         # been refactored.

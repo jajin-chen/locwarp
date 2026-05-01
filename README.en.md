@@ -101,17 +101,17 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 Loop and Multi-stop modes have a **Point-to-point jump** checkbox. When enabled the device teleports stop-to-stop and dwells at each waypoint for a configurable interval (default 6 seconds, freely editable) instead of walking the routed path. Useful when you only need the iPhone to dwell at each waypoint in order. The setting is remembered in localStorage.
 
-### Dual-device Group Mode (v0.2.0+)
+### Multi-device Group Mode (v0.2.0+, up to three devices)
 
-Connect **two iPhones at once**. Every action (teleport, navigate, loop, multi-stop, random walk, joystick, pause, resume, stop, apply speed, restore-all) fans out to both devices in parallel.
+Connect **up to three iPhones at once**. Every action (teleport, navigate, loop, multi-stop, random walk, joystick, pause, resume, stop, apply speed, restore-all) fans out to every connected device in parallel — both the desktop UI and the phone web control honour this.
 
-- Two device chips in the sidebar header show connection state and sim state. Right-click for per-device restore / enable dev mode / disconnect.
-- Status bar dual pills show coords, speed, mode for each device. "Restore all" wipes both at once.
-- **Auto pre-sync start**: before any group action, both devices teleport to the same coordinate so they follow identical paths.
-- **Random walk shared seed**: both devices use the same RNG seed, producing identical destination sequences. Runs for hours without drifting apart.
-- **Cooldown is force-off in dual mode**: per-device cooldowns would otherwise block fan-out actions.
-- **Auto-connect**: USB watchdog polls every 1 s and auto-connects new devices up to the cap of 2. **A third plugged-in iPhone is completely ignored** (no Trust prompt, no connect attempt).
-- The map keeps the single-device view (both devices overlap perfectly after pre-sync, so dual markers were just visual noise). Device identity stays visible via chips and status pills.
+- Device chips in the sidebar header show connection state and sim state for every device. Right-click for per-device restore / enable dev mode / disconnect.
+- Status bar pills show coords, speed, mode for each device. "Restore all" wipes every device at once.
+- **Auto pre-sync start**: before any group action, every device teleports to the same coordinate so they follow identical paths.
+- **Random walk shared seed**: every device uses the same RNG seed, producing identical destination sequences. Runs for hours without drifting apart.
+- **Cooldown is force-off in group mode**: per-device cooldowns would otherwise block fan-out actions.
+- **Auto-connect**: USB watchdog polls every 1 s and auto-connects new devices up to the cap of 3. A fourth plugged-in iPhone is ignored.
+- The map keeps a single-device view (all devices overlap perfectly after pre-sync, so multiple markers were just visual noise). Device identity stays visible via chips and status pills.
 
 ### Routing Source Picker (v0.2.90+ / BRouter v0.2.91+)
 
@@ -309,7 +309,7 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 - **In-process Wi-Fi tunnel**: since v0.2.3 the backend runs `start_tcp_tunnel()` on its own event loop instead of spawning a helper exe
 - **Runtime state directory**: everything goes to `~/.locwarp/` (bookmarks / settings / tunnel info) to avoid PyInstaller's `_MEIPASS` temp-dir issues
 - **Tile referer / OSM swap**: OSM blocks distributable apps on their public tiles, so CartoDB (OSM data hosted on CARTO's CDN, no referer needed) is the default
-- **Dual-device group mode** (v0.2.0+): synchronized teleport / movement, primary is never hijacked by a late-plugged device, late joiner (B) syncs to A's position and auto-resumes whatever sim A is running (fanout)
+- **Multi-device group mode** (v0.2.0+, up to 3 devices): synchronized teleport / movement, primary is never hijacked by a late-plugged device, late joiners sync to the primary's position and auto-resume whatever sim it's running (fanout)
 - **Idle-gated geocoding**: reverse geocode + timezone + weather lookups only fire when state is idle / teleport / disconnect AND position moved ≥ 100m; prevents HTTP contending with the DVT channel during active sim
 - **Frontend-direct weather**: `lookupWeather()` calls Open-Meteo from the renderer so each user consumes their own IP's quota, never proxied through backend (would share one source IP across all users)
 - **Auto country flag**: bookmark add / edit triggers reverse geocode to populate `country_code`; re-fetched automatically when coordinates change

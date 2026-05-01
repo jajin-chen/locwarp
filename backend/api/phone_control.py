@@ -187,6 +187,41 @@ def _engine():
     return eng
 
 
+def _all_engines():
+    """Return every connected simulation engine. Used so phone-control
+    actions fan out to both devices in dual-device group mode (matching
+    the desktop UI's behaviour). Falls back to just the primary when
+    only one device is connected."""
+    from main import app_state
+    if not app_state.simulation_engines:
+        raise HTTPException(status_code=503, detail={"code": "no_device",
+                                                     "message": "尚未連接 iOS 裝置"})
+    return list(app_state.simulation_engines.values())
+
+
+async def _fanout(action_name: str, fn):
+    """Run `fn(engine)` on every connected engine concurrently. Logs
+    per-engine failures but doesn't bubble them up unless every engine
+    failed — that way unplugging one device mid-action still lets the
+    other device complete the action."""
+    import asyncio
+    engines = _all_engines()
+    results = await asyncio.gather(
+        *[fn(e) for e in engines], return_exceptions=True
+    )
+    fails = [r for r in results if isinstance(r, Exception)]
+    if fails and len(fails) == len(results):
+        # Every engine failed — surface the first error so the phone
+        # gets a meaningful message instead of a silent success.
+        first = fails[0]
+        if isinstance(first, HTTPException):
+            raise first
+        logger.exception("phone %s failed on every engine", action_name, exc_info=first)
+        raise HTTPException(status_code=500, detail=str(first))
+    if fails:
+        logger.warning("phone %s: %d/%d engines failed", action_name, len(fails), len(results))
+
+
 @router.get("/api/phone/status")
 async def phone_status(
     request: Request,
@@ -237,15 +272,11 @@ async def phone_teleport(
     x_locwarp_token: str | None = Header(default=None, alias="X-LocWarp-Token"),
     t: str | None = None,
 ):
+    """Teleport every connected device to the same coordinate. In single
+    device mode this is just one engine; in dual-device group mode both
+    iPhones move together, matching the desktop UI's behaviour."""
     _check_token(_resolve_token(request, x_locwarp_token, t))
-    eng = _engine()
-    try:
-        await eng.teleport(body.lat, body.lng)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("phone teleport failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    await _fanout("teleport", lambda e: e.teleport(body.lat, body.lng))
     return {"status": "ok", "lat": body.lat, "lng": body.lng}
 
 
@@ -256,8 +287,7 @@ async def phone_stop(
     t: str | None = None,
 ):
     _check_token(_resolve_token(request, x_locwarp_token, t))
-    eng = _engine()
-    await eng.stop()
+    await _fanout("stop", lambda e: e.stop())
     return {"status": "stopped"}
 
 
@@ -268,8 +298,7 @@ async def phone_restore(
     t: str | None = None,
 ):
     _check_token(_resolve_token(request, x_locwarp_token, t))
-    eng = _engine()
-    await eng.restore()
+    await _fanout("restore", lambda e: e.restore())
     return {"status": "restored"}
 
 
