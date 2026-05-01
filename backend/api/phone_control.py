@@ -309,15 +309,17 @@ async def phone_navigate(
     x_locwarp_token: str | None = Header(default=None, alias="X-LocWarp-Token"),
     t: str | None = None,
 ):
-    """Navigate (walk / drive) from the current virtual position to the
-    given coordinate. Spawns the simulation in the background so the
-    HTTP call returns quickly. Refuses with 400 if there's no virtual
-    origin yet — without one the engine has nothing to interpolate from
-    and the sim would silently no-op, which the phone UI used to mistake
-    for a successful start."""
+    """Navigate (walk / drive) from each device's current virtual position
+    to the given coordinate. Fans out across every connected engine in
+    group mode so all up-to-3 iPhones move together. Refuses with 400
+    if no engine has a virtual origin — without one the sim would
+    silently no-op, which the phone UI used to mistake for a successful
+    start."""
     _check_token(_resolve_token(request, x_locwarp_token, t))
-    eng = _engine()
-    if eng.current_position is None:
+    engines = _all_engines()
+    # Require at least one engine with a current position. Otherwise
+    # the navigate call falls through to a no-op on every engine.
+    if all(e.current_position is None for e in engines):
         raise HTTPException(status_code=400, detail={
             "code": "no_position",
             "message": "尚未有虛擬位置,請先瞬移或飛座標",
@@ -328,11 +330,16 @@ async def phone_navigate(
     except ValueError:
         mode = MovementMode.WALKING
     import asyncio
-    asyncio.create_task(eng.navigate(
-        Coordinate(lat=body.lat, lng=body.lng),
-        mode,
-        speed_kmh=body.speed_kmh,
-    ))
+    dest = Coordinate(lat=body.lat, lng=body.lng)
+    # navigate is fire-and-forget on each engine — the engines run
+    # their sims independently. We don't gather() because navigate's
+    # internal _run_handler keeps running for the lifetime of the
+    # walk; awaiting it would block the HTTP response until each
+    # device arrives.
+    for e in engines:
+        if e.current_position is None:
+            continue
+        asyncio.create_task(e.navigate(dest, mode, speed_kmh=body.speed_kmh))
     return {
         "status": "started",
         "destination": {"lat": body.lat, "lng": body.lng},

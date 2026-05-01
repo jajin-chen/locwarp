@@ -225,12 +225,12 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
   }, [])
   const [jumpInterval, setJumpIntervalRaw] = useState<number>(() => {
     try {
-      const n = parseFloat(localStorage.getItem('locwarp.jump.interval') || '6')
-      return Number.isFinite(n) && n >= 0 ? n : 6
-    } catch { return 6 }
+      const n = parseFloat(localStorage.getItem('locwarp.jump.interval') || '12')
+      return Number.isFinite(n) && n >= 0 ? n : 12
+    } catch { return 12 }
   })
   const setJumpInterval = useCallback((v: number) => {
-    const clamped = Number.isFinite(v) && v >= 0 ? v : 6
+    const clamped = Number.isFinite(v) && v >= 0 ? v : 12
     setJumpIntervalRaw(clamped)
     try { localStorage.setItem('locwarp.jump.interval', String(clamped)) } catch { /* ignore */ }
   }, [])

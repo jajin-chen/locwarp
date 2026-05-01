@@ -33,7 +33,7 @@ class RouteLooper:
         route_engine: str | None = None,
         lap_count: int | None = None,
         jump_mode: bool = False,
-        jump_interval: float = 6.0,
+        jump_interval: float = 12.0,
     ) -> None:
         """Build a multi-waypoint route that forms a closed loop, then
         traverse it repeatedly until stopped.

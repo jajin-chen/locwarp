@@ -99,7 +99,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 #### Point-to-point Jump (v0.2.96+)
 
-Loop and Multi-stop modes have a **Point-to-point jump** checkbox. When enabled the device teleports stop-to-stop and dwells at each waypoint for a configurable interval (default 6 seconds, freely editable) instead of walking the routed path. Useful when you only need the iPhone to dwell at each waypoint in order. The setting is remembered in localStorage.
+Loop and Multi-stop modes have a **Point-to-point jump** checkbox. When enabled the device teleports stop-to-stop and dwells at each waypoint for a configurable interval (default 12 seconds, freely editable) instead of walking the routed path. Useful when you only need the iPhone to dwell at each waypoint in order. The setting is remembered in localStorage.
 
 ### Multi-device Group Mode (v0.2.0+, up to three devices)
 

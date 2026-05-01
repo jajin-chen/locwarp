@@ -276,7 +276,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onClickToAddWaypointChange,
   jumpMode = false,
   onJumpModeChange,
-  jumpInterval = 6,
+  jumpInterval = 12,
   onJumpIntervalChange,
   openLibraryToken,
   openLibraryTab,

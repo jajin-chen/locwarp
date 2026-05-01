@@ -85,7 +85,7 @@ class LoopRequest(BaseModel):
     # walking the routed path. Used for fruit-farm sniping where the user
     # wants the device to dwell at each waypoint, not interpolate between.
     jump_mode: bool = False
-    jump_interval: float = 6.0
+    jump_interval: float = 12.0
 
 
 class MultiStopRequest(BaseModel):
@@ -105,7 +105,7 @@ class MultiStopRequest(BaseModel):
     # Jump mode: teleport point-to-point with a fixed interval instead of
     # walking the routed path. See LoopRequest.jump_mode for details.
     jump_mode: bool = False
-    jump_interval: float = 6.0
+    jump_interval: float = 12.0
 
 
 class RandomWalkRequest(BaseModel):

@@ -239,7 +239,7 @@ class SimulationEngine:
         route_engine: str | None = None,
         lap_count: int | None = None,
         jump_mode: bool = False,
-        jump_interval: float = 6.0,
+        jump_interval: float = 12.0,
     ) -> None:
         """Start looping through a closed route."""
         await self._ensure_stopped()
@@ -296,7 +296,7 @@ class SimulationEngine:
         straight_line: bool = False,
         route_engine: str | None = None,
         jump_mode: bool = False,
-        jump_interval: float = 6.0,
+        jump_interval: float = 12.0,
     ) -> None:
         """Navigate through waypoints with optional stops."""
         await self._ensure_stopped()

@@ -140,7 +140,7 @@ const pp = (o?: PauseOpts) => (o ? {
 const sl = (v?: boolean) => (v ? { straight_line: true } : {})
 const re = (v?: string | null) => (v ? { route_engine: v } : {})
 export type JumpOpts = { jump_mode?: boolean; jump_interval?: number }
-const jm = (o?: JumpOpts) => (o?.jump_mode ? { jump_mode: true, jump_interval: o.jump_interval ?? 6 } : {})
+const jm = (o?: JumpOpts) => (o?.jump_mode ? { jump_mode: true, jump_interval: o.jump_interval ?? 12 } : {})
 export const navigate = (lat: number, lng: number, mode: string, speed?: SpeedOpts, udid?: string, straightLine?: boolean, routeEngine?: string) =>
   request<any>('POST', '/api/location/navigate', { lat, lng, mode, ...sp(speed), ...sl(straightLine), ...re(routeEngine), ...ud(udid) })
 export const startLoop = (waypoints: { lat: number; lng: number }[], mode: string, speed?: SpeedOpts, pause?: PauseOpts, udid?: string, straightLine?: boolean, lapCount?: number | null, routeEngine?: string, jump?: JumpOpts) =>

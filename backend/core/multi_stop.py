@@ -34,7 +34,7 @@ class MultiStopNavigator:
         straight_line: bool = False,
         route_engine: str | None = None,
         jump_mode: bool = False,
-        jump_interval: float = 6.0,
+        jump_interval: float = 12.0,
     ) -> None:
         """Navigate through *waypoints* one leg at a time.
 
