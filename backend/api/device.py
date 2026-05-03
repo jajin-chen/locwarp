@@ -340,8 +340,15 @@ async def wifi_tunnel_discover():
         from pymobiledevice3.bonjour import browse_remotepairing
         instances = await browse_remotepairing(timeout=3.0)
         for inst in instances:
-            ipv4s = [a for a in (inst.addresses or []) if ":" not in a]
-            addrs = ipv4s if ipv4s else list(inst.addresses or [])
+            # Newer pymobiledevice3 returns Address objects (with .ip / .port
+            # attributes), older releases returned plain strings. Coerce to
+            # str either way before doing the IPv4-vs-IPv6 string heuristic
+            # — otherwise `":" not in a` raises TypeError on the Address
+            # type and the whole mDNS branch silently dies.
+            raw_addrs = inst.addresses or []
+            str_addrs = [str(a) for a in raw_addrs]
+            ipv4s = [s for s in str_addrs if ":" not in s]
+            addrs = ipv4s if ipv4s else str_addrs
             for addr in addrs:
                 results.append({
                     "ip": addr,
@@ -386,12 +393,45 @@ async def _cleanup_wifi_connection_for(udid: str, *, caller: str) -> bool:
     """Disconnect a single WiFi-connected device + drop its sim engine.
     Broadcasts device_disconnected for that udid so the frontend chip
     flips to disconnected. Returns True iff a Network connection was found
-    and torn down."""
+    and torn down.
+
+    The engine MUST be stopped before the dm.disconnect closes the RSD —
+    otherwise its in-flight task (random_walk / loop / multi_stop /
+    navigate / _move_along_route) keeps trying to push positions through
+    the now-dead RSD, hits DeviceLostError, retries, fails again, and
+    floods the log with `Giving up on this route after repeated push
+    failures` every ~2 seconds for as long as LocWarp stays open.
+    Mirrors the USB watchdog teardown sequence in main.py:387-418."""
     from main import app_state
     dm = _dm()
     conn = dm._connections.get(udid)
     if conn is None or getattr(conn, "connection_type", "") != "Network":
         return False
+
+    # Stop the running simulation BEFORE we close the underlying lockdown,
+    # so its retry loop doesn't get a chance to log a dozen DeviceLostError
+    # rounds against the dying RSD.
+    old_eng = app_state.simulation_engines.get(udid)
+    if old_eng is not None:
+        try:
+            from models.schemas import SimulationState as _SS
+            old_eng.state = _SS.DISCONNECTED
+            try:
+                await old_eng._emit("state_change", {"state": old_eng.state.value})
+            except Exception:
+                _tunnel_logger.debug(
+                    "[%s] disconnected state_change emit failed", caller, exc_info=True,
+                )
+            old_eng._stop_event.set()
+            old_eng._pause_event.set()  # unstick anyone awaiting pause_event
+            active = getattr(old_eng, "_active_task", None)
+            if active is not None and not active.done():
+                active.cancel()
+        except Exception:
+            _tunnel_logger.debug(
+                "[%s] failed to stop old engine for %s", caller, udid, exc_info=True,
+            )
+
     try:
         await dm.disconnect(udid)
         _tunnel_logger.info("[%s] Disconnected WiFi device %s", caller, udid)
@@ -452,10 +492,160 @@ async def _tear_down_tunnel(udid: str, *, caller: str) -> None:
             _tunnel_logger.exception("[%s] runner.stop failed for %s", caller, udid)
 
 
+# Restart backoff sequence (seconds). Three attempts cover most WiFi blips
+# (transient packet loss, brief screen-lock pause) without sitting on a dead
+# tunnel for an unbounded time. Total worst-case wait ~21s before final
+# teardown — within the user's tolerance for "auto-recovers" before they'd
+# look at the UI and notice.
+_TUNNEL_RESTART_BACKOFF: tuple[float, ...] = (3.0, 6.0, 12.0)
+
+
+async def _attempt_tunnel_restart(
+    udid: str,
+    ip: str,
+    port: int,
+    snapshot: dict | None,
+    original_runner: TunnelRunner,
+) -> bool:
+    """Try one restart of the tunnel. On success, swaps in the new runner,
+    rebuilds dm._connections + sim engine (since the new RSD interface gets
+    a fresh address), and resumes any captured snapshot. Returns True on
+    success, False otherwise. Caller decides whether to retry."""
+    new_runner = TunnelRunner()
+    try:
+        info = await new_runner.start(udid, ip, port, timeout=10.0)
+    except Exception as exc:
+        _tunnel_logger.warning(
+            "Tunnel restart failed for %s: %s: %s",
+            udid, type(exc).__name__, exc,
+        )
+        return False
+
+    new_rsd_address = info.get("rsd_address")
+    new_rsd_port = info.get("rsd_port")
+    if not new_rsd_address or not new_rsd_port:
+        _tunnel_logger.warning(
+            "Tunnel restart for %s returned no RSD info; treating as failure",
+            udid,
+        )
+        try:
+            await new_runner.stop()
+        except Exception:
+            pass
+        return False
+
+    from main import app_state
+    try:
+        async with _tunnels_lock:
+            # User may have stopped this tunnel during our async window.
+            if _tunnels.get(udid) is not original_runner:
+                _tunnel_logger.info(
+                    "Tunnel restart for %s racing user stop; discarding new runner",
+                    udid,
+                )
+                try:
+                    await new_runner.stop()
+                except Exception:
+                    pass
+                return True  # not really success, but caller should NOT retry
+            _tunnels[udid] = new_runner
+
+        # connect_wifi_tunnel internally calls disconnect(udid) if udid
+        # already exists, so the old (now-dead) RSD lockdown gets torn
+        # down correctly.
+        dm = _dm()
+        dev_info = await dm.connect_wifi_tunnel(new_rsd_address, new_rsd_port)
+
+        # Rebuild the sim engine bound to the new location service. The
+        # old engine pointed at the dead RSD and would throw
+        # ConnectionTerminatedError on the next teleport / position push.
+        app_state.simulation_engines.pop(dev_info.udid, None)
+        if app_state._primary_udid == dev_info.udid:
+            # Keep this udid as primary; create_engine_for_device only
+            # promotes when _primary_udid is None.
+            pass
+        await app_state.create_engine_for_device(dev_info.udid)
+
+        # Re-arm the watchdog on the new runner so subsequent blips get
+        # the same recovery treatment.
+        old_wd = _tunnel_watchdogs.pop(udid, None)
+        if old_wd is not None and old_wd is not asyncio.current_task() and not old_wd.done():
+            old_wd.cancel()
+        _tunnel_watchdogs[udid] = asyncio.create_task(
+            _per_tunnel_watchdog(udid, new_runner)
+        )
+
+        # Resume any in-flight simulation (navigate / loop / multi-stop /
+        # random_walk) so the iPhone keeps moving instead of stopping at
+        # the blip point. Snapshot only exists when this device was the
+        # one driving the sim — followers don't capture one.
+        if snapshot is not None:
+            new_eng = app_state.simulation_engines.get(dev_info.udid)
+            if new_eng is not None:
+                _tunnel_logger.info(
+                    "Resuming sim from snapshot after tunnel restart for %s (kind=%s)",
+                    dev_info.udid, snapshot.get("kind"),
+                )
+                asyncio.create_task(new_eng.resume_from_snapshot(snapshot))
+        else:
+            # Group-mode: if this WiFi device was a follower of some other
+            # primary (USB or WiFi), restart broke the follower task. Re-
+            # arm the same teleport-to-primary + attach-as-follower flow
+            # the USB watchdog uses for re-plugged USB devices, so dual /
+            # triple-device groups stay locked together across a blip.
+            try:
+                from main import _auto_sync_new_device_to_primary
+                asyncio.create_task(_auto_sync_new_device_to_primary(dev_info.udid))
+            except Exception:
+                _tunnel_logger.exception(
+                    "Auto-sync after tunnel restart failed for %s", dev_info.udid,
+                )
+
+        try:
+            from api.websocket import broadcast
+            await broadcast("tunnel_recovered", {
+                "udid": dev_info.udid,
+                "rsd_address": new_rsd_address,
+                "rsd_port": new_rsd_port,
+            })
+            await broadcast("device_connected", {
+                "udid": dev_info.udid,
+                "name": dev_info.name,
+                "ios_version": dev_info.ios_version,
+                "connection_type": "Network",
+            })
+        except Exception:
+            _tunnel_logger.exception("Failed to broadcast tunnel_recovered for %s", udid)
+
+        _tunnel_logger.info(
+            "Tunnel restart succeeded for %s (rsd %s:%d)",
+            udid, new_rsd_address, new_rsd_port,
+        )
+        return True
+    except Exception:
+        _tunnel_logger.exception(
+            "Tunnel restart for %s started but post-setup failed; rolling back",
+            udid,
+        )
+        # Roll back the new runner we registered. Leave the old runner
+        # entry empty so the outer retry loop tries a fresh new one.
+        async with _tunnels_lock:
+            if _tunnels.get(udid) is new_runner:
+                _tunnels.pop(udid, None)
+        try:
+            await new_runner.stop()
+        except Exception:
+            pass
+        return False
+
+
 async def _per_tunnel_watchdog(udid: str, runner: TunnelRunner) -> None:
     """Watch a single device's tunnel. If the runner's task dies (WiFi
-    blip, iPhone locked, admin revoked), give 5s grace then tear down
-    only this device's WiFi connection. Other tunnels continue running."""
+    blip, iPhone locked, admin revoked), capture the sim state, then try
+    up to len(_TUNNEL_RESTART_BACKOFF) restarts with backoff. Each restart
+    rebuilds the device manager connection (the new TUN interface gets a
+    fresh RSD address) and resumes the sim from snapshot so the iPhone
+    keeps moving across the blip. Other tunnels stay isolated."""
     try:
         task = runner.task
         if task is None:
@@ -472,30 +662,75 @@ async def _per_tunnel_watchdog(udid: str, runner: TunnelRunner) -> None:
         if _tunnels.get(udid) is not runner:
             return
 
-        _tunnel_logger.warning("Tunnel for %s exited unexpectedly; 5s grace", udid)
+        ip = runner.target_ip
+        port = runner.target_port
+
+        _tunnel_logger.warning(
+            "Tunnel for %s exited unexpectedly (target=%s:%s); will attempt %d restart(s)",
+            udid, ip, port, len(_TUNNEL_RESTART_BACKOFF),
+        )
         try:
             from api.websocket import broadcast
             await broadcast("tunnel_degraded", {"udid": udid, "reason": "task_exited"})
         except Exception:
             _tunnel_logger.exception("Failed to emit tunnel_degraded event")
 
-        await asyncio.sleep(5.0)
+        if ip is None or port is None:
+            # No target captured; we have nothing to retry against. Fall
+            # through to teardown.
+            _tunnel_logger.warning(
+                "Tunnel for %s has no captured target ip/port; skipping retries",
+                udid,
+            )
+        else:
+            from main import app_state
+            snapshot: dict | None = None
+            old_eng = app_state.simulation_engines.get(udid)
+            if old_eng is not None:
+                try:
+                    snapshot = old_eng.capture_resumable_snapshot()
+                    if snapshot:
+                        _tunnel_logger.info(
+                            "Captured resumable snapshot for %s before tunnel restart (kind=%s)",
+                            udid, snapshot.get("kind"),
+                        )
+                except Exception:
+                    _tunnel_logger.exception("capture_resumable_snapshot failed for %s", udid)
 
+            for attempt, delay in enumerate(_TUNNEL_RESTART_BACKOFF, start=1):
+                try:
+                    await asyncio.sleep(delay)
+                except asyncio.CancelledError:
+                    return
+
+                # User may have explicitly stopped or replaced this tunnel
+                # during the sleep; if so, abort the retry loop.
+                if _tunnels.get(udid) is not runner:
+                    _tunnel_logger.info(
+                        "Tunnel for %s no longer registered (user stop?); aborting retries",
+                        udid,
+                    )
+                    return
+
+                _tunnel_logger.info(
+                    "Tunnel restart attempt %d/%d for %s (after %.0fs backoff)",
+                    attempt, len(_TUNNEL_RESTART_BACKOFF), udid, delay,
+                )
+                ok = await _attempt_tunnel_restart(udid, ip, port, snapshot, runner)
+                if ok:
+                    # On success the new watchdog has been armed and this
+                    # one's job is done.
+                    return
+
+        # All retries exhausted (or no target to retry against).
+        _tunnel_logger.warning(
+            "Tunnel for %s could not be restarted; tearing down WiFi connection",
+            udid,
+        )
         async with _tunnels_lock:
             current = _tunnels.get(udid)
-            if current is not runner:
-                # Replaced or removed during grace; nothing to do.
-                return
-            if current.is_running():
-                _tunnel_logger.info("Tunnel for %s recovered within grace period", udid)
-                try:
-                    from api.websocket import broadcast
-                    await broadcast("tunnel_recovered", {"udid": udid})
-                except Exception:
-                    pass
-                return
-            # Final teardown for this udid only.
-            _tunnels.pop(udid, None)
+            if current is runner:
+                _tunnels.pop(udid, None)
             wd = _tunnel_watchdogs.pop(udid, None)
             if wd is not None and wd is not asyncio.current_task() and not wd.done():
                 wd.cancel()

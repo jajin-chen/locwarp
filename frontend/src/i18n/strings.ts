@@ -258,6 +258,13 @@ export const STRINGS = {
   'wifi.legacy_hint': { zh: 'iPhone 解鎖並已配對即可直接連線。', en: 'iPhone unlocked and paired, connect directly.' },
   'wifi.device_not_detected': { zh: '未偵測到裝置,請確認 iPhone 與電腦在同一 WiFi', en: 'Device not detected, ensure iPhone and computer are on the same Wi-Fi' },
   'wifi.detect_failed': { zh: '偵測失敗', en: 'Detection failed' },
+  'wifi.autoconnect_label': { zh: '啟動時自動連線(用上次的 IP)', en: 'Auto-connect on launch (use last IP)' },
+  'wifi.autoconnect_tooltip': { zh: '打開 LocWarp 時,如果沒有裝置已連線,會自動嘗試上次成功的 IP / Port', en: 'When LocWarp starts, automatically try last successful IP / Port if no device is connected yet' },
+  'panel.waypoints_set_as_start': { zh: '設為起點並飛過去(從這裡開始巡迴)', en: 'Set as start and fly here (loop begins from this point)' },
+  'panel.waypoints_set_as_start_short': { zh: '起點', en: 'Start' },
+  'panel.wp_fly_set_as_start': { zh: '設為起點並飛過去', en: 'Set as start + fly' },
+  'map.wp_set_as_start': { zh: '設為起點並飛過去', en: 'Set as start and fly here' },
+  'map.wp_delete': { zh: '刪除路徑點', en: 'Delete waypoint' },
 
   // ── Map ──────────────────────────────────────
   'map.recenter': { zh: '定位到目前位置', en: 'Recenter on current position' },

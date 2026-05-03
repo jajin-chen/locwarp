@@ -353,6 +353,97 @@ const App: React.FC = () => {
     }
   }, [ws.connected])
 
+  // Auto-attempt WiFi tunnel on first WS connect if the user previously
+  // saved at least one IP/port AND has the auto-connect toggle on. Runs
+  // once per app session — not on every WS reconnect — to avoid re-
+  // triggering after a backend restart that already restored the tunnel
+  // via the backend's own watchdog. Failures are silent (the WiFi panel
+  // will surface them when the user opens it).
+  //
+  // Multi-device: tries every IP/port pair in `locwarp.tunnel.savedips`
+  // in parallel (up to MAX_TUNNEL_DEVICES = 3) so a user with two or
+  // three iPhones gets all of them connecting at once, not just the
+  // most recent one. Falls back to the legacy single-IP keys for users
+  // upgrading from a build that didn't track multiple IPs yet.
+  //
+  // Group-mode safety: each per-IP attempt is independent. The whole
+  // pass is skipped if a device is already connected at trigger time
+  // (USB plug, or backend already brought a tunnel back up via its own
+  // restart logic) so we don't fight with an existing USB connection.
+  const wifiAutoConnectAttemptedRef = useRef(false)
+  useEffect(() => {
+    if (!ws.connected) return
+    if (wifiAutoConnectAttemptedRef.current) return
+    let enabled: boolean
+    let savedList: Array<{ ip: string; port: number }> = []
+    try {
+      enabled = localStorage.getItem('locwarp.tunnel.autoconnect') !== '0'
+      const raw = localStorage.getItem('locwarp.tunnel.savedips') || '[]'
+      try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          savedList = parsed
+            .filter((e) => e && typeof e.ip === 'string' && e.ip.trim())
+            .map((e) => ({ ip: String(e.ip).trim(), port: Number(e.port) || 49152 }))
+        }
+      } catch { /* ignore — fall back to legacy below */ }
+      // Legacy single-IP fallback for upgraders.
+      if (savedList.length === 0) {
+        const legacyIp = (localStorage.getItem('locwarp.tunnel.ip') || '').trim()
+        if (legacyIp) {
+          const portStr = localStorage.getItem('locwarp.tunnel.port') || '49152'
+          savedList = [{ ip: legacyIp, port: parseInt(portStr, 10) || 49152 }]
+        }
+      }
+    } catch {
+      return
+    }
+    if (!enabled || savedList.length === 0) return
+    wifiAutoConnectAttemptedRef.current = true
+    // Defer so device.scan() and any backend-side restored tunnels have
+    // time to surface in `device.connectedDevices` before we decide
+    // whether auto-connect is needed.
+    const tid = setTimeout(() => {
+      ;(async () => {
+        try {
+          // Skip if a device is already connected (USB plug, or backend
+          // already brought a tunnel back up via its own restart logic).
+          if (device.connectedDevices.length > 0) return
+          const status = await api.wifiTunnelStatus()
+          const alreadyTunneled = new Set(
+            (status?.tunnels || [])
+              .map((tn) => `${tn.rsd_address || ''}:${tn.rsd_port || 0}`),
+          )
+          // De-dupe by ip:port and cap at the same MAX_DEVICES the
+          // backend enforces — anything beyond would 409 anyway.
+          const seen = new Set<string>()
+          const uniq: Array<{ ip: string; port: number }> = []
+          for (const entry of savedList) {
+            const key = `${entry.ip}:${entry.port}`
+            if (seen.has(key)) continue
+            if (alreadyTunneled.has(key)) continue
+            seen.add(key)
+            uniq.push(entry)
+            if (uniq.length >= 3) break
+          }
+          if (uniq.length === 0) return
+          // Parallel: every iPhone gets a tunnel attempt at the same
+          // time so the user doesn't wait sequentially for unreachable
+          // ones to time out (~10s each).
+          await Promise.allSettled(
+            uniq.map((entry) =>
+              device.startWifiTunnel(entry.ip, entry.port).catch(() => {}),
+            ),
+          )
+        } catch {
+          // Silent — tunnel section will show its own error when opened.
+        }
+      })()
+    }, 1500)
+    return () => clearTimeout(tid)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws.connected])
+
   // Poll cooldown
   useEffect(() => {
     if (!ws.connected) return
@@ -611,6 +702,26 @@ const App: React.FC = () => {
   const handleRemoveWaypoint = useCallback((index: number) => {
     sim.setWaypoints((prev: any[]) => prev.filter((_: any, i: number) => i !== index))
   }, [sim])
+
+  // Trim the waypoint list so the chosen index becomes the new start.
+  // Everything before `index` is dropped — the iPhone won't walk back
+  // through them on the next Start press. Concretely: setting #9 as
+  // start on a 1..15 route gives 9 → 10 → ... → 15 (and Loop wraps
+  // back to 9, not to 1). User asked for trim (not rotate) so a
+  // pause-and-resume-from-#9 flow doesn't re-walk #1..#8 at the end.
+  const handleSetWpAsStart = useCallback(async (index: number) => {
+    const wps = sim.waypoints
+    if (index <= 0 || index >= wps.length) return
+    const trimmed = wps.slice(index)
+    sim.setWaypoints(trimmed)
+    const start = trimmed[0]
+    sim.setCurrentPosition({ lat: start.lat, lng: start.lng })
+    const udids = device.connectedDevices.map((d) => d.udid)
+    if (udids.length > 0) {
+      try { await sim.teleportAll(udids, start.lat, start.lng) } catch { /* ignore */ }
+    }
+    void pushRecent(start.lat, start.lng, 'coord_teleport')
+  }, [sim, device, pushRecent])
 
   // Teleport to a waypoint from inside the Loop / MultiStop list. We
   // go around sim.teleport (which flips sim.mode to Teleport and would
@@ -1522,6 +1633,8 @@ const App: React.FC = () => {
           onNavigate={handleNavigate}
           onAddBookmark={handleAddBookmark}
           onAddWaypoint={handleAddWaypoint}
+          onSetWpAsStart={handleSetWpAsStart}
+          onRemoveWaypoint={handleRemoveWaypoint}
           showWaypointOption={sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop || sim.mode === SimMode.Navigate}
           deviceConnected={device.connectedDevice !== null}
           onShowToast={showToast}
@@ -1779,7 +1892,7 @@ const App: React.FC = () => {
               <div style={{ fontSize: 11, opacity: 0.55, marginBottom: 16 }}>
                 {t('panel.wp_fly_keep_mode')}
               </div>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                 <button
                   onClick={() => setWpFlyConfirm(null)}
                   style={{
@@ -1788,14 +1901,33 @@ const App: React.FC = () => {
                     border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6,
                   }}
                 >{t('generic.cancel')}</button>
-                <button
-                  onClick={confirmWpFly}
-                  style={{
-                    padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                    background: '#6c8cff', color: '#fff',
-                    border: 'none', borderRadius: 6,
-                  }}
-                >{t('panel.wp_fly_confirm')}</button>
+                {wpFlyConfirm.index > 0 ? (
+                  <button
+                    onClick={async () => {
+                      const idx = wpFlyConfirm.index
+                      setWpFlyConfirm(null)
+                      await handleSetWpAsStart(idx)
+                    }}
+                    style={{
+                      padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      background: '#6c8cff', color: '#fff',
+                      border: 'none', borderRadius: 6,
+                    }}
+                    title={t('panel.waypoints_set_as_start')}
+                  >{t('panel.wp_fly_set_as_start')}</button>
+                ) : (
+                  // index 0 IS the start — no rotation possible. Fall back
+                  // to the plain teleport so clicking the start coord still
+                  // lets the user re-align the iPhone to it.
+                  <button
+                    onClick={confirmWpFly}
+                    style={{
+                      padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      background: '#6c8cff', color: '#fff',
+                      border: 'none', borderRadius: 6,
+                    }}
+                  >{t('panel.wp_fly_confirm')}</button>
+                )}
               </div>
             </div>
           </div>,

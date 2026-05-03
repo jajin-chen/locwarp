@@ -50,6 +50,16 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   const [showDropdown, setShowDropdown] = useState(false);
   const [tunnelIp, setTunnelIp] = useState(() => localStorage.getItem('locwarp.tunnel.ip') || '');
   const [tunnelPort, setTunnelPort] = useState(() => localStorage.getItem('locwarp.tunnel.port') || '49152');
+  // Auto-attempt the saved IP/port on app launch. Default ON so users who
+  // previously connected over WiFi don't have to re-click on every cold
+  // start — App.tsx reads this flag once after the WS handshake settles.
+  const [autoConnectEnabled, setAutoConnectEnabled] = useState<boolean>(
+    () => localStorage.getItem('locwarp.tunnel.autoconnect') !== '0',
+  );
+  const handleAutoConnectToggle = (next: boolean) => {
+    setAutoConnectEnabled(next);
+    try { localStorage.setItem('locwarp.tunnel.autoconnect', next ? '1' : '0'); } catch { /* ignore */ }
+  };
   const [tunnelConnecting, setTunnelConnecting] = useState(false);
   const [tunnelError, setTunnelError] = useState<string | null>(null);
   const [showIpHelp, setShowIpHelp] = useState(false);
@@ -558,6 +568,29 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                 </div>
               )}
 
+              {/* Auto-connect on launch toggle — persisted in localStorage,
+                  read by App.tsx after WS handshake. Skipped if any device
+                  is already connected at startup, so it never fights with
+                  a USB-attached iPhone. */}
+              <label
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  fontSize: 11, padding: '4px 6px', marginBottom: 8,
+                  background: 'rgba(108, 140, 255, 0.06)',
+                  border: '1px solid rgba(108, 140, 255, 0.2)',
+                  borderRadius: 3, cursor: 'pointer',
+                }}
+                title={t('wifi.autoconnect_tooltip')}
+              >
+                <input
+                  type="checkbox"
+                  checked={autoConnectEnabled}
+                  onChange={(e) => handleAutoConnectToggle(e.target.checked)}
+                  style={{ margin: 0 }}
+                />
+                <span style={{ flex: 1 }}>{t('wifi.autoconnect_label')}</span>
+              </label>
+
               {/* iOS 17+ WiFi Tunnel (RSD) — list of active tunnels + add form */}
               {onStartWifiTunnel && (
                 <>
@@ -642,8 +675,24 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                           setTunnelConnecting(true); setTunnelError(null);
                           try {
                             await onStartWifiTunnel(tunnelIp.trim(), parseInt(tunnelPort) || 49152);
-                            localStorage.setItem('locwarp.tunnel.ip', tunnelIp.trim());
-                            localStorage.setItem('locwarp.tunnel.port', tunnelPort || '49152');
+                            const ip = tunnelIp.trim();
+                            const port = parseInt(tunnelPort) || 49152;
+                            // Legacy single-entry keys — kept so an old
+                            // build still pre-fills correctly after upgrade.
+                            localStorage.setItem('locwarp.tunnel.ip', ip);
+                            localStorage.setItem('locwarp.tunnel.port', String(port));
+                            // Multi-device: append to the saved list so
+                            // launch-time auto-connect tries every iPhone
+                            // the user has previously paired, not just one.
+                            try {
+                              const raw = localStorage.getItem('locwarp.tunnel.savedips') || '[]';
+                              const list = (() => { try { return JSON.parse(raw) as Array<{ip: string; port: number; lastUsed: number}>; } catch { return []; } })();
+                              const filtered = Array.isArray(list)
+                                ? list.filter((e) => !(e && e.ip === ip && e.port === port))
+                                : [];
+                              const next = [{ ip, port, lastUsed: Date.now() }, ...filtered].slice(0, 5);
+                              localStorage.setItem('locwarp.tunnel.savedips', JSON.stringify(next));
+                            } catch { /* storage disabled */ }
                             setTunnelIp('');
                           } catch (err: any) {
                             setTunnelError(err.message || 'WiFi tunnel failed');

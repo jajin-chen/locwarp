@@ -315,7 +315,15 @@ async def _usbmux_presence_watchdog():
     miss_counts: dict[str, int] = {}
     miss_threshold = 3
     last_reconnect_attempt: dict[str, float] = {}
-    reconnect_cooldown = 5.0  # seconds between retry attempts per UDID
+    # Per-udid consecutive failure count. Drives exponential backoff so a
+    # device that consistently fails to connect (Trust pending, Windows
+    # firewall blocking the RSD loopback, no admin rights, dead USB cable)
+    # doesn't get hammered every 5 seconds for the rest of the session and
+    # spam the log with hundreds of identical tracebacks. Reset on success
+    # OR on disappearance (the user re-plugged after fixing whatever).
+    reconnect_failure_count: dict[str, int] = {}
+    reconnect_cooldown_base = 5.0  # seconds for first retry
+    reconnect_cooldown_max = 300.0  # cap at 5 minutes per UDID
 
     while True:
         await asyncio.sleep(1.0)
@@ -489,15 +497,32 @@ async def _usbmux_presence_watchdog():
             # itself expects.
             new_udids = [present_usb_original[lc] for lc in new_udids_lc]
 
+            # Reset backoff for any UDID that just disappeared from usbmux —
+            # the next time it shows up (re-plug) we want to try immediately,
+            # not at the previous slot's accumulated cooldown.
+            stale = [u for u in reconnect_failure_count if u not in present_usb_original]
+            for u in stale:
+                reconnect_failure_count.pop(u, None)
+                last_reconnect_attempt.pop(u, None)
+
             now = time.monotonic()
             for udid in new_udids:
                 if len(dm._connections) >= MAX_DEVICES:
                     break
+                fail_count = reconnect_failure_count.get(udid, 0)
+                # 5s, 10s, 20s, 40s, 80s, 160s, 300s, 300s ...
+                cooldown = min(
+                    reconnect_cooldown_base * (2 ** fail_count),
+                    reconnect_cooldown_max,
+                )
                 last = last_reconnect_attempt.get(udid, 0.0)
-                if now - last < reconnect_cooldown:
+                if now - last < cooldown:
                     continue
                 last_reconnect_attempt[udid] = now
-                logger.info("usbmux watchdog: new USB device %s detected, auto-connecting", udid)
+                logger.info(
+                    "usbmux watchdog: new USB device %s detected, auto-connecting (fail_count=%d, cooldown=%.0fs)",
+                    udid, fail_count, cooldown,
+                )
                 try:
                     await dm.connect(udid)
                     await app_state.create_engine_for_device(udid)
@@ -515,6 +540,7 @@ async def _usbmux_presence_watchdog():
                         logger.exception("watchdog: broadcast (connected) failed")
                     logger.info("Auto-connect succeeded for %s", udid)
                     last_reconnect_attempt.pop(udid, None)
+                    reconnect_failure_count.pop(udid, None)
 
                     # Auto-sync the new device to the primary device: if the
                     # primary has a virtual position set, teleport the new
@@ -528,9 +554,20 @@ async def _usbmux_presence_watchdog():
                     except Exception:
                         logger.exception("Auto-sync of new device %s to primary failed", udid)
                 except Exception:
+                    reconnect_failure_count[udid] = fail_count + 1
+                    next_cooldown = min(
+                        reconnect_cooldown_base * (2 ** (fail_count + 1)),
+                        reconnect_cooldown_max,
+                    )
+                    # Drop full traceback after the first 3 failures so the
+                    # log doesn't fill with identical stacks. Cause is always
+                    # the same: Trust pending, no admin rights, or firewall
+                    # blocking the RSD loopback handshake.
+                    log_with_trace = fail_count < 3
                     logger.warning(
-                        "Auto-connect for %s failed (will retry in %.0fs): likely Trust pending",
-                        udid, reconnect_cooldown, exc_info=True,
+                        "Auto-connect for %s failed (attempt %d, will retry in %.0fs): likely Trust pending / no admin / firewall",
+                        udid, fail_count + 1, next_cooldown,
+                        exc_info=log_with_trace,
                     )
         except asyncio.CancelledError:
             raise
