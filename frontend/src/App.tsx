@@ -2222,7 +2222,32 @@ const App: React.FC = () => {
                   <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
                     {t('panel.route_paste_start_hint')}
                   </div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'space-between', alignItems: 'center' }}>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const text = await navigator.clipboard.readText()
+                          if (text) setRoutePasteText(text)
+                        } catch {
+                          showToast(t('panel.route_paste_clipboard_blocked'))
+                        }
+                      }}
+                      title={t('panel.route_paste_from_clipboard_tooltip')}
+                      style={{
+                        padding: '6px 12px', fontSize: 12, cursor: 'pointer',
+                        background: 'rgba(108, 140, 255, 0.18)', color: '#9bb0ff',
+                        border: '1px solid rgba(108, 140, 255, 0.4)', borderRadius: 6,
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                      }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="9" y="2" width="6" height="4" rx="1"/>
+                        <path d="M9 4H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-3"/>
+                        <path d="M9 12h6M9 16h4"/>
+                      </svg>
+                      {t('panel.route_paste_from_clipboard')}
+                    </button>
+                    <div style={{ display: 'flex', gap: 8 }}>
                     <button
                       onClick={() => { setRoutePasteOpen(false); setRoutePasteText('') }}
                       style={{
@@ -2242,6 +2267,7 @@ const App: React.FC = () => {
                         border: 'none', borderRadius: 6,
                       }}
                     >{`${t('panel.route_paste_submit')} (${valid.length})`}</button>
+                    </div>
                   </div>
                 </div>
               </div>

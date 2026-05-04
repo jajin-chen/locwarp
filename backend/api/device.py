@@ -801,6 +801,36 @@ async def _per_tunnel_watchdog(udid: str, runner: TunnelRunner) -> None:
                 except Exception:
                     _tunnel_logger.exception("capture_resumable_snapshot failed for %s", udid)
 
+                # Park the engine while we restart. Without this, multi-stop /
+                # loop / random-walk keep iterating to the next leg, each call
+                # burning ~3s in DvtLocationService._reconnect retries against
+                # the dead RSD before raising DeviceLostError, then the handler
+                # immediately tries the next leg. The log fills with "Giving up
+                # on this route after repeated push failures" every ~6s for as
+                # long as the watchdog is mid-restart. Cancelling the active
+                # task here halts the thrash; on a successful restart, the
+                # snapshot we just captured drives resume_from_snapshot back to
+                # the same leg / segment.
+                try:
+                    from models.schemas import SimulationState as _SS
+                    old_eng.state = _SS.DISCONNECTED
+                    try:
+                        await old_eng._emit("state_change", {"state": old_eng.state.value})
+                    except Exception:
+                        _tunnel_logger.debug(
+                            "Disconnected state_change emit failed during watchdog pause",
+                            exc_info=True,
+                        )
+                    old_eng._stop_event.set()
+                    old_eng._pause_event.set()  # unstick anyone awaiting pause_event
+                    active = getattr(old_eng, "_active_task", None)
+                    if active is not None and not active.done():
+                        active.cancel()
+                except Exception:
+                    _tunnel_logger.exception(
+                        "Failed to park engine for %s before tunnel restart", udid,
+                    )
+
             for attempt, delay in enumerate(_TUNNEL_RESTART_BACKOFF, start=1):
                 try:
                     await asyncio.sleep(delay)

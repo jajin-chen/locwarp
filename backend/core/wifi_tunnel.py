@@ -56,8 +56,38 @@ class TunnelRunner:
                     tunnel.address, tunnel.port, tunnel.interface,
                 )
                 self._ready.set()
-                await self._stop.wait()
-                logger.info("Tunnel stop signal received; closing context")
+
+                # Wait until either (a) the user requests stop, or (b) the
+                # underlying TCP socket dies. pymobiledevice3's sock_read_task
+                # exits silently on OSError / ConnectionReset and does NOT
+                # propagate out of the start_tcp_tunnel context, so without
+                # this wait_closed() race the runner task hangs forever even
+                # after the iPhone has gone away. _per_tunnel_watchdog only
+                # restarts when runner.task ends, so detecting tunnel death
+                # here is what wires up the existing auto-restart machinery.
+                stop_task = asyncio.create_task(self._stop.wait())
+                closed_task = asyncio.create_task(tunnel.client.wait_closed())
+                try:
+                    _, pending = await asyncio.wait(
+                        [stop_task, closed_task],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                finally:
+                    for t in (stop_task, closed_task):
+                        if not t.done():
+                            t.cancel()
+                            try:
+                                await t
+                            except (asyncio.CancelledError, Exception):
+                                pass
+
+                if self._stop.is_set():
+                    logger.info("Tunnel stop signal received; closing context")
+                else:
+                    logger.warning(
+                        "Tunnel underlying TCP socket died (sock_read_task exited); "
+                        "exiting runner so watchdog can restart"
+                    )
         except BaseException as exc:
             self._error = exc
             self._ready.set()

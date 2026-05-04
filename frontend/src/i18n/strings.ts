@@ -346,6 +346,15 @@ export const STRINGS = {
   'panel.route_paste_submit': { zh: '套用為路線', en: 'Apply as route' },
   'panel.route_paste_done': { zh: '已設定 {count} 筆路徑點', en: 'Set {count} waypoints' },
   'panel.route_paste_empty': { zh: '沒有有效的座標', en: 'No valid coordinates' },
+  'panel.route_paste_from_clipboard': { zh: '從剪貼簿貼上', en: 'Paste from clipboard' },
+  'panel.route_paste_from_clipboard_tooltip': {
+    zh: '一鍵讀取剪貼簿內容填入下方輸入框 (不用 Ctrl+V)',
+    en: 'One click to read clipboard into the box above (no Ctrl+V needed)',
+  },
+  'panel.route_paste_clipboard_blocked': {
+    zh: '無法讀取剪貼簿,請改用 Ctrl+V 貼上',
+    en: 'Could not read clipboard; use Ctrl+V instead',
+  },
   'panel.waypoints_click_to_fly': { zh: '點擊飛到此座標 (不影響路徑)', en: 'Click to teleport here (route stays intact)' },
   'panel.wp_fly_title': { zh: '飛到此座標?', en: 'Teleport to this waypoint?' },
   'panel.wp_fly_hint': { zh: '確認要把 iPhone 瞬移到這個座標嗎?', en: 'Teleport the iPhone to this coordinate?' },
