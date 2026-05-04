@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import inspect
 from abc import ABC, abstractmethod
+from typing import Awaitable, Callable
 
 import asyncio
 
@@ -25,7 +26,27 @@ class DeviceLostError(RuntimeError):
     """Raised when a location service determines the underlying device
     connection is no longer recoverable (e.g. USB unplugged, tunnel dead).
     Callers should drop any cached engine/connection and force a fresh
-    discover+connect on the next user action."""
+    discover+connect on the next user action.
+
+    The optional ``reason`` slot categorises the root cause so the API
+    layer can pick a specific user-facing message:
+
+    * ``tunnel_dead``   — WiFi tunnel (RemotePairing) is gone
+    * ``lockdown_dead`` — RSD / lockdown is unreachable but tunnel is up
+    * ``ddi_missing``   — Personalized DDI is no longer mounted
+    * ``usb_gone``      — USB cable disconnected / device removed
+    * ``unknown``       — fallback when the cause cannot be classified
+    """
+
+    REASON_TUNNEL_DEAD = "tunnel_dead"
+    REASON_LOCKDOWN_DEAD = "lockdown_dead"
+    REASON_DDI_MISSING = "ddi_missing"
+    REASON_USB_GONE = "usb_gone"
+    REASON_UNKNOWN = "unknown"
+
+    def __init__(self, *args, reason: str = "unknown") -> None:
+        super().__init__(*args)
+        self.reason = reason
 
 
 class LocationService(ABC):
@@ -61,12 +82,24 @@ class DvtLocationService(LocationService):
         An active DvtProvider session connected to the target device.
     lockdown
         The lockdown or RSD service used to create the DvtProvider.
-        Needed for reconnection.
+        Needed for the legacy reconnect path when no factory is supplied.
+    dvt_factory
+        Async callable returning a fresh DvtProvider for this device.
+        When provided (the preferred path), ``_reconnect`` defers to it
+        instead of rebuilding directly from the cached lockdown — this
+        lets device_manager wait for an in-flight WiFi tunnel restart
+        and hand back a DvtProvider built on the live lockdown.
     """
 
-    def __init__(self, dvt_provider: DvtProvider, lockdown=None) -> None:
+    def __init__(
+        self,
+        dvt_provider: DvtProvider,
+        lockdown=None,
+        dvt_factory: Callable[[], Awaitable[DvtProvider]] | None = None,
+    ) -> None:
         self._dvt = dvt_provider
         self._lockdown = lockdown
+        self._dvt_factory = dvt_factory
         self._location_sim: LocationSimulation | None = None
         self._active = False
         self._reconnect_lock = asyncio.Lock()
@@ -82,12 +115,20 @@ class DvtLocationService(LocationService):
     async def _reconnect(self) -> None:
         """Tear down and fully recreate the DVT provider and instrument.
 
-        Retries with exponential backoff (2s, 4s, 8s, 16s, 30s) up to 5
-        times.  This handles the case where the RSD/tunnel needs a moment
-        to recover after a screen lock or brief WiFi interruption.
+        Preferred path (``dvt_factory`` provided): defer rebuild to
+        device_manager. The factory probes tunnel health, waits for any
+        in-flight WiFi tunnel restart, and hands back a DvtProvider built
+        on the *current* live lockdown. This is what aligns this service
+        with the WiFi tunnel auto-recovery added in v0.2.119 — the cached
+        ``self._lockdown`` reference can become an orphan after a tunnel
+        restart, so we no longer rebuild against it directly.
+
+        Legacy path (no factory): keeps the original ~2s fast-fail loop
+        rebuilding from the cached lockdown, for callers that haven't
+        wired up the factory yet (and for unit tests).
         """
         async with self._reconnect_lock:
-            # Close the old DVT provider gracefully
+            # Close the old DVT provider gracefully.
             try:
                 await self._dvt.__aexit__(None, None, None)
             except Exception:
@@ -95,13 +136,27 @@ class DvtLocationService(LocationService):
 
             self._location_sim = None
 
-            if self._lockdown is None:
-                raise RuntimeError("Cannot reconnect DVT: no lockdown/RSD reference")
+            if self._dvt_factory is not None:
+                try:
+                    self._dvt = await self._dvt_factory()
+                    logger.info("DVT provider re-acquired via factory")
+                    return
+                except DeviceLostError:
+                    raise
+                except Exception as exc:
+                    logger.error("DVT factory raised: %s", exc)
+                    raise DeviceLostError(
+                        f"DVT factory failed: {exc}",
+                        reason=DeviceLostError.REASON_LOCKDOWN_DEAD,
+                    ) from exc
 
-            # Fast-fail: a blip usually recovers within 1-2s. If it doesn't,
-            # the device is almost certainly gone (USB unplugged, tunnel dead)
-            # — there's no point making the user wait 60s. 2 attempts with
-            # 0.5s + 1.5s = ~2s worst case, then raise DeviceLostError.
+            if self._lockdown is None:
+                raise DeviceLostError(
+                    "Cannot reconnect DVT: no lockdown reference and no factory",
+                    reason=DeviceLostError.REASON_LOCKDOWN_DEAD,
+                )
+
+            # Legacy fast-fail (kept only for back-compat).
             delays = [0.5, 1.5]
             last_exc: Exception | None = None
             for attempt, delay in enumerate(delays, start=1):
@@ -118,7 +173,6 @@ class DvtLocationService(LocationService):
                         attempt, len(delays), type(exc).__name__, delay,
                     )
                     await asyncio.sleep(delay)
-            # Final try without delay
             try:
                 new_dvt = DvtProvider(self._lockdown)
                 await new_dvt.__aenter__()
@@ -128,7 +182,10 @@ class DvtLocationService(LocationService):
             except Exception as exc:
                 last_exc = exc
             logger.error("DVT provider reconnect exhausted — device likely lost")
-            raise DeviceLostError(f"DVT reconnect failed: {last_exc}") from last_exc
+            raise DeviceLostError(
+                f"DVT reconnect failed: {last_exc}",
+                reason=DeviceLostError.REASON_LOCKDOWN_DEAD,
+            ) from last_exc
 
     async def set(self, lat: float, lng: float) -> None:
         """Simulate the device location using the DVT instrument channel."""
@@ -228,7 +285,10 @@ class LegacyLocationService(LocationService):
                 logger.info("Legacy location set to (%.6f, %.6f) after reconnect", lat, lng)
             except Exception as retry_exc:
                 logger.error("Legacy reconnect failed — device likely lost (%s)", retry_exc)
-                raise DeviceLostError(f"Legacy reconnect failed: {retry_exc}") from retry_exc
+                raise DeviceLostError(
+                    f"Legacy reconnect failed: {retry_exc}",
+                    reason=DeviceLostError.REASON_LOCKDOWN_DEAD,
+                ) from retry_exc
         except Exception:
             logger.exception("Failed to set legacy simulated location")
             raise

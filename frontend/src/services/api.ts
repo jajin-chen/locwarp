@@ -33,6 +33,22 @@ const ERROR_I18N: Record<string, { zh: string; en: string }> = {
   trust_failed: { zh: 'USB 信任失敗, 請在 iPhone 上點「信任」後再試', en: 'USB trust failed, tap Trust on the iPhone and retry' },
   remote_pair_failed: { zh: 'RemotePairing 記錄重建失敗, 請以系統管理員身分重啟 LocWarp', en: 'RemotePairing record rebuild failed, restart LocWarp as Administrator' },
   device_lost: { zh: '裝置連線中斷(USB 拔除或 Tunnel 死亡),請重新插上 USB 後再操作', en: 'Device connection lost (USB unplugged or tunnel died), please reconnect USB and try again' },
+  device_lost_tunnel_dead: {
+    zh: 'WiFi 連線中斷,請確認手機 WiFi 與電腦同網段、解鎖手機後再試',
+    en: 'Wi-Fi tunnel dropped — confirm the iPhone is on the same subnet, unlock the screen, and retry',
+  },
+  device_lost_lockdown_dead: {
+    zh: '裝置回應停止,請解鎖手機螢幕後再試',
+    en: 'Device stopped responding — unlock the iPhone screen and retry',
+  },
+  device_lost_ddi_missing: {
+    zh: 'Developer Disk Image 未掛載,請重新插拔 USB 或重新啟動裝置',
+    en: 'Developer Disk Image is not mounted — replug USB or reboot the device',
+  },
+  device_lost_usb_gone: {
+    zh: 'USB 已拔除,請重新插上後再操作',
+    en: 'USB cable disconnected — plug it back in and retry',
+  },
   max_devices_reached: {
     zh: '已連接最多 3 台裝置',
     en: 'Maximum 3 devices connected',
@@ -67,7 +83,13 @@ function maybeAttachDevModeHint(msg: string): string {
 function formatError(detail: unknown, fallback: string): string {
   if (typeof detail === 'string') return maybeAttachDevModeHint(detail)
   if (detail && typeof detail === 'object') {
-    const d = detail as { code?: string; message?: string }
+    const d = detail as { code?: string; reason?: string; message?: string }
+    // Composite lookup: device_lost + reason → tunnel_dead/lockdown_dead/etc
+    // gives a more specific message than the generic device_lost fallback.
+    if (d.code && d.reason) {
+      const composite = `${d.code}_${d.reason}`
+      if (ERROR_I18N[composite]) return ERROR_I18N[composite][currentLang()]
+    }
     if (d.code && ERROR_I18N[d.code]) return ERROR_I18N[d.code][currentLang()]
     if (d.message) return maybeAttachDevModeHint(d.message)
   }

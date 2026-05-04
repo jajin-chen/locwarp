@@ -35,6 +35,7 @@ from config import DEVICE_NAMES_FILE
 from models.schemas import DeviceInfo
 from services.json_safe import safe_load_json, safe_write_json
 from services.location_service import (
+    DeviceLostError,
     DvtLocationService,
     LegacyLocationService,
     LocationService,
@@ -580,7 +581,22 @@ class DeviceManager:
             await dvt.__aenter__()
             conn.dvt_provider = dvt
             logger.debug("DVT provider opened for %s", conn.udid)
-            return DvtLocationService(dvt, lockdown=conn.lockdown)
+            # Bind a per-udid factory so DvtLocationService._reconnect can
+            # ask us for a fresh DvtProvider on the *current* lockdown.
+            # This is what makes the location service survive WiFi tunnel
+            # restarts — when the tunnel watchdog rebuilds the tunnel and
+            # replaces conn.lockdown, the factory picks up the new one
+            # automatically instead of rebuilding on a now-orphan ref.
+            udid = conn.udid
+
+            async def _factory(_udid: str = udid) -> DvtProvider:
+                return await self.get_fresh_dvt_provider(_udid)
+
+            return DvtLocationService(
+                dvt,
+                lockdown=conn.lockdown,
+                dvt_factory=_factory,
+            )
         except Exception as dvt_exc:
             logger.warning(
                 "DVT location service failed for %s (%s). Falling back to "
@@ -803,6 +819,145 @@ class DeviceManager:
         """Return ``'USB'`` or ``'Network'`` for a connected device."""
         conn = self._connections.get(udid)
         return conn.connection_type if conn else "USB"
+
+    # ------------------------------------------------------------------
+    # Recovery helpers (used by location_service factory + API safety net)
+    # ------------------------------------------------------------------
+
+    async def get_fresh_dvt_provider(
+        self, udid: str, *, timeout: float = 15.0
+    ) -> DvtProvider:
+        """Return a freshly-opened ``DvtProvider`` for *udid*.
+
+        Used by ``DvtLocationService._reconnect`` after the DVT instrument
+        channel drops. Probes connection health, transparently waits for
+        any in-flight WiFi tunnel restart driven by ``_per_tunnel_watchdog``
+        (see ``api/device.py``), then opens a new ``DvtProvider`` on the
+        *current* lockdown. The previous provider stored on the active
+        connection is closed best-effort.
+
+        Raises ``DeviceLostError`` (with a categorised ``reason``) when
+        no live provider can be obtained inside *timeout* seconds —
+        typically because the user really did unplug USB, turn off the
+        iPhone, or the WiFi tunnel cannot be restarted.
+        """
+        import time
+        deadline = time.monotonic() + timeout
+        last_exc: Exception | None = None
+
+        while True:
+            async with self._lock:
+                conn = self._connections.get(udid)
+
+            if conn is None:
+                raise DeviceLostError(
+                    f"Device {udid} no longer connected",
+                    reason=DeviceLostError.REASON_USB_GONE,
+                )
+
+            # WiFi: peek at the tunnel runner. If it has died, the watchdog
+            # is in the middle of restarting it — wait until either a fresh
+            # runner appears (success path swaps in a new TunnelRunner and
+            # replaces conn.lockdown along the way) or we time out.
+            if conn.connection_type == "Network":
+                runner = None
+                try:
+                    from api.device import _tunnels  # local import: avoids cycle at module load
+                    runner = _tunnels.get(udid)
+                except ImportError:
+                    runner = None
+                if runner is not None and not runner.is_running():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise DeviceLostError(
+                            f"WiFi tunnel for {udid} did not restart in {timeout:.0f}s",
+                            reason=DeviceLostError.REASON_TUNNEL_DEAD,
+                        )
+                    await asyncio.sleep(min(0.5, remaining))
+                    continue
+
+            # USB, or WiFi with a live tunnel: try opening a new DvtProvider.
+            try:
+                new_dvt = DvtProvider(conn.lockdown)
+                await new_dvt.__aenter__()
+            except Exception as exc:
+                last_exc = exc
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    logger.warning(
+                        "get_fresh_dvt_provider exhausted for %s: %s", udid, exc,
+                    )
+                    raise DeviceLostError(
+                        f"Could not open DvtProvider for {udid}: {exc}",
+                        reason=DeviceLostError.REASON_LOCKDOWN_DEAD,
+                    ) from exc
+                await asyncio.sleep(min(0.5, remaining))
+                continue
+
+            # Success — swap into the active connection record so future
+            # discover/clear paths find it. Best-effort close on the old.
+            old_dvt = conn.dvt_provider
+            conn.dvt_provider = new_dvt
+            if old_dvt is not None and old_dvt is not new_dvt:
+                try:
+                    await old_dvt.__aexit__(None, None, None)
+                except Exception:
+                    logger.debug(
+                        "Ignoring error closing stale DvtProvider for %s",
+                        udid, exc_info=True,
+                    )
+            logger.info("DVT provider re-acquired for %s", udid)
+            return new_dvt
+
+    async def full_reconnect(self, udid: str) -> bool:
+        """Last-resort recovery: force a complete teardown + reconnect.
+
+        Used as the API-layer safety net (``api/location.py``) when the
+        location service's factory-driven reconnect still raised
+        ``DeviceLostError``. For WiFi this drives the same restart path
+        the tunnel watchdog uses (rebuilding tunnel + RSD lockdown +
+        DvtProvider). For USB, this disconnects + reconnects from
+        scratch.
+
+        Returns ``True`` when *udid* is healthily connected at exit.
+        """
+        async with self._lock:
+            conn = self._connections.get(udid)
+        conn_type = conn.connection_type if conn else None
+
+        if conn_type == "Network":
+            try:
+                from api.device import _tunnels, _attempt_tunnel_restart
+            except ImportError:
+                logger.debug("full_reconnect: api.device not importable")
+                return False
+            runner = _tunnels.get(udid)
+            if runner is None or not runner.target_ip or not runner.target_port:
+                logger.debug(
+                    "full_reconnect: no live tunnel runner for %s; cannot recover", udid,
+                )
+                return False
+            try:
+                ok = await _attempt_tunnel_restart(
+                    udid, runner.target_ip, runner.target_port, None, runner,
+                )
+                return bool(ok)
+            except Exception:
+                logger.exception("full_reconnect: WiFi tunnel restart failed for %s", udid)
+                return False
+
+        # USB (or unknown type — try the bluntest recovery available).
+        try:
+            try:
+                await self.disconnect(udid)
+            except Exception:
+                logger.debug("full_reconnect: USB disconnect failed", exc_info=True)
+            await self.connect(udid)
+            async with self._lock:
+                return udid in self._connections
+        except Exception:
+            logger.exception("full_reconnect: USB reconnect failed for %s", udid)
+            return False
 
     async def disconnect_all(self) -> None:
         """Disconnect every active device."""
