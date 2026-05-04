@@ -328,6 +328,60 @@ async def _scan_subnet_for_port(port: int = 49152) -> list[str]:
     return hits
 
 
+async def _scan_ports_for_ip(
+    ip: str,
+    start: int = 49152,
+    end: int = 65535,
+    concurrency: int = 1024,
+    timeout: float = 0.35,
+) -> list[int]:
+    """Scan the IANA dynamic / ephemeral range on a single IP for open TCP ports.
+
+    iOS picks the RemotePairing port from this range at boot / network rebind,
+    so the actual port on a given iPhone is rarely the legacy 49152 default.
+    Scanning one host across 16k ports finishes in a few seconds because most
+    closed ports return RST immediately on a same-LAN probe.
+    """
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _probe_one(p: int) -> int | None:
+        async with sem:
+            ok = await _tcp_probe(ip, p, timeout)
+            return p if ok else None
+
+    tasks = [asyncio.create_task(_probe_one(p)) for p in range(start, end + 1)]
+    hits: list[int] = []
+    for fut in asyncio.as_completed(tasks):
+        try:
+            res = await fut
+        except (OSError, ConnectionError, asyncio.TimeoutError):
+            res = None
+        if res is not None:
+            hits.append(res)
+    hits.sort()
+    return hits
+
+
+class WifiTunnelFindPortRequest(BaseModel):
+    ip: str
+
+
+@router.post("/wifi/tunnel/find_port")
+async def wifi_tunnel_find_port(req: WifiTunnelFindPortRequest):
+    """Scan an iPhone IP across the IANA dynamic range (49152-65535) and return
+    every open TCP port. Used as the manual fallback when mDNS / Bonjour fails
+    because the user's router blocks multicast or the PC has VPN / virtual NICs
+    that hijack the broadcast path."""
+    ip = (req.ip or "").strip()
+    if not ip:
+        raise HTTPException(status_code=400, detail="ip required")
+    try:
+        ports = await _scan_ports_for_ip(ip)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ip": ip, "ports": ports}
+
+
 @router.get("/wifi/tunnel/discover")
 async def wifi_tunnel_discover():
     """Find iPhones on the local network. First tries mDNS (Bonjour RemotePairing
@@ -365,21 +419,66 @@ async def wifi_tunnel_discover():
     except Exception as e:
         _tunnel_logger.warning("mDNS browse failed: %s", e)
 
-    # --- 2) Fallback: TCP subnet scan on port 49152 ---
+    # --- 2) Fallback: smart /24 scan ---
+    # Old behavior tested only port 49152 across /24, which missed any iPhone
+    # that bound RemotePairing higher in the 49152-65535 dynamic range (most
+    # of them, after the first reboot). Two-phase replacement:
+    #   a) probe every host on /24 against a small set of "iPhone tells"
+    #      (49152 legacy port + 62078 lockdown) to find live candidates
+    #   b) full-range scan (49152-65535) on each candidate to find the
+    #      port iOS actually picked this boot
     if not results:
-        _tunnel_logger.info("mDNS empty; falling back to /24 TCP scan on port 49152")
+        _tunnel_logger.info(
+            "mDNS empty; falling back to smart /24 scan (probe + full-range)",
+        )
         try:
-            hits = await _scan_subnet_for_port(49152)
-            for ip in hits:
-                results.append({
-                    "ip": ip,
-                    "port": 49152,
-                    "host": ip,
-                    "name": ip,
-                    "method": "tcp_scan",
-                })
+            my_ip = _get_primary_local_ip()
+            candidates: set[str] = set()
+            if my_ip:
+                # Phase a: probe a few likely ports across the /24 in
+                # parallel. ANY hit means "host is alive and probably
+                # interesting" — we'll full-range scan it next.
+                probe_ports = (49152, 62078)
+                for p in probe_ports:
+                    try:
+                        hits = await _scan_subnet_for_port(p)
+                        candidates.update(hits)
+                    except Exception as e:
+                        _tunnel_logger.warning("probe scan port %d failed: %s", p, e)
+
+            if candidates:
+                _tunnel_logger.info(
+                    "Smart scan found %d live host(s); full-range scanning each",
+                    len(candidates),
+                )
+                # Phase b: full 49152-65535 scan in parallel across all
+                # candidate IPs. RemotePairing answers immediately on the
+                # right port, so the first hit per IP is what we want.
+                async def _scan_one(ip: str) -> tuple[str, list[int]]:
+                    try:
+                        ports = await _scan_ports_for_ip(ip)
+                    except Exception as e:
+                        _tunnel_logger.warning("port scan for %s failed: %s", ip, e)
+                        return ip, []
+                    return ip, ports
+
+                scan_results = await asyncio.gather(
+                    *[_scan_one(ip) for ip in candidates],
+                )
+                for ip, ports in scan_results:
+                    if not ports:
+                        continue
+                    # Use the first open port in the dynamic range. We
+                    # add one entry per IP — the user picks from the list.
+                    results.append({
+                        "ip": ip,
+                        "port": ports[0],
+                        "host": ip,
+                        "name": ip,
+                        "method": "tcp_scan",
+                    })
         except Exception as e:
-            _tunnel_logger.warning("TCP scan failed: %s", e)
+            _tunnel_logger.warning("Smart fallback scan failed: %s", e)
 
     # De-dupe on (ip, port)
     seen = set()

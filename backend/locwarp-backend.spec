@@ -35,6 +35,13 @@ pyimg4_meta = copy_metadata('pyimg4')
 uvicorn_hidden = collect_submodules('uvicorn')
 fastapi_hidden = collect_submodules('fastapi')
 
+# zeroconf has dynamic imports + lots of C-accelerated submodules. psutil
+# similarly has a Windows-specific extension module that must be bundled
+# for NIC enumeration to work in the frozen exe.
+zc_datas, zc_binaries, zc_hidden = collect_all('zeroconf')
+zc_submodules = collect_submodules('zeroconf')
+ps_datas, ps_binaries, ps_hidden = collect_all('psutil')
+
 hidden = [
     *pmd_hiddenimports,
     *pytun_hidden,
@@ -42,6 +49,9 @@ hidden = [
     *pyimg4_hidden,
     *uvicorn_hidden,
     *fastapi_hidden,
+    *zc_hidden,
+    *zc_submodules,
+    *ps_hidden,
     'uvicorn.logging',
     'uvicorn.loops',
     'uvicorn.loops.auto',
@@ -64,8 +74,10 @@ hidden = [
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=[*pmd_binaries, *pytun_binaries, *ddi_binaries, *pyimg4_binaries],
+    binaries=[*pmd_binaries, *pytun_binaries, *ddi_binaries, *pyimg4_binaries,
+              *zc_binaries, *ps_binaries],
     datas=[*pmd_datas, *pytun_datas, *ddi_datas, *pyimg4_datas, *pyimg4_meta,
+           *zc_datas, *ps_datas,
            ('static/phone.html', 'static')],
     hiddenimports=hidden,
     hookspath=[],

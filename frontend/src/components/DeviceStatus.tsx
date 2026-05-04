@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { wifiTunnelDiscover, wifiRepair, type TunnelInfo } from '../services/api';
+import { wifiTunnelDiscover, wifiTunnelFindPort, wifiRepair, type TunnelInfo } from '../services/api';
 import { useT } from '../i18n';
 
 const MAX_TUNNEL_DEVICES = 3;
@@ -49,7 +49,8 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   const t = useT();
   const [showDropdown, setShowDropdown] = useState(false);
   const [tunnelIp, setTunnelIp] = useState(() => localStorage.getItem('locwarp.tunnel.ip') || '');
-  const [tunnelPort, setTunnelPort] = useState(() => localStorage.getItem('locwarp.tunnel.port') || '49152');
+  const [tunnelPort, setTunnelPort] = useState(() => localStorage.getItem('locwarp.tunnel.port') || '');
+  const [portScanning, setPortScanning] = useState(false);
   // Auto-attempt the saved IP/port on app launch. Default ON so users who
   // previously connected over WiFi don't have to re-click on every cold
   // start — App.tsx reads this flag once after the WS handshake settles.
@@ -665,18 +666,73 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                         <input
                           type="text" className="search-input" placeholder="49152"
                           value={tunnelPort} onChange={(e) => setTunnelPort(e.target.value)}
-                          style={{ flex: 1, fontSize: 12 }} disabled={tunnelConnecting}
+                          style={{ flex: 1, fontSize: 12 }} disabled={tunnelConnecting || portScanning}
+                          title={t('wifi.port_empty_hint')}
                         />
+                        <button
+                          className="action-btn"
+                          style={{ padding: '4px 10px', fontSize: 11, whiteSpace: 'nowrap' }}
+                          disabled={tunnelConnecting || portScanning}
+                          title={t('wifi.port_scan_tooltip')}
+                          onClick={async () => {
+                            const ip = tunnelIp.trim();
+                            if (!ip) {
+                              setTunnelError(t('wifi.ip_required_for_scan'));
+                              return;
+                            }
+                            setTunnelError(null);
+                            setPortScanning(true);
+                            try {
+                              const res = await wifiTunnelFindPort(ip);
+                              if (!res.ports || res.ports.length === 0) {
+                                setTunnelError(t('wifi.port_scan_no_hit'));
+                              } else {
+                                setTunnelPort(String(res.ports[0]));
+                              }
+                            } catch (err: any) {
+                              setTunnelError(err.message || t('wifi.port_scan_failed'));
+                            } finally {
+                              setPortScanning(false);
+                            }
+                          }}
+                        >
+                          {portScanning ? t('wifi.port_scanning_short') : t('wifi.port_scan_button')}
+                        </button>
                       </label>
                       <button
                         className="action-btn primary"
                         onClick={async () => {
-                          if (!tunnelIp.trim()) return;
-                          setTunnelConnecting(true); setTunnelError(null);
+                          const ip = tunnelIp.trim();
+                          if (!ip) {
+                            setTunnelError(t('wifi.ip_required_for_scan'));
+                            return;
+                          }
+                          setTunnelError(null);
+                          let port = parseInt(tunnelPort);
+                          if (!Number.isFinite(port) || port <= 0) {
+                            // Empty / blank port — scan IANA dynamic range on
+                            // this IP. iOS picks RemotePairing port from
+                            // 49152–65535 at boot, so 49152 is rarely correct.
+                            setPortScanning(true);
+                            try {
+                              const res = await wifiTunnelFindPort(ip);
+                              if (!res.ports || res.ports.length === 0) {
+                                setTunnelError(t('wifi.port_scan_no_hit'));
+                                setPortScanning(false);
+                                return;
+                              }
+                              port = res.ports[0];
+                              setTunnelPort(String(port));
+                            } catch (err: any) {
+                              setTunnelError(err.message || t('wifi.port_scan_failed'));
+                              setPortScanning(false);
+                              return;
+                            }
+                            setPortScanning(false);
+                          }
+                          setTunnelConnecting(true);
                           try {
-                            await onStartWifiTunnel(tunnelIp.trim(), parseInt(tunnelPort) || 49152);
-                            const ip = tunnelIp.trim();
-                            const port = parseInt(tunnelPort) || 49152;
+                            await onStartWifiTunnel(ip, port);
                             // Legacy single-entry keys — kept so the IP
                             // input field pre-fills correctly next launch.
                             // The savedips multi-entry list is written by
@@ -689,15 +745,15 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                             setTunnelError(err.message || 'WiFi tunnel failed');
                           } finally { setTunnelConnecting(false); }
                         }}
-                        disabled={tunnelConnecting || !tunnelIp.trim()}
+                        disabled={tunnelConnecting || portScanning}
                         style={{ width: '100%', fontSize: 12 }}
                       >
-                        {tunnelConnecting ? (
+                        {(tunnelConnecting || portScanning) ? (
                           <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}>
                               <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83" />
                             </svg>
-                            {t('wifi.tunnel_establishing')}
+                            {portScanning ? t('wifi.port_scanning') : t('wifi.tunnel_establishing')}
                           </span>
                         ) : t('wifi.tunnel_start')}
                       </button>

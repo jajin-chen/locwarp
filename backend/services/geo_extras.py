@@ -319,6 +319,50 @@ async def osrm_table(coords: list[Coordinate], profile: str = "foot") -> list[li
         return None
 
 
+async def valhalla_matrix(coords: list[Coordinate], profile: str = "foot") -> list[list[float]] | None:
+    """Return duration matrix in seconds from Valhalla /sources_to_targets.
+
+    Valhalla's costing names differ from OSRM's profile names. Returns
+    None on any failure so callers can fall back to haversine.
+    """
+    from config import VALHALLA_BASE_URL  # late import — config must be on path
+    costing = "pedestrian" if profile in ("foot", "walking", "running") else (
+        "bicycle" if profile in ("bike", "cycling") else "auto"
+    )
+    locations = [{"lat": c.lat, "lon": c.lng} for c in coords]
+    body = {
+        "sources": locations,
+        "targets": locations,
+        "costing": costing,
+    }
+    url = f"{VALHALLA_BASE_URL}/sources_to_targets"
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(url, json=body)
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPError as e:
+        logger.warning("Valhalla matrix failed: %s", e)
+        return None
+    rows = data.get("sources_to_targets") or []
+    if not rows:
+        return None
+    n = len(coords)
+    matrix: list[list[float]] = [[0.0] * n for _ in range(n)]
+    try:
+        for i, row in enumerate(rows):
+            for cell in row:
+                j = cell.get("to_index")
+                t = cell.get("time")
+                if j is None or t is None or i >= n or j >= n:
+                    continue
+                matrix[i][j] = float(t)
+    except (TypeError, KeyError, ValueError) as e:
+        logger.warning("Valhalla matrix parse failed: %s", e)
+        return None
+    return matrix
+
+
 def optimize_order_nearest_neighbor(
     durations: list[list[float]], keep_first: bool,
 ) -> list[int]:

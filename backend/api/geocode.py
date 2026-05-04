@@ -17,6 +17,7 @@ from services.geo_extras import (
     optimize_order_exact,
     optimize_order_nearest_neighbor,
     osrm_table,
+    valhalla_matrix,
 )
 
 router = APIRouter(prefix="/api/geocode", tags=["geocode"])
@@ -140,13 +141,36 @@ async def route_optimize(req: RouteOptimizeRequest):
     """
     if len(req.waypoints) < 2:
         raise HTTPException(status_code=400, detail="need >=2 waypoints")
-    durations = await osrm_table(req.waypoints, req.profile)
+
+    # Engine dispatch: OSRM (default), Valhalla, or BRouter (no matrix
+    # API → haversine). Callers don't normally know which engine is
+    # available, so a None response always falls through to haversine.
+    engine = (req.engine or "osrm").lower()
+    durations: list[list[float]] | None = None
+    if engine == "valhalla":
+        durations = await valhalla_matrix(req.waypoints, req.profile)
+        if not durations:
+            logger.info(
+                "route_optimize: Valhalla matrix unavailable for %d waypoints, falling back",
+                len(req.waypoints),
+            )
+    elif engine == "brouter":
+        # BRouter has no matrix endpoint. Skip straight to haversine —
+        # the response flag tells the UI to label this an estimate.
+        logger.info(
+            "route_optimize: BRouter has no matrix API, using haversine for %d waypoints",
+            len(req.waypoints),
+        )
+    else:  # osrm
+        durations = await osrm_table(req.waypoints, req.profile)
+
     used_estimate = False
     if not durations:
         durations = haversine_duration_matrix(req.waypoints, req.profile)
         used_estimate = True
         logger.info(
-            "route_optimize: using haversine fallback for %d waypoints", len(req.waypoints),
+            "route_optimize: using haversine fallback for %d waypoints (engine=%s)",
+            len(req.waypoints), engine,
         )
 
     # Brute-force optimal up to 8 points, heuristic beyond. With the

@@ -2,10 +2,19 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 
+interface PhoneNic {
+  ip: string;
+  iface: string;
+  kind: 'wifi' | 'ethernet' | 'virtual' | 'other';
+  primary: boolean;
+}
+
 interface PhoneInfo {
   port: number;
   lan_ips: string[];
+  nics?: PhoneNic[];
   pin: string;
+  last_phone_hit_ago_s?: number | null;
 }
 
 interface PhoneControlButtonProps {
@@ -66,6 +75,40 @@ const PhoneControlButton: React.FC<PhoneControlButtonProps> = ({ showToast }) =>
   }, [showToast, t]);
 
   const url = info && selectedIp ? `http://${selectedIp}:${info.port}/phone` : '';
+
+  const [fwState, setFwState] = useState<'idle' | 'busy' | 'ok' | 'fail'>('idle');
+  const [fwMsg, setFwMsg] = useState<string>('');
+  const repairFirewall = useCallback(async () => {
+    setFwState('busy');
+    setFwMsg('');
+    try {
+      const r = await fetch(`${API}/api/phone/firewall_repair`, { method: 'POST' });
+      const j = await r.json();
+      if (j.ok) {
+        setFwState('ok');
+        setFwMsg(t('phone.firewall_repair_ok'));
+        showToast?.(t('phone.firewall_repair_ok'));
+      } else {
+        setFwState('fail');
+        setFwMsg(j.message || t('phone.firewall_repair_failed'));
+      }
+    } catch (e: any) {
+      setFwState('fail');
+      setFwMsg(e?.message || t('phone.firewall_repair_failed'));
+    }
+    setTimeout(() => setFwState('idle'), 4500);
+  }, [showToast, t]);
+
+  // Poll while modal open so the "phone reached the URL" indicator lights
+  // up live when the user actually opens the link on their phone.
+  useEffect(() => {
+    if (!open) return;
+    const id = setInterval(fetchInfo, 2000);
+    return () => clearInterval(id);
+  }, [open, fetchInfo]);
+
+  const reachAgo = info?.last_phone_hit_ago_s;
+  const reachOk = typeof reachAgo === 'number' && reachAgo < 60;
 
   return (
     <>
@@ -135,8 +178,27 @@ const PhoneControlButton: React.FC<PhoneControlButtonProps> = ({ showToast }) =>
               <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
                   <div>
-                    <div style={{ fontSize: 11, color: '#97a0b3', marginBottom: 4 }}>{t('phone.lan_url')}</div>
-                    {info.lan_ips.length > 1 && (
+                    <div style={{ fontSize: 11, color: '#97a0b3', marginBottom: 4 }}>
+                      {t('phone.lan_url')}
+                    </div>
+                    {(info.nics && info.nics.filter((n) => n.kind !== 'virtual').length > 1) ? (
+                      <select
+                        value={selectedIp ?? ''}
+                        onChange={(e) => setSelectedIp(e.target.value)}
+                        style={{
+                          width: '100%', marginBottom: 6, padding: '4px 6px',
+                          background: '#0f1218', color: '#e6e8ee',
+                          border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6,
+                          fontSize: 12,
+                        }}
+                      >
+                        {info.nics.filter((n) => n.kind !== 'virtual').map((n) => (
+                          <option key={n.ip} value={n.ip}>
+                            {n.ip} {n.iface ? `— ${n.iface}` : ''} {n.kind === 'wifi' ? '(Wi-Fi)' : n.kind === 'ethernet' ? '(Ethernet)' : ''} {n.primary ? '★' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : info.lan_ips.length > 1 && (
                       <select
                         value={selectedIp ?? ''}
                         onChange={(e) => setSelectedIp(e.target.value)}
@@ -168,6 +230,17 @@ const PhoneControlButton: React.FC<PhoneControlButtonProps> = ({ showToast }) =>
                     </div>
                   </div>
 
+                  <div style={{
+                    fontSize: 11, padding: '6px 10px', borderRadius: 6,
+                    border: `1px solid ${reachOk ? 'rgba(77, 210, 138, 0.5)' : 'rgba(255,255,255,0.10)'}`,
+                    background: reachOk ? 'rgba(77, 210, 138, 0.12)' : 'rgba(255,255,255,0.04)',
+                    color: reachOk ? '#7ee2a4' : '#97a0b3',
+                  }}>
+                    {reachOk
+                      ? t('phone.reach_ok', { sec: String(Math.max(0, Math.round(reachAgo as number))) })
+                      : t('phone.reach_unknown')}
+                  </div>
+
                   <div>
                     <div style={{ fontSize: 11, color: '#97a0b3', marginBottom: 4 }}>PIN</div>
                     <div
@@ -186,7 +259,64 @@ const PhoneControlButton: React.FC<PhoneControlButtonProps> = ({ showToast }) =>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 0 }}>
+                    <button
+                      onClick={repairFirewall}
+                      disabled={fwState === 'busy'}
+                      title={t('phone.firewall_repair_tooltip')}
+                      style={{
+                        padding: '6px 10px', fontSize: 11,
+                        background:
+                          fwState === 'ok' ? 'rgba(77, 210, 138, 0.18)' :
+                          fwState === 'fail' ? 'rgba(239, 93, 93, 0.18)' :
+                          fwState === 'busy' ? 'rgba(108, 140, 255, 0.15)' :
+                          'rgba(255, 180, 60, 0.12)',
+                        border: `1px solid ${
+                          fwState === 'ok' ? 'rgba(77, 210, 138, 0.55)' :
+                          fwState === 'fail' ? 'rgba(239, 93, 93, 0.55)' :
+                          fwState === 'busy' ? 'rgba(108, 140, 255, 0.45)' :
+                          'rgba(255, 180, 60, 0.45)'}`,
+                        color:
+                          fwState === 'ok' ? '#7ee2a4' :
+                          fwState === 'fail' ? '#ef9999' :
+                          fwState === 'busy' ? '#9bb0ff' :
+                          '#ffc870',
+                        borderRadius: 4, cursor: fwState === 'busy' ? 'wait' : 'pointer',
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        alignSelf: 'flex-start',
+                      }}
+                    >
+                      {fwState === 'busy' ? (
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}>
+                          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83" />
+                        </svg>
+                      ) : fwState === 'ok' ? (
+                        <span style={{ fontSize: 13, fontWeight: 700 }}>✓</span>
+                      ) : fwState === 'fail' ? (
+                        <span style={{ fontSize: 13, fontWeight: 700 }}>✗</span>
+                      ) : (
+                        <span style={{ fontSize: 13, fontWeight: 700 }}>!</span>
+                      )}
+                      <span>
+                        {fwState === 'busy' ? t('phone.firewall_repair_busy') :
+                         fwState === 'ok' ? t('phone.firewall_repair_ok') :
+                         fwState === 'fail' ? t('phone.firewall_repair_failed') :
+                         t('phone.firewall_repair_button')}
+                      </span>
+                    </button>
+                    {fwMsg && fwState !== 'idle' && (
+                      <div style={{
+                        fontSize: 10, lineHeight: 1.4,
+                        color: fwState === 'fail' ? '#ef9999' : '#7ee2a4',
+                        wordBreak: 'break-word',
+                      }}>
+                        {fwMsg}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8 }}>
                   <button
                     onClick={rotate}
                     disabled={loading}
@@ -210,6 +340,7 @@ const PhoneControlButton: React.FC<PhoneControlButtonProps> = ({ showToast }) =>
                   >
                     {t('generic.close')}
                   </button>
+                  </div>
                 </div>
               </>
             )}

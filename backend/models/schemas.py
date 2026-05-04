@@ -256,6 +256,12 @@ class RouteOptimizeRequest(BaseModel):
     waypoints: list[Coordinate]
     profile: str = "foot"  # 'foot' or 'car'
     keep_first: bool = True  # first waypoint is the fixed start
+    # Routing engine for the duration matrix used by the TSP solver.
+    # 'osrm' (default) calls OSRM /table; 'valhalla' uses Valhalla
+    # /sources_to_targets; 'brouter' has no matrix API so it falls back
+    # to a haversine straight-line matrix and the response sets
+    # used_estimate=true.
+    engine: str = "osrm"
 
 
 class RouteOptimizeResponse(BaseModel):

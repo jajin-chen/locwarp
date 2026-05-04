@@ -102,6 +102,8 @@ export const wifiTunnelStatus = () =>
     'GET', '/api/device/wifi/tunnel/status',
   )
 export const wifiTunnelDiscover = () => request<{ devices: { ip: string; port: number; host: string; name: string }[] }>('GET', '/api/device/wifi/tunnel/discover')
+export const wifiTunnelFindPort = (ip: string) =>
+  request<{ ip: string; ports: number[] }>('POST', '/api/device/wifi/tunnel/find_port', { ip })
 // udid: stop one specific tunnel; omit to stop all (legacy stop-all)
 export const wifiTunnelStop = (udid?: string) =>
   request<{ status: string; udid?: string; udids?: string[] }>(
@@ -224,9 +226,14 @@ export async function lookupWeather(lat: number, lng: number): Promise<{ tempC: 
     return null
   }
 }
-export const routeOptimize = (waypoints: { lat: number; lng: number }[], profile = 'foot', keep_first = true) =>
+export const routeOptimize = (
+  waypoints: { lat: number; lng: number }[],
+  profile = 'foot',
+  keep_first = true,
+  engine = 'osrm',
+) =>
   request<{ waypoints: { lat: number; lng: number }[]; total_distance_m: number; total_duration_s: number; used_estimate?: boolean }>(
-    'POST', '/api/geocode/route-optimize', { waypoints, profile, keep_first },
+    'POST', '/api/geocode/route-optimize', { waypoints, profile, keep_first, engine },
   )
 
 // Bookmarks

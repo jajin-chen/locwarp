@@ -879,6 +879,11 @@
   }
   function hideGate() { gate.style.display = 'none'; }
 
+  // Tell the desktop UI "this phone reached the LAN URL" so it can
+  // confirm pairing actually works end-to-end (separates "wrong IP"
+  // from "PIN typo"). Fire-and-forget — we don't need the response.
+  fetch('/api/phone/_reach').catch(() => {});
+
   pinInput.addEventListener('input', () => {
     pinInput.value = pinInput.value.replace(/\D/g, '').slice(0, 6);
     pinSubmit.disabled = pinInput.value.length !== 6;

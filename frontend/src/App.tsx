@@ -785,6 +785,24 @@ const App: React.FC = () => {
     sim.setWaypoints((prev: any[]) => prev.filter((_: any, i: number) => i !== index))
   }, [sim])
 
+  // Move a waypoint up / down inside the Loop / MultiStop list. waypoints[0]
+  // is the implicit start (current device position when the first add fired),
+  // so it's pinned — we never let the user shuffle index 0, and other rows
+  // can't be moved into position 0. Same idempotent pattern as the remove
+  // handler: swap two entries inside the immutable list.
+  const handleMoveWaypoint = useCallback((index: number, direction: -1 | 1) => {
+    sim.setWaypoints((prev: any[]) => {
+      const target = index + direction
+      if (index <= 0 || target <= 0) return prev
+      if (index >= prev.length || target >= prev.length) return prev
+      const next = prev.slice()
+      const tmp = next[index]
+      next[index] = next[target]
+      next[target] = tmp
+      return next
+    })
+  }, [sim])
+
   // Trim the waypoint list so the chosen index becomes the new start.
   // Everything before `index` is dropped — the iPhone won't walk back
   // through them on the next Start press. Concretely: setting #9 as
@@ -1526,6 +1544,24 @@ const App: React.FC = () => {
                       onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline'; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none'; }}
                     >{wp.lat.toFixed(5)}, {wp.lng.toFixed(5)}</button>
+                    {!isStart && (
+                      <>
+                        <button
+                          className="action-btn"
+                          style={{ padding: '2px 5px', fontSize: 10, opacity: i <= 1 ? 0.3 : 1 }}
+                          onClick={() => handleMoveWaypoint(i, -1)}
+                          disabled={i <= 1 || sim.status?.running}
+                          title={t('panel.waypoints_move_up')}
+                        >↑</button>
+                        <button
+                          className="action-btn"
+                          style={{ padding: '2px 5px', fontSize: 10, opacity: i >= sim.waypoints.length - 1 ? 0.3 : 1 }}
+                          onClick={() => handleMoveWaypoint(i, 1)}
+                          disabled={i >= sim.waypoints.length - 1 || sim.status?.running}
+                          title={t('panel.waypoints_move_down')}
+                        >↓</button>
+                      </>
+                    )}
                     <button
                       className="action-btn"
                       style={{ padding: '2px 6px', fontSize: 10 }}
@@ -1551,7 +1587,7 @@ const App: React.FC = () => {
                         try {
                           const res = await api.routeOptimize(
                             sim.waypoints.map((w: any) => ({ lat: w.lat, lng: w.lng })),
-                            'foot', true,
+                            'foot', true, sim.routeEngine,
                           )
                           if (res?.waypoints?.length) {
                             sim.setWaypoints(res.waypoints)
