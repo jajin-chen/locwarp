@@ -124,9 +124,18 @@ def _firewall_add_rule(port: int) -> tuple[bool, str]:
     if platform.system() != "Windows":
         return False, "Windows-only"
     import subprocess
+    # netsh on TC Windows outputs UTF-8 (Chinese headers like "規則名稱:"),
+    # but Python's text mode defaults to cp950 there and dies on the first
+    # multi-byte char with UnicodeDecodeError in the stdout reader thread,
+    # silently leaving proc.stdout = "". That made the dedupe check below
+    # always say "rule not found" → every button click appended another
+    # row. Force UTF-8 + replace so dedupe + error-message matching work
+    # regardless of system locale.
     netsh_kwargs = {
         "capture_output": True,
         "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
         "timeout": 4.0,
         "creationflags": 0x08000000,  # CREATE_NO_WINDOW
     }
