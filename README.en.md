@@ -393,7 +393,22 @@ npm install
 Double-click `LocWarp.bat`, it auto-elevates and invokes `start.py`, which launches:
 - backend (`:8777`)
 - Vite dev server (`:5173`)
-- Electron (loading from the dev server)
+- the default browser auto-opens `http://localhost:5173` (browser mode, no Electron window)
+
+Or manually:
+
+```bash
+# Terminal 1: backend
+cd backend && py -3.13 main.py
+
+# Terminal 2a: frontend in the browser (same as LocWarp.bat)
+cd frontend && npx vite --host --port 5173
+
+# Terminal 2b: frontend in the Electron window (same as the installer)
+cd frontend && npm run start
+```
+
+> The installer (`LocWarp.Setup.x.x.x.exe`) ships as an Electron build; `LocWarp.bat` / `start.py` are dev-only and run in the browser. Use 2b above when you need to test Electron-window behavior (IPC, tab logic) during development.
 
 ---
 

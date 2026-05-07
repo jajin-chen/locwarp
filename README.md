@@ -343,7 +343,7 @@ npm install
 雙擊 `LocWarp.bat`, 會自動提權並呼叫 `start.py`,同時啟動:
 - backend(`:8777`)
 - Vite dev server(`:5173`)
-- Electron(載入 dev server)
+- 預設瀏覽器自動開啟 `http://localhost:5173`(走瀏覽器,不啟 Electron)
 
 或手動:
 
@@ -351,9 +351,14 @@ npm install
 # 終端 1, backend
 cd backend && py -3.13 main.py
 
-# 終端 2, 前端 + Electron
+# 終端 2a, 前端走瀏覽器(等同 LocWarp.bat 的行為)
+cd frontend && npx vite --host --port 5173
+
+# 終端 2b, 前端走 Electron 視窗(同安裝檔執行體驗)
 cd frontend && npm run start
 ```
+
+> 安裝檔(`LocWarp.Setup.x.x.x.exe`)跑的是 Electron 包;`LocWarp.bat` / `start.py` 是開發用,故走瀏覽器。要在開發環境裡測 Electron 視窗的行為(例如 IPC、分頁邏輯),用上面的 2b。
 
 ---
 
