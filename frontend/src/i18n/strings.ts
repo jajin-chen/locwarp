@@ -484,6 +484,12 @@ export const STRINGS = {
   'settings.alert_sound_label': { zh: '路線結束提示音', en: 'Route completion alert sound' },
   'settings.alert_sound_desc': { zh: '導航 / 巡迴 / 多點繞路跑完時播放層疊鐘聲 (約 2 秒),提醒你回到 LocWarp。', en: 'Plays a cascading-bell sound (~2s) when navigate / loop / multi-stop finishes so you know to come back to LocWarp.' },
   'settings.alert_sound_test': { zh: '試聽', en: 'Test' },
+  'settings.render_mode_label': { zh: '硬體加速', en: 'Hardware acceleration' },
+  'settings.render_mode_desc': { zh: 'Win10 (含 22H2) 預設關閉以避開 GPU 沙盒崩潰,顯卡正常的人可勾選開啟以提升效能。Win11 預設開啟。切換後需重啟生效。', en: 'Win 10 (including 22H2) defaults to off to dodge a GPU-sandbox crash; tick to opt in if your GPU works fine. Win 11 defaults to on. Restart required after change.' },
+  'settings.render_mode_hw': { zh: '硬體加速', en: 'Hardware acceleration' },
+  'settings.render_mode_sw': { zh: '軟體渲染', en: 'Software rendering' },
+  'settings.render_mode_restart_hint': { zh: '已儲存,重啟後生效', en: 'Saved. Takes effect after restart.' },
+  'settings.render_mode_restart_now': { zh: '立即重啟', en: 'Restart now' },
   // Timezone-detail modal opened from the status-bar tz chip.
   'tz.detail_tooltip': { zh: '點開查看完整時區資訊', en: 'Click for full timezone details' },
   'tz.modal_title': { zh: '目的地時區', en: 'Destination Timezone' },

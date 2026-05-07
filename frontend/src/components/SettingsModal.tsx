@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 import {
@@ -6,6 +6,7 @@ import {
   setAlertSoundEnabled,
   playCompletionAlert,
 } from '../services/alertSound';
+import type { RenderMode, RenderModeInfo } from '../types/electron';
 
 interface Props {
   open: boolean;
@@ -26,12 +27,37 @@ const SettingsModal: React.FC<Props> = ({ open, onClose }) => {
   // UI feedback) and localStorage (for persistence + cross-tab read by
   // playCompletionAlert).
   const [alertEnabled, setAlertEnabledLocal] = useState<boolean>(() => isAlertSoundEnabled());
+  const [renderInfo, setRenderInfo] = useState<RenderModeInfo | null>(null);
+  const [renderDirty, setRenderDirty] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const api = window.electronAPI;
+    if (!api?.getRenderMode) return;
+    api.getRenderMode().then((info) => {
+      setRenderInfo(info);
+      setRenderDirty(false);
+    }).catch(() => { /* no-op — non-Electron context */ });
+  }, [open]);
 
   if (!open) return null;
 
   const handleToggle = (next: boolean) => {
     setAlertEnabledLocal(next);
     setAlertSoundEnabled(next);
+  };
+
+  const handleRenderToggle = async (hardware: boolean) => {
+    const api = window.electronAPI;
+    if (!api?.setRenderMode) return;
+    const next: RenderMode = hardware ? 'hardware' : 'software';
+    await api.setRenderMode(next);
+    setRenderInfo((prev) => prev ? { ...prev, mode: next, saved: next } : prev);
+    setRenderDirty(true);
+  };
+
+  const handleRestart = () => {
+    window.electronAPI?.relaunchApp();
   };
 
   const rowStyle: React.CSSProperties = {
@@ -140,6 +166,57 @@ const SettingsModal: React.FC<Props> = ({ open, onClose }) => {
             {t('settings.alert_sound_test')}
           </button>
         </div>
+
+        {renderInfo && (
+          <div style={{ ...rowStyle, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <label style={rowLabelStyle}>
+                <input
+                  type="checkbox"
+                  checked={renderInfo.mode === 'hardware'}
+                  onChange={(e) => handleRenderToggle(e.target.checked)}
+                  style={{ cursor: 'pointer', margin: 0 }}
+                />
+                <span>{t('settings.render_mode_label')}</span>
+                <span
+                  style={helpIconStyle}
+                  title={t('settings.render_mode_desc')}
+                  aria-label={t('settings.render_mode_desc')}
+                >?</span>
+              </label>
+              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>
+                {renderInfo.mode === 'hardware'
+                  ? t('settings.render_mode_hw')
+                  : t('settings.render_mode_sw')}
+              </span>
+            </div>
+            {renderDirty && (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: 12, padding: '8px 12px',
+                background: 'rgba(108, 140, 255, 0.08)',
+                border: '1px solid rgba(108, 140, 255, 0.25)',
+                borderRadius: 8,
+              }}>
+                <span style={{ fontSize: 12, color: '#a8b8ff' }}>
+                  {t('settings.render_mode_restart_hint')}
+                </span>
+                <button
+                  onClick={handleRestart}
+                  style={{
+                    padding: '5px 12px', fontSize: 12,
+                    background: 'rgba(108, 140, 255, 0.18)',
+                    color: '#a8b8ff',
+                    border: '1px solid rgba(108, 140, 255, 0.45)',
+                    borderRadius: 6, cursor: 'pointer',
+                  }}
+                >
+                  {t('settings.render_mode_restart_now')}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   ), document.body);

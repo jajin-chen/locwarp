@@ -8,10 +8,21 @@ export interface LocatePcResult {
   message?: string
 }
 
+export type RenderMode = 'hardware' | 'software'
+
+export interface RenderModeInfo {
+  mode: RenderMode
+  saved: RenderMode | null
+  isWin10: boolean
+}
+
 declare global {
   interface Window {
     electronAPI?: {
       locatePc(): Promise<LocatePcResult>
+      getRenderMode(): Promise<RenderModeInfo>
+      setRenderMode(mode: RenderMode): Promise<{ ok: boolean }>
+      relaunchApp(): Promise<void>
     }
   }
 }

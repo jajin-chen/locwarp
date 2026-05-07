@@ -3,15 +3,41 @@ const path = require('path')
 const { spawn } = require('child_process')
 const http = require('http')
 const os = require('os')
+const fs = require('fs')
 
-// Every Windows 10 build (1809 through 22H2 = 19045) can't launch
-// Chromium 124's sandboxed GPU process: error_code=18 reproduces on
-// 22H2 too, not just the pre-22H2 builds covered in v0.2.121. Fall
-// back to software rendering on all Win 10 so the window actually
-// paints. Win 11 (build 22000+) keeps full hardware acceleration.
+// Render-mode preference (Issue #24). Win 10 stays on software rendering
+// by default — v0.2.121/125 hit a Chromium 124 GPU-sandbox crash on
+// 22H2 — but users whose hardware works fine can opt in via Settings
+// and restart. Win 11 defaults to hardware acceleration as usual.
+const RENDER_MODE_FILE = path.join(app.getPath('userData'), 'render-mode.json')
+
+function readRenderModePref() {
+  try {
+    const raw = fs.readFileSync(RENDER_MODE_FILE, 'utf8')
+    const parsed = JSON.parse(raw)
+    if (parsed && (parsed.mode === 'hardware' || parsed.mode === 'software')) {
+      return parsed.mode
+    }
+  } catch { /* missing or corrupt — fall through to default */ }
+  return null
+}
+
+function writeRenderModePref(mode) {
+  try {
+    fs.mkdirSync(path.dirname(RENDER_MODE_FILE), { recursive: true })
+    fs.writeFileSync(RENDER_MODE_FILE, JSON.stringify({ mode }, null, 2), 'utf8')
+  } catch (e) {
+    console.error('[render-mode] failed to save pref:', e && e.message)
+  }
+}
+
 if (process.platform === 'win32') {
   const winBuild = parseInt((os.release() || '0.0.0').split('.')[2] || '0', 10)
-  if (winBuild > 0 && winBuild < 22000) {
+  const isWin10 = winBuild > 0 && winBuild < 22000
+  const saved = readRenderModePref()
+  // Effective mode: saved pref wins; otherwise Win 10 → software, Win 11 → hardware.
+  const mode = saved || (isWin10 ? 'software' : 'hardware')
+  if (mode === 'software') {
     app.disableHardwareAcceleration()
     app.commandLine.appendSwitch('no-sandbox')
     app.commandLine.appendSwitch('in-process-gpu')
@@ -128,6 +154,34 @@ const tryWindowsLocation = () => {
     }, 18000)
   })
 }
+
+ipcMain.handle('get-render-mode', () => {
+  // Surface the current saved mode + whether the OS is the one we
+  // originally bypassed (Win 10), so the Settings panel can decide
+  // whether to highlight this toggle as relevant.
+  let isWin10 = false
+  if (process.platform === 'win32') {
+    const winBuild = parseInt((os.release() || '0.0.0').split('.')[2] || '0', 10)
+    isWin10 = winBuild > 0 && winBuild < 22000
+  }
+  const saved = readRenderModePref()
+  // If no pref exists and we're not on Win 10, the effective mode is
+  // hardware (current default for Win 11). On Win 10 with no pref, we
+  // already prompted at startup, so this branch shouldn't normally hit.
+  const effective = saved || (isWin10 ? 'software' : 'hardware')
+  return { mode: effective, saved, isWin10 }
+})
+
+ipcMain.handle('set-render-mode', (_e, mode) => {
+  if (mode !== 'hardware' && mode !== 'software') return { ok: false }
+  writeRenderModePref(mode)
+  return { ok: true }
+})
+
+ipcMain.handle('relaunch-app', () => {
+  app.relaunch()
+  app.exit(0)
+})
 
 ipcMain.handle('locate-pc', async () => {
   const win = await tryWindowsLocation()
