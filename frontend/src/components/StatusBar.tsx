@@ -41,6 +41,10 @@ interface StatusBarProps {
   runtimes?: RuntimesMap;
   devices?: DeviceInfo[];
   countryCode?: string;  // ISO 3166-1 alpha-2 lowercase, for flag icon
+  // Reverse-geocoded city / POI name from short_name. Empty when the
+  // lookup hasn't returned yet (or fired into the ocean). Surfaced in
+  // the timezone-detail modal alongside the country name.
+  cityName?: string;
   // Weather at the current virtual location (Open-Meteo). null = unknown.
   weatherCode?: number | null;
   tempC?: number | null;
@@ -101,6 +105,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
   runtimes,
   devices,
   countryCode = '',
+  cityName = '',
   weatherCode = null,
   tempC = null,
   timezoneZone = null,
@@ -125,6 +130,14 @@ const StatusBar: React.FC<StatusBarProps> = ({
   const [initialDialogValue, setInitialDialogValue] = useState('');
   const [initialDialogError, setInitialDialogError] = useState<string | null>(null);
   const [initialDialogBusy, setInitialDialogBusy] = useState(false);
+
+  // Timezone-detail modal: opened by clicking the trailing tz chip in the
+  // status bar. Shows the localized full zone name + IANA id + diff +
+  // destination wall-clock + place. Replaces the v0.2.127 popup toast
+  // (the chip itself replaces the at-a-glance summary the toast used to
+  // give); user-discoverable so the chip is now the entry point to the
+  // detail.
+  const [tzModalOpen, setTzModalOpen] = useState(false);
 
   // Locate-PC flow: button fires browser geolocation, then this dialog
   // confirms whether the user wants to teleport the iPhone or just pan
@@ -395,15 +408,18 @@ const StatusBar: React.FC<StatusBarProps> = ({
         return (
           <>
             <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.12)' }} />
-            <div
+            <button
+              onClick={() => setTzModalOpen(true)}
+              title={t('tz.detail_tooltip')}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 5,
                 padding: '3px 8px', borderRadius: 999,
                 background: 'rgba(255,255,255,0.06)',
                 border: '1px solid rgba(255,255,255,0.08)',
+                color: 'inherit',
                 fontSize: 11, fontFamily: 'monospace',
+                cursor: 'pointer',
               }}
-              title={`${timezoneZone} (${sign}${diffH}h)`}
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.6 }}>
                 <circle cx="12" cy="12" r="10" />
@@ -413,7 +429,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
               <span style={{ opacity: 0.75 }}>{zoneAbbr}</span>
               {dateBlock && <span style={{ opacity: 0.75 }}>{dateBlock}</span>}
               {timeStr && <span style={{ opacity: 0.85 }}>{timeStr}</span>}
-            </div>
+            </button>
           </>
         );
       })()}
@@ -646,6 +662,122 @@ const StatusBar: React.FC<StatusBarProps> = ({
           </span>
         )}
       </div>
+
+      {tzModalOpen && timezoneZone && gmtOffsetSeconds != null && createPortal((() => {
+        const localOffsetSec = -now.getTimezoneOffset() * 60;
+        const diffSec = gmtOffsetSeconds - localOffsetSec;
+        const diffH = Math.round(diffSec / 3600);
+        const sign = diffH >= 0 ? '+' : '';
+        const lang = (typeof localStorage !== 'undefined' && localStorage.getItem('locwarp.lang') === 'en') ? 'en' : 'zh-TW';
+        let zoneFullName = timezoneZone;
+        let timeStr = '';
+        let dateStr = '';
+        let weekdayStr = '';
+        let countryName = '';
+        try {
+          const parts = new Intl.DateTimeFormat(lang, { timeZone: timezoneZone, timeZoneName: 'long' }).formatToParts(now);
+          const named = parts.find((p) => p.type === 'timeZoneName')?.value;
+          if (named) zoneFullName = named;
+        } catch { /* keep IANA id */ }
+        try {
+          timeStr = new Intl.DateTimeFormat('en-GB', {
+            timeZone: timezoneZone,
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+          }).format(now);
+        } catch { /* skip */ }
+        try {
+          dateStr = new Intl.DateTimeFormat(lang, {
+            timeZone: timezoneZone,
+            year: 'numeric', month: 'long', day: 'numeric',
+          }).format(now);
+        } catch { /* skip */ }
+        try {
+          weekdayStr = new Intl.DateTimeFormat(lang, {
+            timeZone: timezoneZone, weekday: 'long',
+          }).format(now);
+        } catch { /* skip */ }
+        if (countryCode) {
+          try {
+            countryName = new Intl.DisplayNames([lang], { type: 'region' }).of(countryCode.toUpperCase()) ?? '';
+          } catch { /* skip */ }
+        }
+        const place = [countryName, cityName].filter(Boolean).join(' ');
+        const dateLine = [dateStr, weekdayStr].filter(Boolean).join(' · ');
+        const rowLabelStyle: React.CSSProperties = {
+          fontSize: 11, opacity: 0.55, marginBottom: 3, letterSpacing: '0.02em',
+        };
+        const rowValueStyle: React.CSSProperties = {
+          fontSize: 13, color: '#e8eaf0', lineHeight: 1.45,
+        };
+        return (
+          <div
+            onClick={() => setTzModalOpen(false)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 2000,
+              background: 'rgba(8, 10, 20, 0.55)', backdropFilter: 'blur(4px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: 360, position: 'relative',
+                background: 'rgba(26, 29, 39, 0.96)',
+                border: '1px solid rgba(108, 140, 255, 0.25)', borderRadius: 12,
+                padding: '22px 24px', color: '#e8eaf0',
+                boxShadow: '0 20px 60px rgba(12, 18, 40, 0.65)',
+              }}
+            >
+              {/* Top-right close button. Stays in the corner so it doesn't
+                  push the content down. */}
+              <button
+                onClick={() => setTzModalOpen(false)}
+                title={t('generic.close')}
+                aria-label={t('generic.close')}
+                style={{
+                  position: 'absolute', top: 10, right: 10,
+                  width: 26, height: 26, borderRadius: 6,
+                  background: 'transparent', border: 'none',
+                  color: 'rgba(255,255,255,0.5)', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 14, paddingRight: 28 }}>
+                {t('tz.modal_title')}
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <div style={rowLabelStyle}>{t('tz.zone_label')}</div>
+                <div style={rowValueStyle}>{zoneFullName}</div>
+                <div style={{ fontSize: 11, opacity: 0.45, fontFamily: 'monospace', marginTop: 1 }}>{timezoneZone}</div>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <div style={rowLabelStyle}>{t('tz.offset_label')}</div>
+                <div style={rowValueStyle}>{sign}{diffH}h</div>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <div style={rowLabelStyle}>{t('tz.local_now_label')}</div>
+                <div style={rowValueStyle}>{timeStr}</div>
+                {dateLine && <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>{dateLine}</div>}
+              </div>
+
+              {place && (
+                <div>
+                  <div style={rowLabelStyle}>{t('tz.location_label')}</div>
+                  <div style={rowValueStyle}>{place}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })(), document.body)}
 
       {locatePcOpen && createPortal((
         <div

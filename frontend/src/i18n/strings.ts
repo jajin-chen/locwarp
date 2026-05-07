@@ -477,6 +477,13 @@ export const STRINGS = {
   // ── Toasts extra ─────────────────────────────
   'toast.no_position_random': { zh: '尚未取得目前位置,無法產生隨機路徑點', en: 'No current position, cannot generate random waypoints' },
   'toast.route_optimized': { zh: '路線已最佳化(總時長約 {min} 分)', en: 'Route optimized ({min} min total)' },
+  // Timezone-detail modal opened from the status-bar tz chip.
+  'tz.detail_tooltip': { zh: '點開查看完整時區資訊', en: 'Click for full timezone details' },
+  'tz.modal_title': { zh: '目的地時區', en: 'Destination Timezone' },
+  'tz.zone_label': { zh: '時區', en: 'Zone' },
+  'tz.offset_label': { zh: '時差', en: 'Offset' },
+  'tz.local_now_label': { zh: '當地時間', en: 'Local time' },
+  'tz.location_label': { zh: '地點', en: 'Location' },
   'toast.route_optimize_failed': { zh: '路線最佳化失敗', en: 'Route optimize failed' },
   'toast.route_optimize_estimate': { zh: '直線估算', en: 'straight-line estimate' },
   'panel.waypoints_optimize': { zh: '最佳順序', en: 'Optimize' },

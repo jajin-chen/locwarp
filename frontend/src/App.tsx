@@ -96,6 +96,11 @@ const App: React.FC = () => {
   // don't hit Nominatim/Photon every position_update tick.
   const [locMeta, setLocMeta] = useState<{
     countryCode: string;
+    // Reverse-geocoded city / POI / road name (whatever Photon-or-Nominatim's
+    // short_name returns). Used by the timezone-detail modal in StatusBar
+    // to print "Country City" alongside the IANA zone, and may be empty
+    // if the lookup failed or the spot is mid-ocean.
+    cityName: string;
     timezoneZone: string | null;
     gmtOffsetSeconds: number | null;
     // Weather at the current virtual location. Fetched from Open-Meteo when
@@ -104,7 +109,7 @@ const App: React.FC = () => {
     weatherCode: number | null;
     tempC: number | null;
   }>({
-    countryCode: '', timezoneZone: null, gmtOffsetSeconds: null,
+    countryCode: '', cityName: '', timezoneZone: null, gmtOffsetSeconds: null,
     weatherCode: null, tempC: null,
   })
   // Last position we successfully looked up reverse-geo/timezone for. Used
@@ -264,7 +269,12 @@ const App: React.FC = () => {
         geoRes = await api.reverseGeocode(pos.lat, pos.lng)
         if (cancelled) return
         const cc = String(geoRes?.country_code ?? '').toLowerCase()
-        setLocMeta((prev) => prev.countryCode === cc ? prev : { ...prev, countryCode: cc })
+        const city = String(geoRes?.short_name ?? '').trim()
+        setLocMeta((prev) =>
+          (prev.countryCode === cc && prev.cityName === city)
+            ? prev
+            : { ...prev, countryCode: cc, cityName: city }
+        )
       } catch { /* offline / rate-limited — keep previous */ }
       try {
         const tz = await api.lookupTimezone(pos.lat, pos.lng)
@@ -2240,6 +2250,7 @@ const App: React.FC = () => {
           onOpenLog={handleOpenLog}
           dualDevice={device.connectedDevices.length >= 2}
           countryCode={locMeta.countryCode}
+          cityName={locMeta.cityName}
           weatherCode={locMeta.weatherCode}
           tempC={locMeta.tempC}
           timezoneZone={locMeta.timezoneZone}
