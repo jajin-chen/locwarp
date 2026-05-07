@@ -249,6 +249,12 @@ async function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
+      // Default Chromium blocks AudioContext output until a user gesture
+      // happens on the page; that breaks the route-completion alert
+      // sound when a long loop finishes while the user is away from the
+      // window. LocWarp is a desktop tool (not a random webpage), so
+      // disable the gesture gate entirely.
+      autoplayPolicy: 'no-user-gesture-required',
     },
   })
   // Show the window once the first frame is painted. Combined with

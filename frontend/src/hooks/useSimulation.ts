@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import * as api from '../services/api'
 import type { WsMessage } from './useWebSocket'
+import { playCompletionAlert } from '../services/alertSound'
 
 export enum SimMode {
   Teleport = 'teleport',
@@ -371,7 +372,10 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         if (d.waypoints) setWaypoints(d.waypoints)
         break
       }
-      case 'simulation_complete': {
+      case 'simulation_complete':
+      case 'navigation_complete':
+      case 'multi_stop_complete':
+      case 'loop_complete': {
         setStatus((prev) => ({ ...prev, running: false, paused: false }))
         setProgress(1)
         setEta(null)
@@ -380,6 +384,10 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         setLapProgress(null)
         setDestination(null)
         setRoutePath([])
+        // Route reached its end naturally (vs user pressing stop). Fire
+        // the user-toggleable cascading-bell alert; alertSound's setting
+        // gate suppresses playback when disabled.
+        playCompletionAlert()
         break
       }
       case 'waypoint_progress': {

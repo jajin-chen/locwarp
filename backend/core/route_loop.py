@@ -244,6 +244,11 @@ class RouteLooper:
             # Auto-stop after the requested number of laps.
             if limit is not None and engine.lap_count >= limit:
                 logger.info("Loop reached configured lap count %d, stopping", limit)
+                # Surface a dedicated completion event so the frontend can
+                # play its route-completion alert sound. We deliberately
+                # only emit this in the auto-stop path, not when the user
+                # hits Stop or an infinite loop is interrupted.
+                await engine._emit("loop_complete", {"laps": engine.lap_count})
                 break
 
             # No between-laps pause — the per-station pause already covers
@@ -354,6 +359,7 @@ async def _run_jump_loop(
         logger.info("Jump loop lap %d%s complete",
                     engine.lap_count, f"/{limit}" if limit else "")
         if limit is not None and engine.lap_count >= limit:
+            await engine._emit("loop_complete", {"laps": engine.lap_count})
             break
 
     if engine.state == SimulationState.LOOPING:

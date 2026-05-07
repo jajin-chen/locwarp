@@ -477,6 +477,13 @@ export const STRINGS = {
   // ── Toasts extra ─────────────────────────────
   'toast.no_position_random': { zh: '尚未取得目前位置,無法產生隨機路徑點', en: 'No current position, cannot generate random waypoints' },
   'toast.route_optimized': { zh: '路線已最佳化(總時長約 {min} 分)', en: 'Route optimized ({min} min total)' },
+  // Settings panel opened from the bottom status bar.
+  'status.settings': { zh: '設定', en: 'Settings' },
+  'status.settings_tooltip': { zh: '開啟 LocWarp 設定面板', en: 'Open LocWarp settings' },
+  'settings.title': { zh: '設定', en: 'Settings' },
+  'settings.alert_sound_label': { zh: '路線結束提示音', en: 'Route completion alert sound' },
+  'settings.alert_sound_desc': { zh: '導航 / 巡迴 / 多點繞路跑完時播放層疊鐘聲 (約 2 秒),提醒你回到 LocWarp。', en: 'Plays a cascading-bell sound (~2s) when navigate / loop / multi-stop finishes so you know to come back to LocWarp.' },
+  'settings.alert_sound_test': { zh: '試聽', en: 'Test' },
   // Timezone-detail modal opened from the status-bar tz chip.
   'tz.detail_tooltip': { zh: '點開查看完整時區資訊', en: 'Click for full timezone details' },
   'tz.modal_title': { zh: '目的地時區', en: 'Destination Timezone' },

@@ -6,6 +6,7 @@ import type { DeviceInfo } from '../hooks/useDevice';
 import { useT } from '../i18n';
 import LangToggle from './LangToggle';
 import PhoneControlButton from './PhoneControl';
+import SettingsModal from './SettingsModal';
 import pkg from '../../package.json';
 import { WeatherIcon, categorize, labelKeyFor } from './WeatherIcon';
 import { useUpdateCheck } from './UpdateChecker';
@@ -138,6 +139,11 @@ const StatusBar: React.FC<StatusBarProps> = ({
   // give); user-discoverable so the chip is now the entry point to the
   // detail.
   const [tzModalOpen, setTzModalOpen] = useState(false);
+
+  // Settings panel (v0.2.130). Opens from the trailing settings button
+  // next to the avatar/map-pin chip. Hosts the route-completion alert
+  // toggle today; structured for future per-user preferences.
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Locate-PC flow: button fires browser geolocation, then this dialog
   // confirms whether the user wants to teleport the iPhone or just pan
@@ -591,6 +597,29 @@ const StatusBar: React.FC<StatusBarProps> = ({
               {t('status.avatar')}
             </button>
           )}
+          {/* 設定 — opens the settings panel (route-completion alert sound today) */}
+          <button
+            onClick={() => setSettingsOpen(true)}
+            title={t('status.settings_tooltip')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '2px 8px',
+              fontSize: 12,
+              background: 'rgba(180, 180, 200, 0.10)',
+              border: '1px solid rgba(180, 180, 200, 0.35)',
+              color: '#c7cbd9',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+            </svg>
+            {t('status.settings')}
+          </button>
         </>
       )}
 
@@ -662,6 +691,8 @@ const StatusBar: React.FC<StatusBarProps> = ({
           </span>
         )}
       </div>
+
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       {tzModalOpen && timezoneZone && gmtOffsetSeconds != null && createPortal((() => {
         const localOffsetSec = -now.getTimezoneOffset() * 60;
