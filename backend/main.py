@@ -13,6 +13,7 @@ from config import API_HOST, API_PORT, SETTINGS_FILE, DEFAULT_LOCATION
 from core.device_manager import DeviceManager
 from services.cooldown import CooldownTimer
 from services.bookmarks import BookmarkManager
+from services.route_store import RouteManager
 from services.coord_format import CoordinateFormatter
 from services.reconnect import ReconnectManager
 
@@ -49,6 +50,7 @@ class AppState:
         self._primary_udid: str | None = None
         self.cooldown_timer = CooldownTimer()
         self.bookmark_manager = BookmarkManager()
+        self.route_manager = RouteManager()
         self.coord_formatter = CoordinateFormatter()
         self.reconnect_manager = None
         self._last_position = None

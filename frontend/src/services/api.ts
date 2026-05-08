@@ -306,8 +306,24 @@ export const planRoute = (start: any, end: any, profile: string) =>
   request<any>('POST', '/api/route/plan', { start, end, profile })
 export const getSavedRoutes = () => request<any[]>('GET', '/api/route/saved')
 export const saveRoute = (route: any) => request<any>('POST', '/api/route/saved', route)
+// Replace an existing saved route in-place (overwrite-on-save). Keeps the
+// original id and created_at, updates everything else.
+export const replaceRoute = (id: string, route: any) =>
+  request<any>('PUT', `/api/route/saved/${id}`, route)
 export const deleteRoute = (id: string) => request<any>('DELETE', `/api/route/saved/${id}`)
 export const renameRoute = (id: string, name: string) => request<any>('PATCH', `/api/route/saved/${id}`, { name })
+export const moveRoutes = (route_ids: string[], target_category_id: string) =>
+  request<{ moved: number }>('POST', '/api/route/saved/move', { route_ids, target_category_id })
+
+// Route categories (mirror of bookmark categories)
+export const listRouteCategories = () =>
+  request<any[]>('GET', '/api/route/categories')
+export const createRouteCategory = (name: string, color = '#6c8cff') =>
+  request<any>('POST', '/api/route/categories', { name, color })
+export const updateRouteCategory = (id: string, fields: { name?: string; color?: string }) =>
+  request<any>('PUT', `/api/route/categories/${id}`, { id, name: fields.name ?? '', color: fields.color ?? '#6c8cff' })
+export const deleteRouteCategory = (id: string) =>
+  request<any>('DELETE', `/api/route/categories/${id}`)
 
 // GPX import/export
 export async function importGpx(file: File): Promise<{ status: string; id: string; points: number }> {
@@ -330,5 +346,5 @@ export function exportAllRoutesUrl(): string {
   return `${API}/api/route/saved/export`
 }
 
-export const importAllRoutes = (data: { routes: any[] }) =>
+export const importAllRoutes = (data: { routes: any[]; categories?: any[] }) =>
   request<{ imported: number }>('POST', '/api/route/saved/import', data)

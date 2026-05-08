@@ -33,6 +33,7 @@ import PauseControl from './PauseControl';
 import { SimMode, MoveMode } from '../hooks/useSimulation';
 import AddressSearch from './AddressSearch';
 import BookmarkList from './BookmarkList';
+import RouteList, { RouteCategory, SavedRoute } from './RouteList';
 
 interface Position {
   lat: number;
@@ -45,12 +46,6 @@ interface Bookmark {
   lat: number;
   lng: number;
   category: string;
-}
-
-interface SavedRoute {
-  id: string;
-  name: string;
-  waypoints: Position[];
 }
 
 interface ControlPanelProps {
@@ -104,14 +99,21 @@ interface ControlPanelProps {
   onBookmarkBulkPaste?: () => void;
   bookmarkExportUrl?: string;
   savedRoutes: SavedRoute[];
+  routeCategories: RouteCategory[];
   onRouteLoad: (id: string) => void;
-  onRouteSave: (name: string) => void;
+  onRouteSave: (name: string, opts?: { categoryId?: string; overwriteId?: string }) => void;
   onRouteRename?: (id: string, name: string) => void;
   onRouteDelete?: (id: string) => void;
+  onRoutesBulkDelete?: (ids: string[]) => Promise<void> | void;
+  onRouteMove?: (ids: string[], targetCategoryId: string) => Promise<void> | void;
   onRouteGpxImport?: (file: File) => Promise<void>;
   onRouteGpxExport?: (id: string) => void;
   onRoutesImportAll?: (file: File) => Promise<void>;
   routesExportAllUrl?: string;
+  onRouteCategoryAdd?: (name: string, color?: string) => Promise<void> | void;
+  onRouteCategoryDelete?: (id: string) => Promise<void> | void;
+  onRouteCategoryRename?: (id: string, name: string) => Promise<void> | void;
+  onRouteCategoryRecolor?: (id: string, color: string) => Promise<void> | void;
   randomWalkRadius: number;
   pauseRandomWalk?: { enabled: boolean; min: number; max: number };
   onPauseRandomWalkChange?: (v: { enabled: boolean; min: number; max: number }) => void;
@@ -254,14 +256,21 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onBookmarkBulkPaste,
   bookmarkExportUrl,
   savedRoutes,
+  routeCategories,
   onRouteLoad,
   onRouteSave,
   onRouteRename,
   onRouteDelete,
+  onRoutesBulkDelete,
+  onRouteMove,
   onRouteGpxImport,
   onRouteGpxExport,
   onRoutesImportAll,
   routesExportAllUrl,
+  onRouteCategoryAdd,
+  onRouteCategoryDelete,
+  onRouteCategoryRename,
+  onRouteCategoryRecolor,
   randomWalkRadius,
   pauseRandomWalk,
   onPauseRandomWalkChange,
@@ -293,9 +302,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const t = useT();
   const [coordLat, setCoordLat] = useState('');
   const [coordLng, setCoordLng] = useState('');
-  const [routeName, setRouteName] = useState('');
-  const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
-  const [editingRouteName, setEditingRouteName] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [libraryTab, setLibraryTab] = useState<'bookmarks' | 'routes'>('bookmarks');
 
@@ -837,235 +843,25 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   exportUrl={bookmarkExportUrl}
                 />
               ) : (
-                <>
-                  <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 6 }}>
-                    {t('panel.route_save_hint', { n: currentWaypointsCount })}
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                    <input
-                      type="text"
-                      className="search-input"
-                      placeholder={t('panel.route_name')}
-                      value={routeName}
-                      onChange={(e) => setRouteName(e.target.value)}
-                      style={{ flex: 1 }}
-                    />
-                    <button
-                      className="action-btn primary"
-                      disabled={!routeName.trim() || currentWaypointsCount === 0}
-                      onClick={() => {
-                        if (routeName.trim() && currentWaypointsCount > 0) {
-                          onRouteSave(routeName.trim());
-                          setRouteName('');
-                        }
-                      }}
-                    >{t('generic.save')}</button>
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                    {onRouteGpxImport && (
-                      <label
-                        className="action-btn"
-                        title={t('panel.route_gpx_import')}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 4,
-                          padding: '4px 10px', fontSize: 11, cursor: 'pointer',
-                        }}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                          <polyline points="17 8 12 3 7 8" />
-                          <line x1="12" y1="3" x2="12" y2="15" />
-                        </svg>
-                        {t('panel.route_gpx_import')}
-                        <input
-                          type="file"
-                          accept=".gpx,application/gpx+xml"
-                          style={{ display: 'none' }}
-                          onChange={async (e) => {
-                            const f = e.target.files?.[0];
-                            if (f) await onRouteGpxImport(f);
-                            e.target.value = '';
-                          }}
-                        />
-                      </label>
-                    )}
-                    {routesExportAllUrl && (
-                      savedRoutes.length > 0 ? (
-                        <a
-                          className="action-btn"
-                          href={routesExportAllUrl}
-                          download="locwarp-routes.json"
-                          title={t('panel.routes_export_all_tooltip')}
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 4,
-                            padding: '4px 10px', fontSize: 11, cursor: 'pointer',
-                            textDecoration: 'none',
-                            color: '#4ecdc4',
-                            background: 'rgba(78, 205, 196, 0.12)',
-                            border: '1px solid rgba(78, 205, 196, 0.35)',
-                          }}
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                            <polyline points="7 10 12 15 17 10" />
-                            <line x1="12" y1="15" x2="12" y2="3" />
-                          </svg>
-                          {t('panel.routes_export_all')}
-                        </a>
-                      ) : (
-                        <button
-                          className="action-btn"
-                          disabled
-                          title={t('panel.routes_export_all_disabled')}
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 4,
-                            padding: '4px 10px', fontSize: 11,
-                            cursor: 'not-allowed',
-                            color: 'rgba(78, 205, 196, 0.45)',
-                            background: 'rgba(78, 205, 196, 0.05)',
-                            border: '1px solid rgba(78, 205, 196, 0.15)',
-                            opacity: 0.55,
-                          }}
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                            <polyline points="7 10 12 15 17 10" />
-                            <line x1="12" y1="15" x2="12" y2="3" />
-                          </svg>
-                          {t('panel.routes_export_all')}
-                        </button>
-                      )
-                    )}
-                    {onRoutesImportAll && (
-                      <label
-                        className="action-btn"
-                        title={t('panel.routes_import_all_tooltip')}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 4,
-                          padding: '4px 10px', fontSize: 11, cursor: 'pointer',
-                          color: '#4ecdc4',
-                          background: 'rgba(78, 205, 196, 0.12)',
-                          border: '1px solid rgba(78, 205, 196, 0.35)',
-                        }}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                          <polyline points="17 8 12 3 7 8" />
-                          <line x1="12" y1="3" x2="12" y2="15" />
-                        </svg>
-                        {t('panel.routes_import_all')}
-                        <input
-                          type="file"
-                          accept=".json,application/json"
-                          style={{ display: 'none' }}
-                          onChange={async (e) => {
-                            const f = e.target.files?.[0];
-                            if (f) await onRoutesImportAll(f);
-                            e.target.value = '';
-                          }}
-                        />
-                      </label>
-                    )}
-                  </div>
-                  {savedRoutes.length === 0 && (
-                    <div style={{ fontSize: 12, opacity: 0.5, padding: '8px 0' }}>{t('panel.route_empty')}</div>
-                  )}
-                  {savedRoutes.map((route) => {
-                    const isEditing = editingRouteId === route.id;
-                    const commitRename = () => {
-                      const n = editingRouteName.trim();
-                      if (n && n !== route.name && onRouteRename) onRouteRename(route.id, n);
-                      setEditingRouteId(null);
-                    };
-                    return (
-                      <div
-                        key={route.id}
-                        className="bookmark-item"
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px', borderRadius: 4 }}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="22,12 18,12 15,21 9,3 6,12 2,12" />
-                        </svg>
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            autoFocus
-                            value={editingRouteName}
-                            onChange={(e) => setEditingRouteName(e.target.value)}
-                            onBlur={commitRename}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') commitRename();
-                              else if (e.key === 'Escape') setEditingRouteId(null);
-                            }}
-                            style={{ flex: 1, fontSize: 13, padding: '2px 4px' }}
-                          />
-                        ) : (
-                          <span
-                            style={{ fontSize: 13, flex: 1, cursor: 'pointer' }}
-                            onClick={() => { onRouteLoad(route.id); setLibraryOpen(false); }}
-                            title={t('panel.route_load_tooltip')}
-                          >
-                            {route.name}
-                          </span>
-                        )}
-                        <span style={{ opacity: 0.5, fontSize: 11 }}>
-                          {route.waypoints.length} pts
-                        </span>
-                        {!isEditing && onRouteRename && (
-                          <button
-                            className="action-btn"
-                            title={t('generic.rename')}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingRouteId(route.id);
-                              setEditingRouteName(route.name);
-                            }}
-                            style={{ padding: '2px 6px', fontSize: 10 }}
-                          >
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M12 20h9" />
-                              <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
-                            </svg>
-                          </button>
-                        )}
-                        {onRouteGpxExport && (
-                          <button
-                            className="action-btn"
-                            title={t('panel.route_gpx_export_tooltip')}
-                            onClick={(e) => { e.stopPropagation(); onRouteGpxExport(route.id); }}
-                            style={{
-                              padding: '3px 8px', fontSize: 11, fontWeight: 600,
-                              display: 'inline-flex', alignItems: 'center', gap: 4,
-                              color: '#6c8cff',
-                              background: 'rgba(108, 140, 255, 0.12)',
-                              border: '1px solid rgba(108, 140, 255, 0.35)',
-                            }}
-                          >
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                              <polyline points="7 10 12 15 17 10" />
-                              <line x1="12" y1="15" x2="12" y2="3" />
-                            </svg>
-                            GPX
-                          </button>
-                        )}
-                        {onRouteDelete && (
-                          <button
-                            className="action-btn"
-                            title={t('generic.delete')}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (confirm(t('panel.route_delete_confirm', { name: route.name }))) onRouteDelete(route.id);
-                            }}
-                            style={{ padding: '2px 6px', fontSize: 10, color: '#f44336' }}
-                          >
-                            X
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </>
+                <RouteList
+                  routes={savedRoutes}
+                  categories={routeCategories}
+                  currentWaypointsCount={currentWaypointsCount}
+                  onRouteLoad={(id) => { onRouteLoad(id); setLibraryOpen(false); }}
+                  onRouteSave={onRouteSave}
+                  onRouteRename={(id, name) => onRouteRename?.(id, name)}
+                  onRouteDelete={(id) => onRouteDelete?.(id)}
+                  onRoutesBulkDelete={onRoutesBulkDelete}
+                  onRouteMove={onRouteMove}
+                  onRouteGpxExport={onRouteGpxExport}
+                  onRouteGpxImport={onRouteGpxImport}
+                  onCategoryAdd={onRouteCategoryAdd}
+                  onCategoryDelete={onRouteCategoryDelete}
+                  onCategoryRename={onRouteCategoryRename}
+                  onCategoryRecolor={onRouteCategoryRecolor}
+                  routesExportAllUrl={routesExportAllUrl}
+                  onRoutesImportAll={onRoutesImportAll}
+                />
               )}
             </div>
           </div>

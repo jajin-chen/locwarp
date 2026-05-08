@@ -422,6 +422,24 @@ export const STRINGS = {
   'toast.route_rename_failed': { zh: '重新命名失敗', en: 'Rename failed' },
   'toast.gpx_imported': { zh: '已匯入 {n} 個路徑點', en: 'Imported {n} waypoints' },
   'toast.gpx_import_failed': { zh: '匯入失敗: {msg}', en: 'Import failed: {msg}' },
+  'toast.route_overwritten': { zh: '已覆蓋路線「{name}」', en: 'Route "{name}" overwritten' },
+  'toast.route_bulk_deleted': { zh: '已刪除 {n} 條路線', en: 'Deleted {n} routes' },
+
+  // ── Routes (categorised list) ───────────────
+  'route.search_placeholder': { zh: '搜尋路線名稱', en: 'Search routes' },
+  'route.search_no_results': { zh: '沒有符合的路線', en: 'No matching routes' },
+  'route.points_unit': { zh: '點', en: 'pts' },
+  'route.load': { zh: '載入路線', en: 'Load route' },
+  'route.export_gpx': { zh: '匯出 GPX', en: 'Export GPX' },
+  'route.manage_categories': { zh: '管理路線分類', en: 'Manage route categories' },
+  'route.save_category_tooltip': { zh: '儲存到分類', en: 'Save to category' },
+  'route.move_to_placeholder': { zh: '移到分類…', en: 'Move to…' },
+  'route.bulk_delete_confirm': { zh: '確定要刪除 {n} 條路線嗎?', en: 'Delete {n} routes?' },
+  'route.sort_date_updated': { zh: '依更新時間', en: 'By updated' },
+  'route.overwrite_title': { zh: '已存在同名路線', en: 'A route with this name exists' },
+  'route.overwrite_body': { zh: '找到 {n} 條同名路線「{name}」,要覆蓋舊的還是另存新檔?', en: 'Found {n} route(s) named "{name}". Overwrite the existing one or save as new?' },
+  'route.overwrite_yes': { zh: '覆蓋舊的', en: 'Overwrite' },
+  'route.overwrite_save_as_new': { zh: '另存新檔', en: 'Save as new' },
 
   // ── Error codes (backend → i18n) ────────────
   'err.python313_missing': { zh: '需要 Python 3.13+ 才能啟動 WiFi Tunnel', en: 'Python 3.13+ is required to start the Wi-Fi tunnel' },

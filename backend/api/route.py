@@ -1,15 +1,19 @@
-import json
 import logging
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from pydantic import BaseModel
 
-from config import ROUTES_FILE
-from models.schemas import RoutePlanRequest, SavedRoute, Coordinate
+from models.schemas import (
+    Coordinate,
+    RouteCategory,
+    RouteMoveRequest,
+    RoutePlanRequest,
+    SavedRoute,
+)
 from services.route_service import RouteService
 from services.gpx_service import GpxService
-from services.json_safe import safe_load_json, safe_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -19,26 +23,11 @@ route_service = RouteService()
 gpx_service = GpxService()
 
 
-def _load_saved_routes() -> dict[str, SavedRoute]:
-    raw = safe_load_json(ROUTES_FILE)
-    if raw is None:
-        return {}
-    out: dict[str, SavedRoute] = {}
-    for item in raw.get("routes", []):
-        try:
-            route = SavedRoute(**item)
-            out[route.id] = route
-        except Exception as e:
-            logger.warning("skip malformed saved route: %s", e)
-    return out
-
-
-def _persist_saved_routes() -> None:
-    payload = {"routes": [r.model_dump(mode="json") for r in _saved_routes.values()]}
-    safe_write_json(ROUTES_FILE, payload)
-
-
-_saved_routes: dict[str, SavedRoute] = _load_saved_routes()
+def _rm():
+    """Lazy lookup so route_store can read backend state without a circular
+    import at module load (api/route is imported before main builds app_state)."""
+    from main import app_state
+    return app_state.route_manager
 
 
 @router.post("/plan")
@@ -49,113 +38,142 @@ async def plan_route(req: RoutePlanRequest):
     return result
 
 
+# ── Saved routes ──────────────────────────────────────────
+
 @router.get("/saved", response_model=list[SavedRoute])
 async def list_saved():
-    return list(_saved_routes.values())
+    return _rm().list_routes()
 
 
 @router.post("/saved", response_model=SavedRoute)
 async def save_route(route: SavedRoute):
-    route.id = str(uuid.uuid4())
-    route.created_at = datetime.now(timezone.utc).isoformat()
-    _saved_routes[route.id] = route
-    _persist_saved_routes()
-    return route
+    return _rm().create_route(route)
+
+
+@router.put("/saved/{route_id}", response_model=SavedRoute)
+async def replace_saved(route_id: str, route: SavedRoute):
+    """Overwrite an existing saved route's payload.
+
+    Backend half of the "save and overwrite same-named route" UX. Keeps
+    the original id and created_at; updates name, waypoints, profile,
+    and category, and stamps updated_at.
+    """
+    updated = _rm().replace_route(route_id, route)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Route not found")
+    return updated
 
 
 @router.delete("/saved/{route_id}")
 async def delete_saved(route_id: str):
-    if route_id not in _saved_routes:
+    if not _rm().delete_route(route_id):
         raise HTTPException(status_code=404, detail="Route not found")
-    del _saved_routes[route_id]
-    _persist_saved_routes()
     return {"status": "deleted"}
 
 
-from pydantic import BaseModel as _BM
-
-
-class _RouteRenameRequest(_BM):
+class _RouteRenameRequest(BaseModel):
     name: str
 
 
 @router.patch("/saved/{route_id}")
 async def rename_saved(route_id: str, req: _RouteRenameRequest):
-    if route_id not in _saved_routes:
-        raise HTTPException(status_code=404, detail="Route not found")
     name = req.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail={"code": "invalid_name", "message": "路線名稱不可為空"})
-    _saved_routes[route_id].name = name
-    _persist_saved_routes()
-    return _saved_routes[route_id]
+    updated = _rm().rename_route(route_id, name)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Route not found")
+    return updated
+
+
+@router.post("/saved/move")
+async def move_saved_routes(req: RouteMoveRequest):
+    count = _rm().move_routes(req.route_ids, req.target_category_id)
+    return {"moved": count}
 
 
 @router.get("/saved/export")
 async def export_all_saved_routes():
-    """Export every saved route as a single JSON bundle."""
-    payload = {"routes": [r.model_dump(mode="json") for r in _saved_routes.values()]}
+    """Export every saved route + categories as a single JSON bundle."""
     from fastapi.responses import Response
-    import json as _json
-    body = _json.dumps(payload, ensure_ascii=False, indent=2)
+    body = _rm().export_json()
     return Response(content=body, media_type="application/json",
                     headers={"Content-Disposition": 'attachment; filename="locwarp-routes.json"'})
 
 
-class _RouteImportBody(_BM):
-    routes: list[SavedRoute]
+class _RouteImportBody(BaseModel):
+    # Accept both the new bundle shape (categories + routes) and the
+    # legacy shape (routes only). The manager copes with either.
+    routes: list[SavedRoute] = []
+    categories: list[RouteCategory] = []
 
 
 @router.post("/saved/import")
 async def import_all_saved_routes(body: _RouteImportBody):
-    """Merge imported routes into saved. Imports get fresh ids so they never collide."""
-    imported = 0
-    for r in body.routes:
-        r.id = str(uuid.uuid4())
-        r.created_at = datetime.now(timezone.utc).isoformat()
-        _saved_routes[r.id] = r
-        imported += 1
-    if imported:
-        _persist_saved_routes()
+    import json as _json
+    payload = _json.dumps({
+        "routes": [r.model_dump(mode="json") for r in body.routes],
+        "categories": [c.model_dump(mode="json") for c in body.categories],
+    })
+    imported = _rm().import_json(payload)
     return {"imported": imported}
 
+
+# ── Categories ────────────────────────────────────────────
+
+@router.get("/categories", response_model=list[RouteCategory])
+async def list_route_categories():
+    return _rm().list_categories()
+
+
+@router.post("/categories", response_model=RouteCategory)
+async def create_route_category(cat: RouteCategory):
+    return _rm().create_category(name=cat.name, color=cat.color)
+
+
+@router.put("/categories/{cat_id}", response_model=RouteCategory)
+async def update_route_category(cat_id: str, cat: RouteCategory):
+    updated = _rm().update_category(cat_id, name=cat.name, color=cat.color)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Category not found")
+    return updated
+
+
+@router.delete("/categories/{cat_id}")
+async def delete_route_category(cat_id: str):
+    if cat_id == "default":
+        raise HTTPException(status_code=400, detail="Cannot delete default category")
+    if not _rm().delete_category(cat_id):
+        raise HTTPException(status_code=404, detail="Category not found")
+    return {"status": "deleted"}
+
+
+# ── GPX ───────────────────────────────────────────────────
 
 @router.post("/gpx/import")
 async def import_gpx(file: UploadFile = File(...)):
     content = await file.read()
     text = content.decode("utf-8")
     coords = gpx_service.parse_gpx(text)
-    # Strip the .gpx extension from the filename so the rename input
-    # doesn't show "myroute.gpx" — the format suffix is irrelevant to the
-    # in-app route name.
     raw_name = file.filename or "Imported GPX"
     base_name = raw_name.rsplit(".", 1)[0] if raw_name.lower().endswith(".gpx") else raw_name
     route = SavedRoute(
-        id=str(uuid.uuid4()),
         name=base_name or "Imported GPX",
         waypoints=coords,
         profile="walking",
-        created_at=datetime.now(timezone.utc).isoformat(),
     )
-    _saved_routes[route.id] = route
-    _persist_saved_routes()
-    return {"status": "imported", "id": route.id, "points": len(coords)}
+    saved = _rm().create_route(route)
+    return {"status": "imported", "id": saved.id, "points": len(coords)}
 
 
 @router.get("/gpx/export/{route_id}")
 async def export_gpx(route_id: str):
-    if route_id not in _saved_routes:
+    route = next((r for r in _rm().list_routes() if r.id == route_id), None)
+    if route is None:
         raise HTTPException(status_code=404, detail="Route not found")
-    route = _saved_routes[route_id]
     points = [{"lat": c.lat, "lng": c.lng} for c in route.waypoints]
     gpx_xml = gpx_service.generate_gpx(points, name=route.name)
     from fastapi.responses import Response
-    # HTTP headers are encoded latin-1 by ASGI servers, so a raw
-    # non-ASCII filename (e.g. 測試用的.gpx) blows up with
-    # UnicodeEncodeError. Emit both a safe ASCII fallback and the
-    # RFC 6266 filename* parameter so modern clients get the correct
-    # Chinese / emoji / etc. name while legacy clients still download
-    # the file.
     import urllib.parse
     safe_name = "".join(ch if ord(ch) < 128 and ch not in '"\\/' else "_" for ch in route.name) or "route"
     utf8_encoded = urllib.parse.quote(f"{route.name}.gpx", safe="")

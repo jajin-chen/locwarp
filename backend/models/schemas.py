@@ -162,12 +162,36 @@ class RoutePlanRequest(BaseModel):
     profile: str = "foot"
 
 
+class RouteCategory(BaseModel):
+    id: str = ""
+    name: str
+    color: str = "#6c8cff"
+    sort_order: int = 0
+    created_at: str = ""
+
+
 class SavedRoute(BaseModel):
     id: str = ""
     name: str
     waypoints: list[Coordinate]
     profile: str = "walking"
     created_at: str = ""
+    # Default keeps legacy routes.json files (which have no category_id field)
+    # working with no migration step: pydantic populates "default" on load.
+    category_id: str = "default"
+    # Set whenever the route is replaced (PUT /saved/{id}) so the UI can
+    # show a "last modified" timestamp distinct from created_at.
+    updated_at: str = ""
+
+
+class RouteMoveRequest(BaseModel):
+    route_ids: list[str]
+    target_category_id: str
+
+
+class RouteStore(BaseModel):
+    categories: list[RouteCategory] = []
+    routes: list[SavedRoute] = []
 
 
 # ── Bookmarks ─────────────────────────────────────────────
