@@ -25,6 +25,7 @@ from core.joystick import JoystickHandler
 from core.multi_stop import MultiStopNavigator
 from core.random_walk import RandomWalkHandler
 from core.restore import RestoreHandler
+from core.goldditto import GoldDittoHandler
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,7 @@ class SimulationEngine:
         self._multi_stop = MultiStopNavigator(self)
         self._random_walk = RandomWalkHandler(self)
         self._restore_handler = RestoreHandler(self)
+        self._goldditto_handler = GoldDittoHandler(self)
 
         # Status tracking
         self.distance_traveled: float = 0.0
@@ -405,6 +407,10 @@ class SimulationEngine:
     async def restore(self) -> None:
         """Stop everything and clear the simulated location."""
         await self._restore_handler.restore()
+
+    async def goldditto_cycle(self, lat: float, lng: float) -> None:
+        """Pikmin-Bloom 拉金盆: teleport to A, then immediately restore."""
+        await self._goldditto_handler.cycle(lat, lng)
 
     async def live_insert_waypoint(
         self, after_index: int, lat: float, lng: float,

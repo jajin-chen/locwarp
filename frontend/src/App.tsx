@@ -78,6 +78,14 @@ const App: React.FC = () => {
   const [cooldownEnabled, setCooldownEnabled] = useState(false)
   const [randomWalkRadius, setRandomWalkRadius] = useState(500)
   const [clickToAddWaypoint, setClickToAddWaypoint] = useState(false)
+  const [goldDittoA, setGoldDittoARaw] = useState<string>(() => {
+    try { return localStorage.getItem('locwarp.goldditto.a') ?? '' } catch { return '' }
+  })
+  const setGoldDittoA = useCallback((v: string) => {
+    setGoldDittoARaw(v)
+    try { localStorage.setItem('locwarp.goldditto.a', v) } catch { /* ignore */ }
+  }, [])
+  const [goldDittoBusy, setGoldDittoBusy] = useState(false)
   const [showBookmarkPins, setShowBookmarkPinsRaw] = useState<boolean>(() => {
     try { return localStorage.getItem('locwarp.show_bookmark_pins') === '1' } catch { return false }
   })
@@ -840,6 +848,40 @@ const App: React.FC = () => {
     showToast(t('panel.route_paste_done').replace('{count}', String(valid.length)))
   }, [routePasteText, parseRoutePaste, sim, device, t, showToast])
 
+  const handleGoldDittoStart = useCallback(async () => {
+    const raw = goldDittoA.trim()
+    if (!raw) {
+      showToast(t('goldditto.toast.no_a'))
+      return
+    }
+    const parts = raw.split(',').map((s) => s.trim())
+    if (parts.length !== 2) {
+      showToast(t('goldditto.toast.invalid_a'))
+      return
+    }
+    const lat = parseFloat(parts[0])
+    const lng = parseFloat(parts[1])
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      showToast(t('goldditto.toast.invalid_a'))
+      return
+    }
+    const udids = device.connectedDevices.map((d) => d.udid)
+    setGoldDittoBusy(true)
+    try {
+      if (udids.length >= 2) {
+        const outcome = await sim.goldDittoCycleAll(udids, lat, lng)
+        showToast(toastForFanout(t, t('mode.goldditto'), outcome, device.connectedDevices))
+      } else {
+        await sim.goldDittoCycle(lat, lng)
+        showToast(t('goldditto.toast.restored'))
+      }
+    } catch {
+      // sim.goldDittoCycle / fan-out helper already surfaces error via setError
+    } finally {
+      setGoldDittoBusy(false)
+    }
+  }, [goldDittoA, sim, device, t, showToast])
+
   const handleStartWaypointRoute = useCallback(async () => {
     // UI waypoint list already includes the current position as index 0
     // (see handleAddWaypoint / generateWaypoints), so just hand it straight
@@ -891,8 +933,10 @@ const App: React.FC = () => {
       }
     } else if (sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop) {
       handleStartWaypointRoute()
+    } else if (sim.mode === SimMode.GoldDitto) {
+      handleGoldDittoStart()
     }
-  }, [sim, device, randomWalkRadius, handleStartWaypointRoute, showToast, t])
+  }, [sim, device, randomWalkRadius, handleStartWaypointRoute, handleGoldDittoStart, showToast, t])
 
   const handleStop = useCallback(async () => {
     // Stop the active movement only — keep the simulated location in place
@@ -1450,6 +1494,10 @@ const App: React.FC = () => {
           pauseRandomWalk={sim.pauseRandomWalk}
           onPauseRandomWalkChange={sim.setPauseRandomWalk}
           onRandomWalkRadiusChange={setRandomWalkRadius}
+          goldDittoA={goldDittoA}
+          onGoldDittoAChange={setGoldDittoA}
+          onGoldDittoStart={handleGoldDittoStart}
+          goldDittoBusy={goldDittoBusy}
           currentWaypointsCount={sim.waypoints.length}
           straightLine={sim.straightLine}
           onStraightLineChange={sim.setStraightLine}

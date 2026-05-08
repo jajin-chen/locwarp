@@ -118,6 +118,10 @@ interface ControlPanelProps {
   pauseRandomWalk?: { enabled: boolean; min: number; max: number };
   onPauseRandomWalkChange?: (v: { enabled: boolean; min: number; max: number }) => void;
   onRandomWalkRadiusChange: (radius: number) => void;
+  goldDittoA?: string;
+  onGoldDittoAChange?: (v: string) => void;
+  onGoldDittoStart?: () => void;
+  goldDittoBusy?: boolean;
   modeExtraSection?: React.ReactNode;
   currentWaypointsCount?: number;
   straightLine?: boolean;
@@ -200,6 +204,16 @@ const modeIcons: Record<SimMode, JSX.Element> = {
       <line x1="19" y1="12" x2="22" y2="12" />
     </svg>
   ),
+  [SimMode.GoldDitto]: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="6" r="2.5" />
+      <circle cx="6.5" cy="11" r="2.5" />
+      <circle cx="17.5" cy="11" r="2.5" />
+      <circle cx="9" cy="17" r="2.5" />
+      <circle cx="15" cy="17" r="2.5" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    </svg>
+  ),
 };
 
 import type { StringKey } from '../i18n';
@@ -210,6 +224,7 @@ const modeLabelKeys: Record<SimMode, StringKey> = {
   [SimMode.MultiStop]: 'mode.multi_stop',
   [SimMode.RandomWalk]: 'mode.random_walk',
   [SimMode.Joystick]: 'mode.joystick',
+  [SimMode.GoldDitto]: 'mode.goldditto',
 };
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -275,6 +290,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   pauseRandomWalk,
   onPauseRandomWalkChange,
   onRandomWalkRadiusChange,
+  goldDittoA = '',
+  onGoldDittoAChange,
+  onGoldDittoStart,
+  goldDittoBusy = false,
   modeExtraSection,
   currentWaypointsCount = 0,
   straightLine = false,
@@ -302,6 +321,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const t = useT();
   const [coordLat, setCoordLat] = useState('');
   const [coordLng, setCoordLng] = useState('');
+  const [goldDittoAHidden, setGoldDittoAHidden] = useState<boolean>(() => {
+    try { return localStorage.getItem('locwarp.goldditto.a_hidden') === '1' } catch { return false }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('locwarp.goldditto.a_hidden', goldDittoAHidden ? '1' : '0') } catch { /* ignore */ }
+  }, [goldDittoAHidden]);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [libraryTab, setLibraryTab] = useState<'bookmarks' | 'routes'>('bookmarks');
 
@@ -580,6 +605,73 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 />
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Gold Ditto (拉金盆) — shown when GoldDitto mode is selected */}
+      {simMode === SimMode.GoldDitto && (
+        <div className="section" style={{ margin: '0 0 8px 0' }}>
+          <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {modeIcons[SimMode.GoldDitto]}
+            {t('mode.goldditto')}
+          </div>
+          <div className="section-content">
+            <div style={{ fontSize: 11, opacity: 0.7, lineHeight: 1.4, marginBottom: 8 }}>
+              {t('goldditto.flow_help')}
+            </div>
+            <label style={{ display: 'block', fontSize: 11, opacity: 0.8, marginBottom: 4 }}>
+              {t('goldditto.a_label')}
+              <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }}>
+                {t('goldditto.a_hint')}
+              </span>
+            </label>
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <input
+                type={goldDittoAHidden ? 'password' : 'text'}
+                className="search-input"
+                value={goldDittoA}
+                placeholder={t('goldditto.a_placeholder')}
+                onChange={(e) => onGoldDittoAChange?.(e.target.value)}
+                style={{ width: '100%', paddingRight: 32 }}
+              />
+              <button
+                type="button"
+                onClick={() => setGoldDittoAHidden((v) => !v)}
+                title={t(goldDittoAHidden ? 'goldditto.a_show' : 'goldditto.a_hide')}
+                style={{
+                  position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
+                  width: 26, height: 26, padding: 0,
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  color: 'currentColor', opacity: 0.65,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.65' }}
+              >
+                {goldDittoAHidden ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
+                    <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
+                    <path d="M14.12 14.12A3 3 0 119.88 9.88" />
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            <button
+              className="action-btn primary"
+              onClick={() => onGoldDittoStart?.()}
+              disabled={goldDittoBusy}
+              style={{ width: '100%', padding: '8px 12px', fontSize: 13, fontWeight: 600 }}
+            >
+              {t('goldditto.start_button')}
+            </button>
           </div>
         </div>
       )}

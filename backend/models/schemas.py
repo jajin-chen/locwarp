@@ -137,6 +137,12 @@ class JoystickInput(BaseModel):
     intensity: float = Field(ge=0, le=1)
 
 
+class GoldDittoCycleRequest(BaseModel):
+    lat: float = Field(ge=-90.0, le=90.0)
+    lng: float = Field(ge=-180.0, le=180.0)
+    udid: str | None = None
+
+
 # ── Simulation status ────────────────────────────────────
 class SimulationStatus(BaseModel):
     state: SimulationState = SimulationState.IDLE

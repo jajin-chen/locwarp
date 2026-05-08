@@ -11,6 +11,7 @@ from models.schemas import (
     MultiStopRequest,
     RandomWalkRequest,
     JoystickStartRequest,
+    GoldDittoCycleRequest,
     SimulationStatus,
     Coordinate,
     CooldownSettings,
@@ -476,6 +477,33 @@ async def resume(udid: str | None = None):
     engine = await _engine(udid)
     await engine.resume()
     return {"status": "resumed"}
+
+
+@router.post("/goldditto/cycle")
+async def goldditto_cycle(req: GoldDittoCycleRequest):
+    from main import app_state as _app_state
+    action_udid = req.udid or _app_state._primary_udid
+
+    async def _do_cycle():
+        eng = await _engine(action_udid)
+        await eng.goldditto_cycle(req.lat, req.lng)
+
+    try:
+        await _try_with_recovery_retry(action_udid, _do_cycle)
+    except HTTPException:
+        raise
+    except DeviceLostError as e:
+        raise (await _handle_device_lost(e, action_udid))
+    except Exception as e:
+        import traceback, logging
+        logging.getLogger("locwarp").error("Gold Ditto cycle failed:\n%s", traceback.format_exc())
+        cause = e
+        while cause is not None:
+            if isinstance(cause, DeviceLostError):
+                raise (await _handle_device_lost(cause, action_udid))
+            cause = cause.__cause__
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "ok", "lat": req.lat, "lng": req.lng}
 
 
 @router.post("/restore")

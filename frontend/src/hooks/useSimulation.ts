@@ -10,6 +10,7 @@ export enum SimMode {
   Joystick = 'joystick',
   MultiStop = 'multistop',
   RandomWalk = 'randomwalk',
+  GoldDitto = 'goldditto',
 }
 
 export enum MoveMode {
@@ -723,6 +724,16 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     }
   }, [])
 
+  const goldDittoCycle = useCallback(async (lat: number, lng: number) => {
+    setError(null)
+    try {
+      return await api.goldDittoCycle(lat, lng)
+    } catch (err: any) {
+      setError(err.message)
+      throw err
+    }
+  }, [])
+
   const restore = useCallback(async () => {
     setError(null)
     try {
@@ -874,6 +885,8 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     // Keep effectiveSpeed so status bar shows last-applied speed after restore-all.
     return outcome
   }, [fanout])
+  const goldDittoCycleAll = useCallback((udids: string[], lat: number, lng: number) =>
+    fanout(udids, 'goldditto', (u) => api.goldDittoCycle(lat, lng, u)), [fanout])
   const joystickStartAll = useCallback(async (udids: string[]) => {
     await preSyncStart(udids)
     return fanout(udids, 'joystick-start', (u) => api.joystickStart(moveMode, u))
@@ -906,6 +919,8 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     restoreAll,
     joystickStartAll,
     joystickStopAll,
+    goldDittoCycle,
+    goldDittoCycleAll,
     mode,
     setMode,
     moveMode,
