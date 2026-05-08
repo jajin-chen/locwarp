@@ -12,6 +12,7 @@ from models.schemas import (
 )
 from services.geocoding import GeocodingService
 from services.geo_extras import (
+    _HAVERSINE_PROFILE_SPEED_MPS,
     get_timezone,
     haversine_duration_matrix,
     optimize_order_exact,
@@ -201,9 +202,18 @@ async def route_optimize(req: RouteOptimizeRequest):
         d = durations[a][b] or 0.0
         total_duration += d
 
+    # Reconstruct an estimated road distance from the duration matrix using
+    # each engine's natural-walking baseline. The frontend re-derives ETA
+    # from this distance using the user's actual sim speed (which is often
+    # 3~10 km/h, very different from OSRM/Valhalla's 5 km/h built-in
+    # pedestrian speed). Without this scaling step the optimizer toast
+    # would advertise OSRM's wall-clock instead of the user's.
+    baseline_speed = _HAVERSINE_PROFILE_SPEED_MPS.get(req.profile, 1.4)
+    total_distance_m = total_duration * baseline_speed
+
     return RouteOptimizeResponse(
         waypoints=[Coordinate(lat=wp.lat, lng=wp.lng) for wp in reordered],
-        total_distance_m=0.0,
+        total_distance_m=total_distance_m,
         total_duration_s=total_duration,
         used_estimate=used_estimate,
     )

@@ -1654,7 +1654,19 @@ const App: React.FC = () => {
                           )
                           if (res?.waypoints?.length) {
                             sim.setWaypoints(res.waypoints)
-                            const minMsg = t('toast.route_optimized').replace('{min}', String(Math.round(res.total_duration_s / 60)))
+                            // Re-derive ETA from the backend's distance
+                            // estimate divided by the user's actual sim
+                            // speed. The matrix providers all assume
+                            // ~5 km/h walking, which mismatches LocWarp's
+                            // 10.8 km/h default and any custom km/h the
+                            // user has dialled in (e.g. 3 km/h for the
+                            // PoGo speed cap).
+                            const userKmh = sim.effectiveSpeed?.kmh ?? sim.customSpeedKmh ?? SPEED_MAP[sim.moveMode] ?? 10.8
+                            const userMps = Math.max(userKmh, 0.1) / 3.6
+                            const realSeconds = res.total_distance_m > 0
+                              ? res.total_distance_m / userMps
+                              : res.total_duration_s
+                            const minMsg = t('toast.route_optimized').replace('{min}', String(Math.round(realSeconds / 60)))
                             // OSRM /table caps at 100 waypoints; the backend
                             // falls back to a straight-line haversine matrix
                             // beyond that. Tag the toast so the user knows
