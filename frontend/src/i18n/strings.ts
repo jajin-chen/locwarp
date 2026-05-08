@@ -148,7 +148,7 @@ export const STRINGS = {
   'mode.multi_stop': { zh: '多點導航', en: 'Multi-stop' },
   'mode.random_walk': { zh: '隨機漫步', en: 'Random Walk' },
   'mode.joystick': { zh: '搖桿操控', en: 'Joystick' },
-  'mode.goldditto': { zh: '拉金盆', en: 'Gold Ditto' },
+  'mode.goldditto': { zh: '拉金盆', en: 'Gold Flower' },
 
   // ── Gold Ditto (Pikmin Bloom 拉金盆) mode ─────
   'goldditto.a_label': { zh: 'A 座標', en: 'A coordinate' },
@@ -160,11 +160,11 @@ export const STRINGS = {
     zh: '操作流程: 手動飛到金盆點開花苞,等待「在特殊花朵上往下滑動就能獲得獎勵」提示出來,再等 2 秒,再按下方「拉金盆」開始拉盆',
     en: 'Flow: manually fly to the gold-pot and open the bud. Wait for the "Swipe down on the special flower for a reward" prompt, then wait another 2 seconds before tapping below.',
   },
-  'goldditto.start_button': { zh: '拉金盆', en: 'Pull Gold Ditto' },
+  'goldditto.start_button': { zh: '拉金盆', en: 'Pull Gold Flower' },
   'goldditto.toast.no_a': { zh: '請先設定 A 座標', en: 'Set A coordinate first' },
   'goldditto.toast.invalid_a': { zh: 'A 座標格式有誤', en: 'A coordinate is malformed' },
   'goldditto.toast.teleported': { zh: '已瞬移到 A,接著還原 GPS', en: 'Teleported to A, restoring GPS' },
-  'goldditto.toast.restored': { zh: '拉金盆完成', en: 'Gold Ditto cycle done' },
+  'goldditto.toast.restored': { zh: '拉金盆完成', en: 'Gold Flower cycle done' },
 
   // ── Move mode (speed presets) ────────────────
   'move.walking': { zh: '走路', en: 'Walking' },
