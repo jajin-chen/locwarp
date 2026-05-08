@@ -494,7 +494,7 @@ export const STRINGS = {
 
   // ── Toasts extra ─────────────────────────────
   'toast.no_position_random': { zh: '尚未取得目前位置,無法產生隨機路徑點', en: 'No current position, cannot generate random waypoints' },
-  'toast.route_optimized': { zh: '路線已最佳化(總時長約 {min} 分)', en: 'Route optimized ({min} min total)' },
+  'toast.route_optimized': { zh: '路線已最佳化', en: 'Route optimized' },
   // Settings panel opened from the bottom status bar.
   'status.settings': { zh: '設定', en: 'Settings' },
   'status.settings_tooltip': { zh: '開啟 LocWarp 設定面板', en: 'Open LocWarp settings' },
