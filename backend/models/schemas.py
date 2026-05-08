@@ -281,10 +281,11 @@ class RouteOptimizeRequest(BaseModel):
     profile: str = "foot"  # 'foot' or 'car'
     keep_first: bool = True  # first waypoint is the fixed start
     # Routing engine for the duration matrix used by the TSP solver.
-    # 'osrm' (default) calls OSRM /table; 'valhalla' uses Valhalla
-    # /sources_to_targets; 'brouter' has no matrix API so it falls back
-    # to a haversine straight-line matrix and the response sets
-    # used_estimate=true.
+    # The selected engine drives the simulation path between points;
+    # for ordering we additionally cascade across matrix providers
+    # (OSRM /table → Valhalla /sources_to_targets → haversine) since
+    # BRouter has no matrix API of its own. used_estimate is only set
+    # when every road-aware matrix is unavailable.
     engine: str = "osrm"
 
 

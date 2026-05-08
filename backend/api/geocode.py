@@ -142,34 +142,49 @@ async def route_optimize(req: RouteOptimizeRequest):
     if len(req.waypoints) < 2:
         raise HTTPException(status_code=400, detail="need >=2 waypoints")
 
-    # Engine dispatch: OSRM (default), Valhalla, or BRouter (no matrix
-    # API → haversine). Callers don't normally know which engine is
-    # available, so a None response always falls through to haversine.
+    # Engine dispatch for the duration matrix used by the TSP solver.
+    # The user-selected engine controls the *path* taken between points
+    # at simulation time, but the matrix only affects ordering — so
+    # when the chosen engine has no matrix API (BRouter), we silently
+    # try OSRM /table → Valhalla /sources_to_targets → haversine. That
+    # way picking BRouter still gives road-aware ordering instead of
+    # forcing a "straight-line estimate" label on every optimize.
     engine = (req.engine or "osrm").lower()
     durations: list[list[float]] | None = None
     if engine == "valhalla":
         durations = await valhalla_matrix(req.waypoints, req.profile)
         if not durations:
             logger.info(
-                "route_optimize: Valhalla matrix unavailable for %d waypoints, falling back",
+                "route_optimize: Valhalla matrix unavailable for %d waypoints, trying OSRM /table",
                 len(req.waypoints),
             )
+            durations = await osrm_table(req.waypoints, req.profile)
     elif engine == "brouter":
-        # BRouter has no matrix endpoint. Skip straight to haversine —
-        # the response flag tells the UI to label this an estimate.
+        # BRouter has no matrix endpoint, so reach for OSRM /table first
+        # (closest in semantics to BRouter's road-aware costing) and
+        # then Valhalla as a second fallback.
         logger.info(
-            "route_optimize: BRouter has no matrix API, using haversine for %d waypoints",
+            "route_optimize: BRouter has no matrix API; using OSRM /table for ordering of %d waypoints",
             len(req.waypoints),
         )
+        durations = await osrm_table(req.waypoints, req.profile)
+        if not durations:
+            durations = await valhalla_matrix(req.waypoints, req.profile)
     else:  # osrm
         durations = await osrm_table(req.waypoints, req.profile)
+        if not durations:
+            logger.info(
+                "route_optimize: OSRM /table unavailable, trying Valhalla matrix for %d waypoints",
+                len(req.waypoints),
+            )
+            durations = await valhalla_matrix(req.waypoints, req.profile)
 
     used_estimate = False
     if not durations:
         durations = haversine_duration_matrix(req.waypoints, req.profile)
         used_estimate = True
         logger.info(
-            "route_optimize: using haversine fallback for %d waypoints (engine=%s)",
+            "route_optimize: all matrix engines unavailable, using haversine fallback for %d waypoints (engine=%s)",
             len(req.waypoints), engine,
         )
 
