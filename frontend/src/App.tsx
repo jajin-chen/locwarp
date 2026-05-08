@@ -1698,7 +1698,7 @@ const App: React.FC = () => {
                         try {
                           const res = await api.routeOptimize(
                             sim.waypoints.map((w: any) => ({ lat: w.lat, lng: w.lng })),
-                            'foot', true, sim.routeEngine,
+                            sim.moveMode, true, sim.routeEngine,
                           )
                           if (res?.waypoints?.length) {
                             sim.setWaypoints(res.waypoints)
