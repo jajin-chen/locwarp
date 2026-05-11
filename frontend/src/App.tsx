@@ -278,11 +278,12 @@ const App: React.FC = () => {
       if (dLat * dLat + dLng * dLng < 100 * 100) return
     }
     let cancelled = false
-    const tid = setTimeout(async () => {
+    const tid = setTimeout(() => {
       lastLookedUpPosRef.current = { lat: pos.lat, lng: pos.lng }
-      let geoRes: any = null
-      try {
-        geoRes = await api.reverseGeocode(pos.lat, pos.lng)
+      // Three independent services (Nominatim, TimezoneDB, Open-Meteo).
+      // Fire in parallel so one outage doesn't freeze the other two for
+      // a 10s timeout each time the position changes.
+      void api.reverseGeocode(pos.lat, pos.lng).then((geoRes: any) => {
         if (cancelled) return
         const cc = String(geoRes?.country_code ?? '').toLowerCase()
         const city = String(geoRes?.short_name ?? '').trim()
@@ -291,19 +292,17 @@ const App: React.FC = () => {
             ? prev
             : { ...prev, countryCode: cc, cityName: city }
         )
-      } catch { /* offline / rate-limited — keep previous */ }
-      try {
-        const tz = await api.lookupTimezone(pos.lat, pos.lng)
+      }).catch(() => { /* offline / rate-limited — keep previous */ })
+      void api.lookupTimezone(pos.lat, pos.lng).then((tz) => {
         if (cancelled || !tz) return
         setLocMeta((prev) => ({ ...prev, timezoneZone: tz.zone, gmtOffsetSeconds: tz.gmt_offset_seconds }))
-      } catch { /* ignore */ }
-      try {
-        const wx = await api.lookupWeather(pos.lat, pos.lng)
+      }).catch(() => { /* ignore */ })
+      void api.lookupWeather(pos.lat, pos.lng).then((wx) => {
         if (cancelled || !wx) return
         setLocMeta((prev) => prev.weatherCode === wx.code && prev.tempC === wx.tempC
           ? prev
           : { ...prev, weatherCode: wx.code, tempC: wx.tempC })
-      } catch { /* ignore */ }
+      }).catch(() => { /* ignore */ })
     }, 600)
     return () => { cancelled = true; clearTimeout(tid) }
   }, [sim.currentPosition?.lat, sim.currentPosition?.lng, sim.status?.state])
