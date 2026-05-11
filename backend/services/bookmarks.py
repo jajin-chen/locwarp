@@ -137,6 +137,70 @@ class BookmarkManager:
     def list_categories(self) -> list[BookmarkCategory]:
         return sorted(self.store.categories, key=lambda c: c.sort_order)
 
+    def reorder_categories(self, category_ids: list[str]) -> int:
+        """Reassign ``sort_order`` so categories appear in the given order.
+
+        Categories whose ids are not present in *category_ids* are pushed to
+        the end while preserving their current relative order, so callers may
+        send only the subset they've actually rearranged.
+        """
+        order_map = {cid: idx for idx, cid in enumerate(category_ids)}
+        seen = set(category_ids)
+        # Append unspecified ones in their current sort_order order.
+        tail_idx = len(category_ids)
+        existing_sorted = sorted(self.store.categories, key=lambda c: c.sort_order)
+        for cat in existing_sorted:
+            if cat.id not in seen:
+                order_map[cat.id] = tail_idx
+                tail_idx += 1
+        changed = 0
+        for cat in self.store.categories:
+            new_order = order_map.get(cat.id, cat.sort_order)
+            if cat.sort_order != new_order:
+                cat.sort_order = new_order
+                changed += 1
+        if changed:
+            self._save()
+        return changed
+
+    def reorder_bookmarks_in_category(
+        self,
+        category_id: str,
+        bookmark_ids: list[str],
+    ) -> int:
+        """Reorder bookmarks belonging to *category_id* to match *bookmark_ids*.
+
+        Items in the category but missing from *bookmark_ids* are appended at
+        the end of the rearranged block (preserving their current order).
+        Items outside the category keep their original positions in the store
+        list, so other categories' ordering is unaffected.
+        """
+        in_cat_indices = [
+            i for i, b in enumerate(self.store.bookmarks)
+            if b.category_id == category_id
+        ]
+        if not in_cat_indices:
+            return 0
+        in_cat_bms = [self.store.bookmarks[i] for i in in_cat_indices]
+        bm_by_id = {b.id: b for b in in_cat_bms}
+        ordered: list[Bookmark] = []
+        consumed: set[str] = set()
+        for bid in bookmark_ids:
+            bm = bm_by_id.get(bid)
+            if bm is not None and bid not in consumed:
+                ordered.append(bm)
+                consumed.add(bid)
+        for bm in in_cat_bms:
+            if bm.id not in consumed:
+                ordered.append(bm)
+        new_list = list(self.store.bookmarks)
+        for slot, bm in zip(in_cat_indices, ordered):
+            new_list[slot] = bm
+        if new_list != self.store.bookmarks:
+            self.store.bookmarks = new_list
+            self._save()
+        return len(ordered)
+
     def _find_category(self, cat_id: str) -> BookmarkCategory | None:
         return next((c for c in self.store.categories if c.id == cat_id), None)
 

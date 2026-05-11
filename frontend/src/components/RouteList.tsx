@@ -37,6 +37,12 @@ interface RouteListProps {
   onCategoryDelete?: (id: string) => Promise<void> | void;
   onCategoryRename?: (id: string, name: string) => Promise<void> | void;
   onCategoryRecolor?: (id: string, color: string) => Promise<void> | void;
+  // Persist a new category order. Receives the full ordered list of category
+  // IDs in the desired display order.
+  onCategoryReorder?: (orderedIds: string[]) => Promise<void> | void;
+  // Persist a new route order within a single category. Receives the
+  // category ID and the ordered list of route IDs.
+  onRouteReorder?: (categoryId: string, orderedRouteIds: string[]) => Promise<void> | void;
 
   routesExportAllUrl?: string;
   onRoutesImportAll?: (file: File) => Promise<void> | void;
@@ -64,6 +70,8 @@ const RouteList: React.FC<RouteListProps> = ({
   onCategoryDelete,
   onCategoryRename,
   onCategoryRecolor,
+  onCategoryReorder,
+  onRouteReorder,
   routesExportAllUrl,
   onRoutesImportAll,
 }) => {
@@ -172,6 +180,19 @@ const RouteList: React.FC<RouteListProps> = ({
     });
   };
 
+  // ── Reorder mode ─────────────────────────────────────
+  // Off by default — opt-in via the toolbar button. When on, the category
+  // headers and route rows expose up/down arrows + a drag handle that
+  // persist a new order.
+  const [reorderMode, setReorderMode] = useState(false);
+  const sortBeforeReorderRef = useRef<SortMode | null>(null);
+  // Drag-and-drop state.
+  const [draggedRouteId, setDraggedRouteId] = useState<string | null>(null);
+  const [dragOverRouteId, setDragOverRouteId] = useState<string | null>(null);
+  const [dragRouteCat, setDragRouteCat] = useState<string | null>(null);
+  const [draggedCatId, setDraggedCatId] = useState<string | null>(null);
+  const [dragOverCatId, setDragOverCatId] = useState<string | null>(null);
+
   // ── Multi-select ─────────────────────────────────────
   const [multiSelect, setMultiSelect] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -253,9 +274,100 @@ const RouteList: React.FC<RouteListProps> = ({
     return buckets;
   }, [routes, categories]);
 
+  // Reorder mode forces sort to 'default' (so the drag / arrow results match
+  // the displayed order). User's previous sort is restored on exit.
+  const enterReorderMode = () => {
+    if (sortMode !== 'default') {
+      sortBeforeReorderRef.current = sortMode;
+      setSortMode('default');
+    } else {
+      sortBeforeReorderRef.current = null;
+    }
+    if (multiSelect) exitMultiSelect();
+    setReorderMode(true);
+  };
+  const exitReorderMode = () => {
+    setReorderMode(false);
+    setDraggedRouteId(null);
+    setDragOverRouteId(null);
+    setDragRouteCat(null);
+    setDraggedCatId(null);
+    setDragOverCatId(null);
+    const prev = sortBeforeReorderRef.current;
+    if (prev && prev !== 'default') setSortMode(prev);
+    sortBeforeReorderRef.current = null;
+  };
+  const reorderAvailable = reorderMode;
+  const dropCategoryOn = (srcId: string, dstId: string) => {
+    if (!onCategoryReorder || srcId === dstId) return;
+    const srcIdx = categories.findIndex((c) => c.id === srcId);
+    const dstIdx = categories.findIndex((c) => c.id === dstId);
+    if (srcIdx < 0 || dstIdx < 0) return;
+    const arr = categories.map((c) => c.id);
+    const [moved] = arr.splice(srcIdx, 1);
+    arr.splice(dstIdx, 0, moved);
+    void onCategoryReorder(arr);
+  };
+  const dropRouteOn = (catId: string, srcId: string, dstId: string) => {
+    if (!onRouteReorder || srcId === dstId) return;
+    const list = routesByCategory[catId] || [];
+    const srcIdx = list.findIndex((r) => r.id === srcId);
+    const dstIdx = list.findIndex((r) => r.id === dstId);
+    if (srcIdx < 0 || dstIdx < 0) return;
+    const arr = list.map((r) => r.id);
+    const [moved] = arr.splice(srcIdx, 1);
+    arr.splice(dstIdx, 0, moved);
+    void onRouteReorder(catId, arr);
+  };
+
+  // Auto-scroll the surrounding scrollable container during a drag. Native
+  // edge-scroll is sluggish on long lists, so we drive a rAF loop ourselves.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const dragCursorYRef = useRef(0);
+  useEffect(() => {
+    const dragging = !!(draggedRouteId || draggedCatId);
+    if (!dragging) return;
+    let scroller: HTMLElement | null = wrapRef.current?.parentElement ?? null;
+    while (scroller) {
+      const cs = getComputedStyle(scroller);
+      const scrollable = (cs.overflowY === 'auto' || cs.overflowY === 'scroll')
+        && scroller.scrollHeight > scroller.clientHeight + 1;
+      if (scrollable) break;
+      scroller = scroller.parentElement;
+    }
+    if (!scroller) return;
+    const onDragOver = (e: DragEvent) => {
+      dragCursorYRef.current = e.clientY;
+    };
+    window.addEventListener('dragover', onDragOver);
+    const EDGE = 80;
+    const MAX_SPEED = 18;
+    let raf = 0;
+    const tick = () => {
+      const el = scroller!;
+      const r = el.getBoundingClientRect();
+      const y = dragCursorYRef.current;
+      if (y > 0) {
+        const fromTop = y - r.top;
+        const fromBottom = r.bottom - y;
+        if (fromTop >= 0 && fromTop < EDGE) {
+          el.scrollTop -= MAX_SPEED * (1 - fromTop / EDGE);
+        } else if (fromBottom >= 0 && fromBottom < EDGE) {
+          el.scrollTop += MAX_SPEED * (1 - fromBottom / EDGE);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('dragover', onDragOver);
+    };
+  }, [draggedRouteId, draggedCatId]);
+
   // ── Render ──────────────────────────────────────────
   return (
-    <div>
+    <div ref={wrapRef}>
       {/* Save current bar */}
       <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 6 }}>
         {t('panel.route_save_hint', { n: currentWaypointsCount })}
@@ -401,7 +513,7 @@ const RouteList: React.FC<RouteListProps> = ({
           className="action-btn"
           onClick={() => {
             if (multiSelect) exitMultiSelect();
-            else { setShowCategoryMgr(false); setMultiSelect(true); }
+            else { setShowCategoryMgr(false); setMultiSelect(true); if (reorderMode) exitReorderMode(); }
           }}
           style={{
             padding: '3px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center',
@@ -415,6 +527,27 @@ const RouteList: React.FC<RouteListProps> = ({
             <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
           </svg>
         </button>
+        {(onCategoryReorder || onRouteReorder) && (
+          <button
+            className="action-btn"
+            onClick={() => {
+              if (reorderMode) exitReorderMode();
+              else enterReorderMode();
+            }}
+            style={{
+              padding: '3px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center',
+              background: reorderMode ? 'rgba(108,140,255,0.2)' : undefined,
+              borderColor: reorderMode ? 'rgba(108,140,255,0.6)' : undefined,
+            }}
+            title={t('bm.reorder_tooltip')}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="17 11 12 6 7 11" />
+              <polyline points="17 17 12 22 7 17" />
+              <line x1="12" y1="6" x2="12" y2="22" />
+            </svg>
+          </button>
+        )}
         {onCategoryAdd && (
           <button
             className="action-btn"
@@ -698,13 +831,50 @@ const RouteList: React.FC<RouteListProps> = ({
             return (
               <div key={cat.id} style={{ marginBottom: 4 }}>
                 <div
+                  draggable={reorderAvailable && !!onCategoryReorder}
+                  onDragStart={(e) => {
+                    if (!reorderAvailable || !onCategoryReorder) return;
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('application/x-locwarp-route-cat', cat.id);
+                    setDraggedCatId(cat.id);
+                  }}
+                  onDragOver={(e) => {
+                    if (!reorderAvailable || !draggedCatId) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    setDragOverCatId(cat.id);
+                  }}
+                  onDragLeave={() => { if (dragOverCatId === cat.id) setDragOverCatId(null); }}
+                  onDrop={(e) => {
+                    if (!reorderAvailable) return;
+                    e.preventDefault();
+                    const src = draggedCatId || e.dataTransfer.getData('application/x-locwarp-route-cat');
+                    if (src) dropCategoryOn(src, cat.id);
+                    setDraggedCatId(null);
+                    setDragOverCatId(null);
+                  }}
+                  onDragEnd={() => { setDraggedCatId(null); setDragOverCatId(null); }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6,
-                    padding: '5px 4px', cursor: 'pointer',
-                    fontSize: 12, fontWeight: 600, opacity: 0.85,
+                    padding: '5px 4px',
+                    cursor: reorderAvailable ? 'grab' : 'pointer',
+                    fontSize: 12, fontWeight: 600,
+                    opacity: draggedCatId === cat.id ? 0.4 : 0.85,
+                    borderTop: dragOverCatId === cat.id && draggedCatId && draggedCatId !== cat.id
+                      ? '2px solid #6c8cff' : '2px solid transparent',
+                    userSelect: reorderAvailable ? 'none' : undefined,
                   }}
                   onClick={() => toggleCategory(cat.id)}
                 >
+                  {reorderAvailable && onCategoryReorder && (
+                    <span style={{ opacity: 0.55, flexShrink: 0, display: 'inline-flex', alignItems: 'center', cursor: 'grab' }} title={t('bm.reorder_drag_hint')}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="4" y1="8" x2="20" y2="8" />
+                        <line x1="4" y1="12" x2="20" y2="12" />
+                        <line x1="4" y1="16" x2="20" y2="16" />
+                      </svg>
+                    </span>
+                  )}
                   {multiSelect && (
                     <input
                       type="checkbox"
@@ -745,7 +915,7 @@ const RouteList: React.FC<RouteListProps> = ({
                     {inCat.length === 0 && (
                       <div style={{ fontSize: 11, opacity: 0.4, padding: '4px 0' }}>{t('bm.blank')}</div>
                     )}
-                    {sortRoutes(inCat).map((r) => renderRouteRow(r, false))}
+                    {sortRoutes(inCat).map((r) => renderRouteRow(r, false, cat.id))}
                   </div>
                 )}
               </div>
@@ -1005,10 +1175,15 @@ const RouteList: React.FC<RouteListProps> = ({
     </div>
   );
 
-  function renderRouteRow(route: SavedRoute, flat: boolean) {
+  function renderRouteRow(
+    route: SavedRoute,
+    flat: boolean,
+    inCategoryId?: string,
+  ) {
     const isEditing = editingRouteId === route.id;
     const isSelected = selectedIds.has(route.id);
     const cat = findCategoryById(route.category_id || 'default');
+    const canDragRow = reorderAvailable && !!onRouteReorder && !!inCategoryId && !flat;
 
     const commitRename = () => {
       const n = editingRouteName.trim();
@@ -1020,18 +1195,47 @@ const RouteList: React.FC<RouteListProps> = ({
       <div
         key={route.id}
         className="bookmark-item"
+        draggable={canDragRow}
+        onDragStart={(e) => {
+          if (!canDragRow || !inCategoryId) return;
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('application/x-locwarp-route', `${inCategoryId}::${route.id}`);
+          setDraggedRouteId(route.id);
+          setDragRouteCat(inCategoryId);
+        }}
+        onDragOver={(e) => {
+          if (!canDragRow || !draggedRouteId || dragRouteCat !== inCategoryId) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          setDragOverRouteId(route.id);
+        }}
+        onDragLeave={() => { if (dragOverRouteId === route.id) setDragOverRouteId(null); }}
+        onDrop={(e) => {
+          if (!canDragRow || !inCategoryId) return;
+          e.preventDefault();
+          const src = draggedRouteId;
+          if (src && dragRouteCat === inCategoryId) dropRouteOn(inCategoryId, src, route.id);
+          setDraggedRouteId(null);
+          setDragOverRouteId(null);
+          setDragRouteCat(null);
+        }}
+        onDragEnd={() => { setDraggedRouteId(null); setDragOverRouteId(null); setDragRouteCat(null); }}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: '6px 6px', borderRadius: 4, fontSize: 12,
-          cursor: 'pointer', transition: 'background 0.15s',
+          cursor: canDragRow ? 'grab' : 'pointer', transition: 'background 0.15s',
           background: multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent',
+          opacity: draggedRouteId === route.id ? 0.4 : 1,
+          borderTop: dragOverRouteId === route.id && draggedRouteId && draggedRouteId !== route.id
+            ? '2px solid #6c8cff' : '2px solid transparent',
+          userSelect: canDragRow ? 'none' : undefined,
         }}
         onClick={() => {
           if (multiSelect) toggleSelected(route.id);
-          else if (!isEditing) onRouteLoad(route.id);
+          else if (!isEditing && !reorderAvailable) onRouteLoad(route.id);
         }}
         onContextMenu={(e) => {
-          if (multiSelect) { e.preventDefault(); return; }
+          if (multiSelect || reorderAvailable) { e.preventDefault(); return; }
           e.preventDefault();
           e.stopPropagation();
           setContextMenu({ route, x: e.clientX, y: e.clientY });
@@ -1044,6 +1248,15 @@ const RouteList: React.FC<RouteListProps> = ({
             ? 'rgba(108,140,255,0.18)' : 'transparent';
         }}
       >
+        {canDragRow && (
+          <span style={{ opacity: 0.55, flexShrink: 0, display: 'inline-flex', alignItems: 'center', cursor: 'grab' }} title={t('bm.reorder_drag_hint')}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="4" y1="8" x2="20" y2="8" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="16" x2="20" y2="16" />
+            </svg>
+          </span>
+        )}
         {multiSelect && (
           <input
             type="checkbox"

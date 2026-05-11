@@ -93,6 +93,8 @@ interface ControlPanelProps {
   onCategoryDelete: (name: string) => void;
   onCategoryRename?: (oldName: string, newName: string) => void;
   onCategoryRecolor?: (name: string, color: string) => void;
+  onCategoryReorder?: (orderedNames: string[]) => void;
+  onBookmarkReorder?: (categoryName: string, orderedIds: string[]) => void;
   bookmarkShowOnMap?: boolean;
   onBookmarkShowOnMapChange?: (v: boolean) => void;
   onBookmarkImport?: (file: File) => Promise<void>;
@@ -114,6 +116,8 @@ interface ControlPanelProps {
   onRouteCategoryDelete?: (id: string) => Promise<void> | void;
   onRouteCategoryRename?: (id: string, name: string) => Promise<void> | void;
   onRouteCategoryRecolor?: (id: string, color: string) => Promise<void> | void;
+  onRouteCategoryReorder?: (orderedIds: string[]) => Promise<void> | void;
+  onRouteReorder?: (categoryId: string, orderedRouteIds: string[]) => Promise<void> | void;
   randomWalkRadius: number;
   pauseRandomWalk?: { enabled: boolean; min: number; max: number };
   onPauseRandomWalkChange?: (v: { enabled: boolean; min: number; max: number }) => void;
@@ -265,6 +269,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onCategoryDelete,
   onCategoryRename,
   onCategoryRecolor,
+  onCategoryReorder,
+  onBookmarkReorder,
   bookmarkShowOnMap,
   onBookmarkShowOnMapChange,
   onBookmarkImport,
@@ -286,6 +292,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onRouteCategoryDelete,
   onRouteCategoryRename,
   onRouteCategoryRecolor,
+  onRouteCategoryReorder,
+  onRouteReorder,
   randomWalkRadius,
   pauseRandomWalk,
   onPauseRandomWalkChange,
@@ -928,6 +936,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   onCategoryDelete={onCategoryDelete}
                   onCategoryRename={onCategoryRename}
                   onCategoryRecolor={onCategoryRecolor}
+                  onCategoryReorder={onCategoryReorder}
+                  onBookmarkReorder={onBookmarkReorder}
                   showOnMap={bookmarkShowOnMap}
                   onShowOnMapChange={onBookmarkShowOnMapChange}
                   onImport={onBookmarkImport}
@@ -951,6 +961,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   onCategoryDelete={onRouteCategoryDelete}
                   onCategoryRename={onRouteCategoryRename}
                   onCategoryRecolor={onRouteCategoryRecolor}
+                  onCategoryReorder={onRouteCategoryReorder}
+                  onRouteReorder={onRouteReorder}
                   routesExportAllUrl={routesExportAllUrl}
                   onRoutesImportAll={onRoutesImportAll}
                 />

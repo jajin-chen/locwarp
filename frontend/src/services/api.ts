@@ -267,10 +267,17 @@ export const updateBookmark = (id: string, bm: any) => request<any>('PUT', `/api
 export const deleteBookmark = (id: string) => request<any>('DELETE', `/api/bookmarks/${id}`)
 export const moveBookmarks = (ids: string[], catId: string) =>
   request<any>('POST', '/api/bookmarks/move', { bookmark_ids: ids, target_category_id: catId })
+export const reorderBookmarks = (categoryId: string, bookmarkIds: string[]) =>
+  request<{ reordered: number }>('POST', '/api/bookmarks/reorder', {
+    category_id: categoryId,
+    bookmark_ids: bookmarkIds,
+  })
 export const getCategories = () => request<any[]>('GET', '/api/bookmarks/categories')
 export const createCategory = (cat: any) => request<any>('POST', '/api/bookmarks/categories', cat)
 export const updateCategory = (id: string, cat: any) => request<any>('PUT', `/api/bookmarks/categories/${id}`, cat)
 export const deleteCategory = (id: string) => request<any>('DELETE', `/api/bookmarks/categories/${id}`)
+export const reorderBookmarkCategories = (categoryIds: string[]) =>
+  request<{ reordered: number }>('POST', '/api/bookmarks/categories/reorder', { category_ids: categoryIds })
 
 export const bookmarksExportUrl = () => `${API}/api/bookmarks/export`
 
@@ -316,6 +323,13 @@ export const deleteRoute = (id: string) => request<any>('DELETE', `/api/route/sa
 export const renameRoute = (id: string, name: string) => request<any>('PATCH', `/api/route/saved/${id}`, { name })
 export const moveRoutes = (route_ids: string[], target_category_id: string) =>
   request<{ moved: number }>('POST', '/api/route/saved/move', { route_ids, target_category_id })
+export const reorderRoutes = (categoryId: string, routeIds: string[]) =>
+  request<{ reordered: number }>('POST', '/api/route/saved/reorder', {
+    category_id: categoryId,
+    route_ids: routeIds,
+  })
+export const reorderRouteCategories = (categoryIds: string[]) =>
+  request<{ reordered: number }>('POST', '/api/route/categories/reorder', { category_ids: categoryIds })
 
 // Route categories (mirror of bookmark categories)
 export const listRouteCategories = () =>

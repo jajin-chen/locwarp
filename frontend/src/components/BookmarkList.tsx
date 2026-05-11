@@ -43,6 +43,12 @@ interface BookmarkListProps {
   onCategoryRename?: (oldName: string, newName: string) => void;
   // Persist a new color for a category (works for Default too).
   onCategoryRecolor?: (name: string, color: string) => void;
+  // Persist a new category order. Receives the full ordered list of category
+  // names. Triggered by the up/down arrows surfaced in reorder mode.
+  onCategoryReorder?: (orderedNames: string[]) => void;
+  // Persist a new bookmark order within a single category. Receives the
+  // category name and the ordered list of bookmark IDs in that category.
+  onBookmarkReorder?: (categoryName: string, orderedIds: string[]) => void;
   showOnMap?: boolean;
   onShowOnMapChange?: (v: boolean) => void;
   onImport?: (file: File) => Promise<void>;
@@ -95,6 +101,8 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   onCategoryDelete,
   onCategoryRename,
   onCategoryRecolor,
+  onCategoryReorder,
+  onBookmarkReorder,
   showOnMap = false,
   onShowOnMapChange,
   onImport,
@@ -150,6 +158,23 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   const [customLng, setCustomLng] = useState('');
   const [customCategory, setCustomCategory] = useState(categories[0] || 'Default');
   const [search, setSearch] = useState('');
+  // Reorder mode: when on, each category header in the manager panel and each
+  // bookmark row inside its category shows up/down arrows + a drag handle that
+  // persist a new order back to the backend. Off by default — must opt in.
+  const [reorderMode, setReorderMode] = useState(false);
+  // Saved sort mode from before entering reorder mode. Reorder mode forces
+  // 'default' so the arrows / drag results match the displayed order; we
+  // restore the previous sort when the user exits.
+  const sortBeforeReorderRef = useRef<SortMode | null>(null);
+  // Drag-and-drop state for in-list reordering. We track the dragged id so we
+  // can highlight it (lower opacity), and the hover target so we can draw a
+  // drop indicator line. Categories and bookmarks have separate slots so a
+  // category drag doesn't reach into the bookmark list.
+  const [draggedBmId, setDraggedBmId] = useState<string | null>(null);
+  const [dragOverBmId, setDragOverBmId] = useState<string | null>(null);
+  const [dragCatName, setDragCatName] = useState<string | null>(null);
+  const [draggedCatName, setDraggedCatName] = useState<string | null>(null);
+  const [dragOverCatName, setDragOverCatName] = useState<string | null>(null);
   // Multi-select mode: tick rows and batch-delete. When active, row clicks
   // toggle selection instead of teleporting.
   const [multiSelect, setMultiSelect] = useState(false);
@@ -412,12 +437,111 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
     bookmarksByCategory['Uncategorized'] = uncategorized;
   }
 
+  // Reorder mode only makes sense when sorted by the underlying 'default' order
+  // (other sort modes would re-rank items and the arrows / drag would feel
+  // broken). Entering reorder mode therefore forces sort to 'default' and we
+  // restore the user's previous sort on exit.
+  const enterReorderMode = () => {
+    if (sortMode !== 'default') {
+      sortBeforeReorderRef.current = sortMode;
+      setSortMode('default');
+    } else {
+      sortBeforeReorderRef.current = null;
+    }
+    if (multiSelect) exitMultiSelect();
+    setReorderMode(true);
+  };
+  const exitReorderMode = () => {
+    setReorderMode(false);
+    setDraggedBmId(null);
+    setDragOverBmId(null);
+    setDragCatName(null);
+    setDraggedCatName(null);
+    setDragOverCatName(null);
+    const prev = sortBeforeReorderRef.current;
+    if (prev && prev !== 'default') {
+      setSortMode(prev);
+    }
+    sortBeforeReorderRef.current = null;
+  };
+  const reorderAvailable = reorderMode;
+  // Reorder via drag-and-drop. Drop ONTO target = the dragged item takes the
+  // target's display position; everything between them shifts to fill the gap.
+  const dropBookmarkOn = (cat: string, srcId: string, dstId: string) => {
+    if (!onBookmarkReorder || srcId === dstId) return;
+    const list = bookmarksByCategory[cat] || [];
+    const srcIdx = list.findIndex((b) => b.id === srcId);
+    const dstIdx = list.findIndex((b) => b.id === dstId);
+    if (srcIdx < 0 || dstIdx < 0) return;
+    const arr = [...list];
+    const [moved] = arr.splice(srcIdx, 1);
+    arr.splice(dstIdx, 0, moved);
+    onBookmarkReorder(cat, arr.map((b) => b.id || '').filter(Boolean));
+  };
+  const dropCategoryOn = (srcCat: string, dstCat: string) => {
+    if (!onCategoryReorder || srcCat === dstCat) return;
+    const srcIdx = categories.indexOf(srcCat);
+    const dstIdx = categories.indexOf(dstCat);
+    if (srcIdx < 0 || dstIdx < 0) return;
+    const arr = [...categories];
+    const [moved] = arr.splice(srcIdx, 1);
+    arr.splice(dstIdx, 0, moved);
+    onCategoryReorder(arr);
+  };
+
+  // Auto-scroll the surrounding scrollable container while a drag is in
+  // progress: HTML5 native DnD's built-in edge-scroll is sluggish and barely
+  // triggers on long lists, so we drive it from a rAF loop ourselves. Wheel
+  // events keep working as normal (Chromium delivers them through dragover).
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const dragCursorYRef = useRef(0);
+  useEffect(() => {
+    const dragging = !!(draggedBmId || draggedCatName);
+    if (!dragging) return;
+    let scroller: HTMLElement | null = wrapRef.current?.parentElement ?? null;
+    while (scroller) {
+      const cs = getComputedStyle(scroller);
+      const scrollable = (cs.overflowY === 'auto' || cs.overflowY === 'scroll')
+        && scroller.scrollHeight > scroller.clientHeight + 1;
+      if (scrollable) break;
+      scroller = scroller.parentElement;
+    }
+    if (!scroller) return;
+    const onDragOver = (e: DragEvent) => {
+      dragCursorYRef.current = e.clientY;
+    };
+    window.addEventListener('dragover', onDragOver);
+    const EDGE = 80;
+    const MAX_SPEED = 18;
+    let raf = 0;
+    const tick = () => {
+      const el = scroller!;
+      const r = el.getBoundingClientRect();
+      const y = dragCursorYRef.current;
+      if (y > 0) {
+        const fromTop = y - r.top;
+        const fromBottom = r.bottom - y;
+        if (fromTop >= 0 && fromTop < EDGE) {
+          el.scrollTop -= MAX_SPEED * (1 - fromTop / EDGE);
+        } else if (fromBottom >= 0 && fromBottom < EDGE) {
+          el.scrollTop += MAX_SPEED * (1 - fromBottom / EDGE);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('dragover', onDragOver);
+    };
+  }, [draggedBmId, draggedCatName]);
+
   return (
-    <div>
-      {/* Header with add / manage buttons. flex-wrap so extra buttons drop
-          to a new row on narrow library panels instead of pushing the gear
-          off-screen. */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+    <div ref={wrapRef}>
+      {/* Row 1: the two primary "add" actions. Kept on their own row so the
+          secondary tools (export / import / multi-select / reorder / gear)
+          don't push them off-screen on narrow library panels. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <button
           className="action-btn"
           onClick={() => setShowAddDialog(!showAddDialog)}
@@ -445,12 +569,16 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
           </svg>
           {t('bm.add_custom')}
         </button>
+      </div>
+      {/* Row 2: secondary tools (export / bulk paste / import / multi-select /
+          reorder / manage categories). All icon-only to fit six in a row. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 8 }}>
         {exportUrl && (
           <a
             className="action-btn"
             href={exportUrl}
             download="bookmarks.json"
-            style={{ padding: '3px 6px', fontSize: 12, marginLeft: 'auto', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+            style={{ padding: '3px 6px', fontSize: 12, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
             title={t('bm.export_tooltip')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -464,7 +592,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
           <button
             className="action-btn"
             onClick={onBulkPaste}
-            style={{ padding: '3px 6px', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', marginLeft: exportUrl ? 0 : 'auto' }}
+            style={{ padding: '3px 6px', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
             title={t('bm.bulk_paste_tooltip')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -478,7 +606,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
         {onImport && (
           <label
             className="action-btn"
-            style={{ padding: '3px 6px', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', marginLeft: (exportUrl || onBulkPaste) ? 0 : 'auto' }}
+            style={{ padding: '3px 6px', fontSize: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
             title={t('bm.import_tooltip')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -508,6 +636,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
               // panel that'd otherwise stack on top and confuse the user.
               setShowCategoryMgr(false);
               setMultiSelect(true);
+              if (reorderMode) exitReorderMode();
             }
           }}
           style={{
@@ -522,6 +651,27 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
           </svg>
         </button>
+        {(onCategoryReorder || onBookmarkReorder) && (
+          <button
+            className="action-btn"
+            onClick={() => {
+              if (reorderMode) exitReorderMode();
+              else enterReorderMode();
+            }}
+            style={{
+              padding: '3px 6px', fontSize: 12, display: 'inline-flex', alignItems: 'center',
+              background: reorderMode ? 'rgba(108,140,255,0.2)' : undefined,
+              borderColor: reorderMode ? 'rgba(108,140,255,0.6)' : undefined,
+            }}
+            title={t('bm.reorder_tooltip')}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="17 11 12 6 7 11" />
+              <polyline points="17 17 12 22 7 17" />
+              <line x1="12" y1="6" x2="12" y2="22" />
+            </svg>
+          </button>
+        )}
         <button
           className="action-btn"
           onClick={() => {
@@ -988,18 +1138,55 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
         return (
         <div key={cat} className="bookmark-group" style={{ marginBottom: 4 }}>
           <div
+            draggable={reorderAvailable && !!onCategoryReorder && cat !== 'Uncategorized'}
+            onDragStart={(e) => {
+              if (!reorderAvailable || !onCategoryReorder || cat === 'Uncategorized') return;
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('application/x-locwarp-cat', cat);
+              setDraggedCatName(cat);
+            }}
+            onDragOver={(e) => {
+              if (!reorderAvailable || !draggedCatName || cat === 'Uncategorized') return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setDragOverCatName(cat);
+            }}
+            onDragLeave={() => {
+              if (dragOverCatName === cat) setDragOverCatName(null);
+            }}
+            onDrop={(e) => {
+              if (!reorderAvailable || cat === 'Uncategorized') return;
+              e.preventDefault();
+              const src = draggedCatName || e.dataTransfer.getData('application/x-locwarp-cat');
+              if (src) dropCategoryOn(src, cat);
+              setDraggedCatName(null);
+              setDragOverCatName(null);
+            }}
+            onDragEnd={() => { setDraggedCatName(null); setDragOverCatName(null); }}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 6,
               padding: '5px 4px',
-              cursor: 'pointer',
+              cursor: reorderAvailable && cat !== 'Uncategorized' ? 'grab' : 'pointer',
               fontSize: 12,
               fontWeight: 600,
-              opacity: 0.8,
+              opacity: draggedCatName === cat ? 0.4 : 0.8,
+              borderTop: dragOverCatName === cat && draggedCatName && draggedCatName !== cat
+                ? '2px solid #6c8cff' : '2px solid transparent',
+              userSelect: reorderAvailable ? 'none' : undefined,
             }}
             onClick={() => toggleCategory(cat)}
           >
+            {reorderAvailable && cat !== 'Uncategorized' && onCategoryReorder && (
+              <span style={{ opacity: 0.55, flexShrink: 0, display: 'inline-flex', alignItems: 'center', cursor: 'grab' }} title={t('bm.reorder_drag_hint')}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="4" y1="8" x2="20" y2="8" />
+                  <line x1="4" y1="12" x2="20" y2="12" />
+                  <line x1="4" y1="16" x2="20" y2="16" />
+                </svg>
+              </span>
+            )}
             {multiSelect && (
               <input
                 type="checkbox"
@@ -1057,31 +1244,63 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
               )}
               {sortBookmarks(bms).map((bm) => {
                 const isSelected = bm.id ? selectedIds.has(bm.id) : false;
+                const canDragRow = reorderAvailable && !!onBookmarkReorder && !!bm.id && cat !== 'Uncategorized';
                 return (
                   <div
                     key={bm.id ?? `${bm.lat}-${bm.lng}`}
                     className="bookmark-item"
+                    draggable={canDragRow}
+                    onDragStart={(e) => {
+                      if (!canDragRow || !bm.id) return;
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('application/x-locwarp-bm', `${cat}::${bm.id}`);
+                      setDraggedBmId(bm.id);
+                      setDragCatName(cat);
+                    }}
+                    onDragOver={(e) => {
+                      if (!canDragRow || !draggedBmId || dragCatName !== cat) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      if (bm.id) setDragOverBmId(bm.id);
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverBmId === bm.id) setDragOverBmId(null);
+                    }}
+                    onDrop={(e) => {
+                      if (!canDragRow || !bm.id) return;
+                      e.preventDefault();
+                      const src = draggedBmId;
+                      if (src && dragCatName === cat) dropBookmarkOn(cat, src, bm.id);
+                      setDraggedBmId(null);
+                      setDragOverBmId(null);
+                      setDragCatName(null);
+                    }}
+                    onDragEnd={() => { setDraggedBmId(null); setDragOverBmId(null); setDragCatName(null); }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
                       padding: '5px 6px',
-                      cursor: 'pointer',
+                      cursor: canDragRow ? 'grab' : 'pointer',
                       borderRadius: 4,
                       fontSize: 12,
                       transition: 'background 0.15s',
                       background: bm.id && flashedBmId === bm.id
                         ? 'rgba(34, 197, 94, 0.22)'
                         : (multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent'),
+                      opacity: draggedBmId === bm.id ? 0.4 : 1,
+                      borderTop: dragOverBmId === bm.id && draggedBmId && draggedBmId !== bm.id
+                        ? '2px solid #6c8cff' : '2px solid transparent',
+                      userSelect: canDragRow ? 'none' : undefined,
                     }}
                     onClick={() => {
                       if (multiSelect) {
                         if (bm.id) toggleSelected(bm.id);
-                      } else {
+                      } else if (!reorderAvailable) {
                         handleBookmarkClick(bm);
                       }
                     }}
-                    onContextMenu={(e) => { if (!multiSelect) handleContextMenu(e, bm); else e.preventDefault(); }}
+                    onContextMenu={(e) => { if (!multiSelect && !reorderAvailable) handleContextMenu(e, bm); else e.preventDefault(); }}
                     onMouseEnter={(e) => {
                       if (!(multiSelect && isSelected) && !(bm.id && flashedBmId === bm.id)) (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
                     }}
@@ -1091,6 +1310,15 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
                         : (multiSelect && isSelected ? 'rgba(108,140,255,0.18)' : 'transparent');
                     }}
                   >
+                    {canDragRow && (
+                      <span style={{ opacity: 0.55, flexShrink: 0, display: 'inline-flex', alignItems: 'center', cursor: 'grab' }} title={t('bm.reorder_drag_hint')}>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="4" y1="8" x2="20" y2="8" />
+                          <line x1="4" y1="12" x2="20" y2="12" />
+                          <line x1="4" y1="16" x2="20" y2="16" />
+                        </svg>
+                      </span>
+                    )}
                     {multiSelect && (
                       <input
                         type="checkbox"

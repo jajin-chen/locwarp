@@ -99,6 +99,66 @@ class RouteManager:
     def list_categories(self) -> list[RouteCategory]:
         return sorted(self.store.categories, key=lambda c: c.sort_order)
 
+    def reorder_categories(self, category_ids: list[str]) -> int:
+        """Reassign ``sort_order`` so categories appear in the given order.
+
+        Categories not named in *category_ids* are pushed to the tail while
+        preserving their current relative order.
+        """
+        order_map = {cid: idx for idx, cid in enumerate(category_ids)}
+        seen = set(category_ids)
+        tail_idx = len(category_ids)
+        existing_sorted = sorted(self.store.categories, key=lambda c: c.sort_order)
+        for cat in existing_sorted:
+            if cat.id not in seen:
+                order_map[cat.id] = tail_idx
+                tail_idx += 1
+        changed = 0
+        for cat in self.store.categories:
+            new_order = order_map.get(cat.id, cat.sort_order)
+            if cat.sort_order != new_order:
+                cat.sort_order = new_order
+                changed += 1
+        if changed:
+            self._save()
+        return changed
+
+    def reorder_routes_in_category(
+        self,
+        category_id: str,
+        route_ids: list[str],
+    ) -> int:
+        """Reorder saved routes in *category_id* to match *route_ids*.
+
+        Routes outside the category keep their position in the store list, so
+        ordering of other categories is unaffected.
+        """
+        in_cat_indices = [
+            i for i, r in enumerate(self.store.routes)
+            if r.category_id == category_id
+        ]
+        if not in_cat_indices:
+            return 0
+        in_cat_routes = [self.store.routes[i] for i in in_cat_indices]
+        route_by_id = {r.id: r for r in in_cat_routes}
+        ordered: list[SavedRoute] = []
+        consumed: set[str] = set()
+        for rid in route_ids:
+            r = route_by_id.get(rid)
+            if r is not None and rid not in consumed:
+                ordered.append(r)
+                consumed.add(rid)
+        for r in in_cat_routes:
+            if r.id not in consumed:
+                ordered.append(r)
+        new_list = list(self.store.routes)
+        for slot, r in zip(in_cat_indices, ordered):
+            new_list[slot] = r
+        if new_list != self.store.routes:
+            self.store.routes = new_list
+            self._save()
+        return len(ordered)
+
     def create_category(self, name: str, color: str = "#6c8cff") -> RouteCategory:
         max_order = max((c.sort_order for c in self.store.categories), default=-1)
         cat = RouteCategory(

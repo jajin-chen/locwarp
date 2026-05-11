@@ -92,6 +92,27 @@ async def move_saved_routes(req: RouteMoveRequest):
     return {"moved": count}
 
 
+class _ReorderRoutesRequest(BaseModel):
+    category_id: str
+    route_ids: list[str]
+
+
+@router.post("/saved/reorder")
+async def reorder_saved_routes(req: _ReorderRoutesRequest):
+    count = _rm().reorder_routes_in_category(req.category_id, req.route_ids)
+    return {"reordered": count}
+
+
+class _ReorderRouteCategoriesRequest(BaseModel):
+    category_ids: list[str]
+
+
+@router.post("/categories/reorder")
+async def reorder_route_categories(req: _ReorderRouteCategoriesRequest):
+    count = _rm().reorder_categories(req.category_ids)
+    return {"reordered": count}
+
+
 @router.get("/saved/export")
 async def export_all_saved_routes():
     """Export every saved route + categories as a single JSON bundle."""

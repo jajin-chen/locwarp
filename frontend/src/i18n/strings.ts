@@ -598,6 +598,8 @@ export const STRINGS = {
   'update.later': { zh: '稍後提醒', en: 'Later' },
   'bm.edit': { zh: '編輯', en: 'Edit' },
   'bm.move_to': { zh: '移動到:', en: 'Move to:' },
+  'bm.reorder_tooltip': { zh: '排序模式:拖曳左側 ≡ 把手可調整分類與項目順序 (預設關閉)。開啟時會切回「預設」排序', en: 'Reorder mode: drag the ≡ handle to move categories and items (off by default). Switches sort to Default when enabled.' },
+  'bm.reorder_drag_hint': { zh: '拖曳調整順序', en: 'Drag to reorder' },
 
   // ── Address search ───────────────────────────
   'search.placeholder': { zh: '搜尋地址...', en: 'Search address...' },

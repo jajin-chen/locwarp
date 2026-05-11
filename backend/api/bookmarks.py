@@ -72,6 +72,29 @@ async def move_bookmarks(req: BookmarkMoveRequest):
     return {"moved": count}
 
 
+class _ReorderBookmarksRequest(BaseModel):
+    category_id: str
+    bookmark_ids: list[str]
+
+
+@router.post("/reorder")
+async def reorder_bookmarks(req: _ReorderBookmarksRequest):
+    bm = _bm()
+    count = bm.reorder_bookmarks_in_category(req.category_id, req.bookmark_ids)
+    return {"reordered": count}
+
+
+class _ReorderCategoriesRequest(BaseModel):
+    category_ids: list[str]
+
+
+@router.post("/categories/reorder")
+async def reorder_categories(req: _ReorderCategoriesRequest):
+    bm = _bm()
+    count = bm.reorder_categories(req.category_ids)
+    return {"reordered": count}
+
+
 # ── Categories ────────────────────────────────────────────
 
 @router.get("/categories", response_model=list[BookmarkCategory])

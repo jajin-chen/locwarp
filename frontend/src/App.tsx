@@ -1085,6 +1085,56 @@ const App: React.FC = () => {
     }
   }, [routeCategories, refreshRouteCategories, showToast])
 
+  const handleRouteCategoryReorder = useCallback(async (orderedIds: string[]) => {
+    // Optimistically reorder locally so the arrow click feels instant; refresh
+    // reconciles with the backend afterwards.
+    setRouteCategories((prev) => {
+      const byId = new Map(prev.map((c) => [c.id, c] as const))
+      const head = orderedIds.map((id) => byId.get(id)).filter((c): c is any => !!c)
+      const headIds = new Set(head.map((c: any) => c.id))
+      const tail = prev.filter((c: any) => !headIds.has(c.id))
+      return [...head, ...tail]
+    })
+    try {
+      await api.reorderRouteCategories(orderedIds)
+      await refreshRouteCategories()
+    } catch (err: any) {
+      showToast(err.message || 'category reorder failed')
+      await refreshRouteCategories()
+    }
+  }, [refreshRouteCategories, showToast])
+
+  const handleRouteReorder = useCallback(async (categoryId: string, orderedIds: string[]) => {
+    // Splice the affected category's routes into the new order while keeping
+    // other categories' relative positions intact, mirroring the backend.
+    setSavedRoutes((prev) => {
+      const order = new Map(orderedIds.map((id, idx) => [id, idx] as const))
+      const inCat = prev.filter((r) => (r.category_id || 'default') === categoryId)
+      inCat.sort((a, b) => {
+        const ai = order.has(a.id) ? (order.get(a.id) as number) : Number.MAX_SAFE_INTEGER
+        const bi = order.has(b.id) ? (order.get(b.id) as number) : Number.MAX_SAFE_INTEGER
+        return ai - bi
+      })
+      const result = [...prev]
+      let ptr = 0
+      for (let i = 0; i < result.length; i++) {
+        if ((result[i].category_id || 'default') === categoryId) {
+          result[i] = inCat[ptr++]
+        }
+      }
+      return result
+    })
+    try {
+      await api.reorderRoutes(categoryId, orderedIds)
+      const routes = await api.getSavedRoutes()
+      setSavedRoutes(routes)
+    } catch (err: any) {
+      showToast(err.message || 'route reorder failed')
+      const routes = await api.getSavedRoutes()
+      setSavedRoutes(routes)
+    }
+  }, [showToast])
+
   const handleGpxImport = useCallback(async (file: File) => {
     try {
       const res = await api.importGpx(file)
@@ -1457,6 +1507,20 @@ const App: React.FC = () => {
             if (!cat) return
             bm.updateCategory(cat.id, { ...cat, color })
           }}
+          onCategoryReorder={(orderedNames: string[]) => {
+            // BookmarkList speaks names; translate to backend ids before
+            // POSTing the new order. Skip any name we can't resolve (e.g.
+            // the synthetic "Uncategorized" bucket isn't a real category).
+            const ids = orderedNames
+              .map((n) => bm.categories.find((c) => c.name === n)?.id)
+              .filter((id): id is string => !!id)
+            if (ids.length > 0) bm.reorderCategories(ids)
+          }}
+          onBookmarkReorder={(categoryName: string, orderedIds: string[]) => {
+            const cat = bm.categories.find((c) => c.name === categoryName)
+            if (!cat) return
+            bm.reorderBookmarksInCategory(cat.id, orderedIds)
+          }}
           bookmarkShowOnMap={showBookmarkPins}
           onBookmarkShowOnMapChange={setShowBookmarkPins}
           onBookmarkImport={handleBookmarkImport}
@@ -1490,6 +1554,8 @@ const App: React.FC = () => {
           onRouteCategoryDelete={handleRouteCategoryDelete}
           onRouteCategoryRename={handleRouteCategoryRename}
           onRouteCategoryRecolor={handleRouteCategoryRecolor}
+          onRouteCategoryReorder={handleRouteCategoryReorder}
+          onRouteReorder={handleRouteReorder}
           randomWalkRadius={randomWalkRadius}
           pauseRandomWalk={sim.pauseRandomWalk}
           onPauseRandomWalkChange={sim.setPauseRandomWalk}

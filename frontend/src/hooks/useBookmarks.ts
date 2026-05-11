@@ -110,6 +110,60 @@ export function useBookmarks() {
     [refresh],
   )
 
+  const reorderCategories = useCallback(
+    async (categoryIds: string[]) => {
+      // Optimistic local reorder so the dragged row stays in place visually
+      // while the API round-trip completes. refresh() reconciles to truth.
+      setCategories((prev) => {
+        const byId = new Map(prev.map((c) => [c.id, c] as const))
+        const head = categoryIds
+          .map((id) => byId.get(id))
+          .filter((c): c is BookmarkCategory => !!c)
+        const headIds = new Set(head.map((c) => c.id))
+        const tail = prev.filter((c) => !headIds.has(c.id))
+        return [...head, ...tail]
+      })
+      await api.reorderBookmarkCategories(categoryIds)
+      await refresh()
+    },
+    [refresh],
+  )
+
+  const reorderBookmarksInCategory = useCallback(
+    async (categoryId: string, bookmarkIds: string[]) => {
+      setBookmarks((prev) => {
+        const order = new Map(bookmarkIds.map((id, idx) => [id, idx] as const))
+        // Stable sort: items in the affected category sort by the new order
+        // (items outside the order list go to the end of their category).
+        // Items in other categories keep their relative position.
+        const inCat: typeof prev = []
+        const outCat: typeof prev = []
+        for (const b of prev) {
+          if (b.category_id === categoryId) inCat.push(b)
+          else outCat.push(b)
+        }
+        inCat.sort((a, b) => {
+          const ai = order.has(a.id) ? (order.get(a.id) as number) : Number.MAX_SAFE_INTEGER
+          const bi = order.has(b.id) ? (order.get(b.id) as number) : Number.MAX_SAFE_INTEGER
+          return ai - bi
+        })
+        // Splice the in-cat items back into the positions they originally
+        // occupied, preserving other-category positions for stable rendering.
+        const result = [...prev]
+        let inCatPtr = 0
+        for (let i = 0; i < result.length; i++) {
+          if (result[i].category_id === categoryId) {
+            result[i] = inCat[inCatPtr++]
+          }
+        }
+        return result
+      })
+      await api.reorderBookmarks(categoryId, bookmarkIds)
+      await refresh()
+    },
+    [refresh],
+  )
+
   return {
     bookmarks,
     categories,
@@ -121,6 +175,8 @@ export function useBookmarks() {
     createCategory,
     deleteCategory,
     updateCategory,
+    reorderCategories,
+    reorderBookmarksInCategory,
     refresh,
   }
 }
