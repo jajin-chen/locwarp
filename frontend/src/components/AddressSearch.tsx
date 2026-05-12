@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { searchAddress } from '../services/api';
+import { searchAddress, setGeocodeProviderPref } from '../services/api';
 import { useT } from '../i18n';
 
 interface SearchResult {
@@ -45,11 +45,21 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [keyInput, setKeyInput] = useState<string>(googleKey);
 
+  // Mirror to backend so /api/phone/geocode can honour the same choice.
+  // Fire-and-forget: the desktop's localStorage is still the source of
+  // truth for its own search calls, this only matters for the phone.
+  const syncToBackend = useCallback((p: Provider, key: string) => {
+    setGeocodeProviderPref(p, p === 'google' ? key : '').catch(() => {
+      /* backend offline / older build — desktop search keeps working */
+    });
+  }, []);
+
   const persistProvider = useCallback((p: Provider) => {
     setProvider(p);
     try { localStorage.setItem('locwarp.geocode_provider', p); }
     catch { /* ignore */ }
-  }, []);
+    syncToBackend(p, googleKey);
+  }, [googleKey, syncToBackend]);
 
   const saveGoogleKey = useCallback(() => {
     const trimmed = keyInput.trim();
@@ -57,9 +67,12 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
     setGoogleKey(trimmed);
     try { localStorage.setItem('locwarp.google_geocode_key', trimmed); }
     catch { /* ignore */ }
-    persistProvider('google');
+    setProvider('google');
+    try { localStorage.setItem('locwarp.geocode_provider', 'google'); }
+    catch { /* ignore */ }
+    syncToBackend('google', trimmed);
     setShowSettings(false);
-  }, [keyInput, persistProvider]);
+  }, [keyInput, syncToBackend]);
 
   const clearGoogleKey = useCallback(() => {
     setGoogleKey('');
@@ -68,6 +81,14 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
     catch { /* ignore */ }
     persistProvider('nominatim');
   }, [persistProvider]);
+
+  // On mount, push the currently-saved choice to the backend in case the
+  // user previously picked Google/Photon before this sync existed (or the
+  // backend's settings.json got reset).
+  useEffect(() => {
+    syncToBackend(provider, googleKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const doSearch = useCallback(async (q: string) => {
     if (q.trim().length < 2) {

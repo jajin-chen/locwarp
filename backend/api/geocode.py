@@ -2,6 +2,7 @@ import logging
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from models.schemas import (
     Coordinate,
@@ -47,6 +48,41 @@ async def search_address(
 @router.get("/reverse", response_model=GeocodingResult | None)
 async def reverse_geocode(lat: float, lng: float):
     return await geocoding_service.reverse(lat, lng)
+
+
+class ProviderPref(BaseModel):
+    provider: str = Field(pattern="^(nominatim|photon|google)$")
+    google_key: str = ""
+
+
+@router.get("/provider-pref")
+async def get_provider_pref():
+    """Return the desktop's currently-selected geocode provider so the
+    phone page can honour the same choice — the desktop's pick lives in
+    Electron-renderer localStorage which the mobile browser can't read."""
+    from main import app_state
+    return {
+        "provider": app_state._geocode_provider,
+        "has_google_key": bool(app_state._google_geocode_key),
+    }
+
+
+@router.put("/provider-pref")
+async def set_provider_pref(pref: ProviderPref):
+    """Desktop pushes its provider choice here whenever the user changes
+    it in the search settings modal, so the same choice flows to /api/
+    phone/geocode."""
+    from main import app_state
+    app_state._geocode_provider = pref.provider
+    # Only overwrite the stored key when one is supplied so the user can
+    # toggle Google off / on without re-entering it.
+    if pref.google_key:
+        app_state._google_geocode_key = pref.google_key.strip()
+    elif pref.provider != "google":
+        # Allow explicit clear when switching away from google.
+        pass
+    app_state.save_settings()
+    return {"ok": True}
 
 
 @router.get("/timezone", response_model=TimezoneInfo | None)

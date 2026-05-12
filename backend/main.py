@@ -62,6 +62,11 @@ class AppState:
         # "auto-collapse when total bookmarks > 30" rule. Empty list means
         # explicitly all-collapsed.
         self._bookmark_expanded_categories: list[str] | None = None
+        # Geocode provider preference. Mirrors what the desktop UI saves to
+        # its own localStorage, so /api/phone/geocode (which runs against
+        # the backend, not the renderer) can honour the same choice.
+        self._geocode_provider: str = "nominatim"
+        self._google_geocode_key: str = ""
         self._load_settings()
 
     def _load_settings(self):
@@ -83,6 +88,12 @@ class AppState:
             bmExp = data.get("bookmark_expanded_categories")
             if isinstance(bmExp, list):
                 self._bookmark_expanded_categories = [str(x) for x in bmExp]
+            gp = data.get("geocode_provider")
+            if isinstance(gp, str) and gp in ("nominatim", "photon", "google"):
+                self._geocode_provider = gp
+            gk = data.get("google_geocode_key")
+            if isinstance(gk, str):
+                self._google_geocode_key = gk
         except (ValueError, KeyError):
             logger.warning("Settings payload field malformed; keeping defaults", exc_info=True)
 
@@ -93,6 +104,8 @@ class AppState:
             "coord_format": self.coord_formatter.format.value,
             "initial_map_position": self._initial_map_position,
             "bookmark_expanded_categories": self._bookmark_expanded_categories,
+            "geocode_provider": self._geocode_provider,
+            "google_geocode_key": self._google_geocode_key,
         }
         safe_write_json(SETTINGS_FILE, data)
 

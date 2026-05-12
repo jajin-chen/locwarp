@@ -621,16 +621,25 @@ async def phone_geocode(
     x_locwarp_token: str | None = Header(default=None, alias="X-LocWarp-Token"),
     t: str | None = None,
 ):
-    """Forward geocode via the existing GeocodingService (Nominatim).
-    Returned as a list of {display_name, short_name, lat, lng,
-    country_code} so the phone can render a results list."""
+    """Forward geocode using whichever provider the desktop UI picked.
+
+    The desktop saves its choice (and the Google API key if any) to the
+    backend via PUT /api/geocode/provider-pref. We honour the same
+    preference here so the mobile page doesn't quietly fall back to
+    Nominatim — which has been 403-ing for some users — when the user
+    explicitly chose Photon or Google upstairs."""
     _check_token(_resolve_token(request, x_locwarp_token, t))
     from services.geocoding import GeocodingService
+    from main import app_state
+    provider = app_state._geocode_provider or "nominatim"
+    google_key = app_state._google_geocode_key or None
+    if provider == "google" and not google_key:
+        provider = "nominatim"  # safety fallback if key got cleared
     svc = GeocodingService()
     try:
-        results = await svc.search(q, limit=8, provider="nominatim", google_key=None)
+        results = await svc.search(q, limit=8, provider=provider, google_key=google_key)
     except Exception as e:
-        logger.exception("phone geocode failed: %s", e)
+        logger.exception("phone geocode failed (provider=%s): %s", provider, e)
         raise HTTPException(status_code=500, detail=str(e))
     return [
         {
