@@ -1755,6 +1755,29 @@ const App: React.FC = () => {
                     onClick={handleClearWaypoints}
                     disabled={sim.status?.running}
                   >{t('generic.clear')}</button>
+                  <button
+                    className="action-btn"
+                    style={{ flex: 1 }}
+                    onClick={async () => {
+                      const wps = sim.waypoints
+                      if (wps.length === 0) return
+                      const txt = wps
+                        .map((w: any) => `${w.lat.toFixed(6)}, ${w.lng.toFixed(6)}`)
+                        .join('\n')
+                      try {
+                        await navigator.clipboard.writeText(txt)
+                      } catch {
+                        const ta = document.createElement('textarea')
+                        ta.value = txt
+                        document.body.appendChild(ta)
+                        ta.select()
+                        try { document.execCommand('copy') } catch { /* ignore */ }
+                        document.body.removeChild(ta)
+                      }
+                      showToast(t('toast.waypoints_copied').replace('{n}', String(wps.length)))
+                    }}
+                    title={t('panel.waypoints_copy_all_tooltip')}
+                  >{t('panel.waypoints_copy_all')}</button>
                   {sim.waypoints.length >= 3 && (
                     <button
                       className="action-btn"

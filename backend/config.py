@@ -39,7 +39,7 @@ BROUTER_BASE_URL = "https://brouter.de"
 
 # Nominatim
 NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org"
-NOMINATIM_USER_AGENT = "LocWarp/0.2.150 (+https://github.com/keezxc1223/locwarp)"
+NOMINATIM_USER_AGENT = "LocWarp/0.2.151 (+https://github.com/keezxc1223/locwarp)"
 
 # Photon (komoot) — OSM-backed, no API key, more forgiving than Nominatim
 # for fuzzy / typo queries and unrestricted on User-Agent.
