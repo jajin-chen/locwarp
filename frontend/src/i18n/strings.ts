@@ -606,13 +606,18 @@ export const STRINGS = {
   'search.searching': { zh: '搜尋中...', en: 'Searching...' },
   'search.no_results': { zh: '無搜尋結果', en: 'No results' },
   'search.settings_title': { zh: '地址搜尋來源', en: 'Search provider' },
-  'search.settings_btn_free': { zh: '搜尋來源:免費版 (點擊設定)', en: 'Provider: Free (click to configure)' },
+  'search.settings_btn_free': { zh: '搜尋來源:免費版 Nominatim (點擊設定)', en: 'Provider: Free Nominatim (click to configure)' },
+  'search.settings_btn_photon': { zh: '搜尋來源:免費版 Photon (點擊設定)', en: 'Provider: Free Photon (click to configure)' },
   'search.settings_btn_google': { zh: '搜尋來源:Google (點擊設定)', en: 'Provider: Google (click to configure)' },
-  'search.provider_free_short': { zh: '免費', en: 'Free' },
   'search.provider_free_label': { zh: '免費版 (Nominatim)', en: 'Free (Nominatim)' },
   'search.provider_free_desc': {
     zh: '全球 OSM 開放資料,不用 API Key,精準度普通 (台灣巷弄、新建社區命中率較低)',
     en: 'Global OSM open data, no API key needed; moderate accuracy (weak on Taiwan alleys / new addresses)',
+  },
+  'search.provider_photon_label': { zh: '免費版 (Photon by komoot)', en: 'Free (Photon by komoot)' },
+  'search.provider_photon_desc': {
+    zh: '同樣是 OSM 資料,不用 API Key,模糊搜尋 / 容錯字較強,Nominatim 找不到時可改試這個',
+    en: 'Also OSM data, no key needed; better fuzzy / typo tolerance — try this if Nominatim misses your query',
   },
   'search.provider_google_label': { zh: 'Google Geocoding', en: 'Google Geocoding' },
   'search.provider_google_desc': {

@@ -1,9 +1,12 @@
 """Forward / reverse geocoding service.
 
-Forward search supports two providers selected per-request:
+Forward search supports three providers selected per-request:
 
 * ``nominatim`` — default, the OSM-backed public Nominatim instance. Free,
   no key, but Asian street-level accuracy is weak.
+* ``photon`` — komoot-hosted, also OSM-backed, free, no key. Better fuzzy
+  matching and typo tolerance than Nominatim, looser rate limits in
+  practice. Returns GeoJSON instead of Nominatim's flat shape.
 * ``google`` — Google Geocoding API. Requires the user's own API key;
   10k free events / month with the Essentials tier.
 
@@ -19,7 +22,7 @@ import logging
 import httpx
 from fastapi import HTTPException
 
-from config import NOMINATIM_BASE_URL, NOMINATIM_USER_AGENT
+from config import NOMINATIM_BASE_URL, NOMINATIM_USER_AGENT, PHOTON_BASE_URL
 from models.schemas import GeocodingResult
 
 logger = logging.getLogger(__name__)
@@ -56,6 +59,8 @@ class GeocodingService:
                     detail="provider=google requires google_key",
                 )
             return await self._search_google(query, limit, google_key)
+        if provider == "photon":
+            return await self._search_photon(query, limit)
         return await self._search_nominatim(query, limit)
 
     async def _search_nominatim(self, query: str, limit: int) -> list[GeocodingResult]:
@@ -88,6 +93,61 @@ class GeocodingService:
                 )
             except (KeyError, ValueError) as exc:
                 logger.warning("Skipping malformed search result: %s", exc)
+        return results
+
+    async def _search_photon(self, query: str, limit: int) -> list[GeocodingResult]:
+        # Photon returns GeoJSON: a FeatureCollection where each feature has
+        # `geometry.coordinates = [lon, lat]` and `properties` with name /
+        # city / country / etc. There's no `display_name` field, so we
+        # synthesise one from the properties for parity with Nominatim.
+        params = {"q": query, "limit": min(limit, 40)}
+        logger.debug("Photon search: %s", query)
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(
+                f"{PHOTON_BASE_URL}/api",
+                params=params,
+                headers={"User-Agent": NOMINATIM_USER_AGENT},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        results: list[GeocodingResult] = []
+        for feat in data.get("features", []):
+            try:
+                coords = feat["geometry"]["coordinates"]
+                lng, lat = float(coords[0]), float(coords[1])
+                props = feat.get("properties") or {}
+                name = (props.get("name") or "").strip()
+                # Build a Nominatim-style "specific, generic, country" line.
+                parts: list[str] = []
+                if name:
+                    parts.append(name)
+                house = props.get("housenumber")
+                street = props.get("street")
+                if house and street:
+                    parts.append(f"{street} {house}")
+                elif street:
+                    parts.append(street)
+                for key in ("district", "city", "county", "state", "country"):
+                    v = props.get(key)
+                    if v and v not in parts:
+                        parts.append(v)
+                display = ", ".join(parts) if parts else (name or query)
+                results.append(
+                    GeocodingResult(
+                        display_name=display,
+                        lat=lat,
+                        lng=lng,
+                        # Photon's "type" is the OSM tag value (e.g. "city"),
+                        # mirror it into our `type` field for compat.
+                        type=props.get("type") or props.get("osm_value") or "",
+                        importance=0.0,
+                        country_code=(props.get("countrycode") or "").lower(),
+                        short_name=name,
+                    )
+                )
+            except (KeyError, ValueError, TypeError) as exc:
+                logger.warning("Skipping malformed Photon result: %s", exc)
         return results
 
     async def _search_google(

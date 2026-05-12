@@ -36,9 +36,10 @@ async def search_address(
 ):
     """Forward geocode.
 
-    `provider` is one of ``nominatim`` (default, free, no key) or
-    ``google`` (requires `google_key`, 10k events/month free tier on
-    Google's Essentials plan).
+    `provider` is one of ``nominatim`` (default, free, no key),
+    ``photon`` (also free / no key, fuzzy-friendly OSM mirror at
+    komoot.io), or ``google`` (requires `google_key`, 10k events/month
+    free tier on Google's Essentials plan).
     """
     return await geocoding_service.search(q, limit, provider, google_key)
 

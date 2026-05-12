@@ -221,6 +221,8 @@ export const searchAddress = (q: string) => {
   if (provider === 'google') {
     params.set('provider', 'google')
     params.set('google_key', googleKey)
+  } else if (provider === 'photon') {
+    params.set('provider', 'photon')
   }
   return request<any[]>('GET', `/api/geocode/search?${params.toString()}`)
 }
