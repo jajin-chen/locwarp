@@ -274,6 +274,11 @@ export const STRINGS = {
   'wifi.port_scan_failed': { zh: '掃描 port 失敗', en: 'Port scan failed' },
   'wifi.ip_required_for_scan': { zh: '請先手動填入 IP', en: 'Please enter the iPhone IP first' },
   'wifi.tunnel_stop': { zh: 'Stop Tunnel', en: 'Stop Tunnel' },
+  'wifi.recent_ips_button': { zh: '最近 {n}', en: 'Recent {n}' },
+  'wifi.recent_ips_tooltip': {
+    zh: '從最近連線過的 IP 直接挑一個帶回欄位,免重打',
+    en: 'Pick a recently used IP — fills the field without retyping',
+  },
   'dev_mode.reveal_button': { zh: '顯示開發者模式選項', en: 'Reveal Developer Mode option' },
   'dev_mode.reveal_working': { zh: '處理中...', en: 'Working...' },
   'dev_mode.reveal_tooltip': {

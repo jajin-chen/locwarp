@@ -2136,6 +2136,10 @@ textarea:focus {
   color: var(--text-muted);
   z-index: 10;
   flex-shrink: 0;
+  /* Lock digit widths so the per-second clock / speed / cooldown updates
+     don't shift the row width and trigger flex-wrap row jitter at
+     borderline viewport widths (issue #29). */
+  font-variant-numeric: tabular-nums;
 }
 
 .status-item {

@@ -51,6 +51,23 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   const [tunnelIp, setTunnelIp] = useState(() => localStorage.getItem('locwarp.tunnel.ip') || '');
   const [tunnelPort, setTunnelPort] = useState(() => localStorage.getItem('locwarp.tunnel.port') || '');
   const [portScanning, setPortScanning] = useState(false);
+  // Saved IPs are written by useDevice.startWifiTunnel into
+  // locwarp.tunnel.savedips as a max-5 ring buffer. Surface them here so
+  // users can re-establish a tunnel to the same iPhone with one click,
+  // instead of retyping the IP after every WiFi drop / manual Stop
+  // (issue #29). Refresh whenever the dropdown is toggled or after a
+  // successful connect so the list reflects useDevice's latest write.
+  const readSavedIps = (): Array<{ ip: string; port: number; udid?: string; lastUsed: number }> => {
+    try {
+      const raw = localStorage.getItem('locwarp.tunnel.savedips') || '[]';
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((e) => e && typeof e.ip === 'string' && typeof e.port === 'number');
+    } catch { return []; }
+  };
+  const [savedIps, setSavedIps] = useState(readSavedIps);
+  const [showSavedIps, setShowSavedIps] = useState(false);
+  const refreshSavedIps = () => setSavedIps(readSavedIps());
   // Auto-attempt the saved IP/port on app launch. Default ON so users who
   // previously connected over WiFi don't have to re-click on every cold
   // start — App.tsx reads this flag once after the WS handshake settles.
@@ -652,7 +669,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                           {t('wifi.tunnel_add_another')}
                         </div>
                       )}
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 4 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 4, position: 'relative' }}>
                         <span style={{ opacity: 0.7, width: 36 }}>IP</span>
                         <input
                           type="text" className="search-input"
@@ -660,6 +677,76 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                           value={tunnelIp} onChange={(e) => setTunnelIp(e.target.value)}
                           style={{ flex: 1, fontSize: 12 }} disabled={tunnelConnecting}
                         />
+                        {savedIps.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => { refreshSavedIps(); setShowSavedIps((v) => !v); }}
+                            disabled={tunnelConnecting}
+                            title={t('wifi.recent_ips_tooltip')}
+                            style={{
+                              padding: '2px 6px', fontSize: 10, lineHeight: 1.2,
+                              background: 'rgba(108, 140, 255, 0.12)',
+                              border: '1px solid rgba(108, 140, 255, 0.35)',
+                              color: '#9ac0ff', borderRadius: 3,
+                              cursor: tunnelConnecting ? 'not-allowed' : 'pointer',
+                              display: 'inline-flex', alignItems: 'center', gap: 3,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {t('wifi.recent_ips_button', { n: savedIps.length })}
+                            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
+                              style={{ transform: showSavedIps ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+                              <polyline points="6,9 12,15 18,9" />
+                            </svg>
+                          </button>
+                        )}
+                        {showSavedIps && savedIps.length > 0 && (
+                          <div
+                            style={{
+                              position: 'absolute', top: '100%', right: 0, left: 42,
+                              marginTop: 4, zIndex: 30,
+                              background: '#2a2a2e',
+                              border: '1px solid rgba(108, 140, 255, 0.35)',
+                              borderRadius: 4,
+                              boxShadow: '0 6px 14px rgba(0,0,0,0.45)',
+                              maxHeight: 180, overflowY: 'auto',
+                            }}
+                          >
+                            {savedIps.map((entry, idx) => {
+                              const dev = devices.find((d) => d.id === entry.udid);
+                              const label = dev?.name || (entry.udid ? entry.udid.slice(0, 10) : entry.ip);
+                              return (
+                                <div
+                                  key={`${entry.ip}:${entry.port}:${idx}`}
+                                  onClick={() => {
+                                    setTunnelIp(entry.ip);
+                                    setTunnelPort(String(entry.port));
+                                    setShowSavedIps(false);
+                                  }}
+                                  style={{
+                                    padding: '6px 10px', cursor: 'pointer', fontSize: 11,
+                                    borderBottom: '1px solid #333',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                                  }}
+                                  onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e'; }}
+                                  onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+                                >
+                                  <div style={{ minWidth: 0, flex: 1 }}>
+                                    <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {label}
+                                    </div>
+                                    <div style={{ fontSize: 10, opacity: 0.55, fontFamily: 'monospace' }}>
+                                      {entry.ip}:{entry.port}
+                                    </div>
+                                  </div>
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5, flexShrink: 0 }}>
+                                    <polyline points="9 18 15 12 9 6" />
+                                  </svg>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </label>
                       <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginBottom: 6 }}>
                         <span style={{ opacity: 0.7, width: 36 }}>Port</span>
@@ -740,7 +827,12 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                             // path, so we don't need to write it here.
                             localStorage.setItem('locwarp.tunnel.ip', ip);
                             localStorage.setItem('locwarp.tunnel.port', String(port));
-                            setTunnelIp('');
+                            // Keep IP/Port in the input so the user can
+                            // re-establish the same tunnel after a WiFi
+                            // drop or manual Stop without retyping
+                            // (issue #29). Refresh the saved-IP list so
+                            // the new entry shows up in the dropdown.
+                            refreshSavedIps();
                           } catch (err: any) {
                             setTunnelError(err.message || 'WiFi tunnel failed');
                           } finally { setTunnelConnecting(false); }

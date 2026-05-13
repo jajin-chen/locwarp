@@ -208,6 +208,43 @@ export function useDevice(subscribe?: WsSubscribe) {
     ? { running: true, rsd_address: tunnels[0].rsd_address, rsd_port: tunnels[0].rsd_port }
     : { running: false }
 
+  // React to backend tunnel lifecycle events so the DeviceStatus panel
+  // doesn't keep showing a dead tunnel as connected when the iPhone
+  // leaves the WiFi network. Without this, the `tunnels` list is only
+  // mutated by explicit Start / Stop button clicks — issue #29.
+  useEffect(() => {
+    if (!subscribe) return
+    return subscribe((msg) => {
+      if (msg.type === 'tunnel_lost') {
+        const udid = msg.data?.udid
+        if (udid) {
+          setTunnels((prev) => prev.filter((tn) => tn.udid !== udid))
+          setDevices((prev) => prev.map((d) =>
+            d.udid === udid && d.connection_type === 'Network'
+              ? { ...d, is_connected: false }
+              : d,
+          ))
+        } else {
+          // No udid in the payload — fall back to a full re-query so
+          // we never leave a phantom tunnel chip in the panel.
+          wifiTunnelStatus().then((res) => {
+            setTunnels(Array.isArray(res?.tunnels) ? res.tunnels : [])
+          }).catch(() => setTunnels([]))
+        }
+      } else if (msg.type === 'tunnel_recovered') {
+        const udid = msg.data?.udid
+        const rsd_address = msg.data?.rsd_address
+        const rsd_port = msg.data?.rsd_port
+        if (udid && rsd_address && typeof rsd_port === 'number') {
+          setTunnels((prev) => {
+            const filtered = prev.filter((tn) => tn.udid !== udid)
+            return [...filtered, { udid, rsd_address, rsd_port }]
+          })
+        }
+      }
+    })
+  }, [subscribe])
+
   const startWifiTunnel = useCallback(
     async (ip: string, port = 49152, udidHint?: string) => {
       try {

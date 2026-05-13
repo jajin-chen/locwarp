@@ -159,6 +159,7 @@ function TransportButtons({
         border: '1px solid rgba(108, 140, 255, 0.22)',
         borderRadius: 10,
         boxShadow: '0 10px 26px rgba(8, 11, 22, 0.5)',
+        pointerEvents: 'auto',
       }}
     >
       {!isRunning && (
@@ -1846,6 +1847,14 @@ const MapView: React.FC<MapViewProps> = ({
           flexDirection: 'column',
           alignItems: 'flex-start',
           gap: 8,
+          // The wrapper sits as a sibling of the Leaflet container (not a
+          // child) so mousedown landing on its invisible bounding box —
+          // the gap between rows, or the area to the right of a narrow
+          // child like the lone Start button — never reaches Leaflet's
+          // drag handler and the map appears un-draggable there (issue
+          // #29). Make the wrapper transparent to pointer events and
+          // re-enable on each actual button/input.
+          pointerEvents: 'none',
         }}
       >
         {showBulkPasteOnMap && onBulkPasteOpen && (
@@ -1864,6 +1873,7 @@ const MapView: React.FC<MapViewProps> = ({
               borderRadius: 10,
               boxShadow: '0 10px 26px rgba(8, 11, 22, 0.5)',
               cursor: 'pointer',
+              pointerEvents: 'auto',
             }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1897,6 +1907,7 @@ const MapView: React.FC<MapViewProps> = ({
             padding: '7px 9px',
             boxShadow: '0 10px 32px rgba(12, 18, 40, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06) inset',
             border: '1px solid rgba(108, 140, 255, 0.15)',
+            pointerEvents: 'auto',
           }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6c8cff" strokeWidth="2" style={{ flexShrink: 0 }}>
