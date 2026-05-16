@@ -189,12 +189,21 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
   - 自訂座標(一格輸入 `lat, lng`)、JSON 全量匯出 / 匯入(合併,不覆蓋)
   - 新增時**自動抓取地名**(短名稱)與**國旗**(reverse geocode)
   - **多選刪除**、**分類顏色自訂**(10 色預設 + HEX 任意色)、搜尋、排序(名稱 / 日期 / 最後使用)
+  - **拖曳排序**(v0.2.146+):分類與項目均可手動拖曳調整顯示順序,記在 localStorage
   - 勾選「在地圖上顯示所有收藏」:地圖上會顯示所有收藏的精緻 pin(霓虹玻璃膠囊 + 國旗 + 聚合 Polaroid 卡片)
   - 「點擊也要飛 GPS」勾選控制:打勾時點座標會把 iPhone 瞬移過去(預設);取消打勾則只把畫面飛過去看看,iPhone 定位不變
   - 編輯座標時座標改變會自動刷新國旗
-- **儲存路線 + GPX 匯入 / 匯出**
+- **儲存路線**:GPX 匯入 / 匯出、JSON 全量匯出 / 匯入
+  - **路線分類**(v0.2.133+):同名儲存可選擇覆蓋既有路線
+  - **拖曳排序**(v0.2.146+):分類與路線項目可手動排序
+  - **多點 / 路線複製座標**(v0.2.151+):依目前順序輸出 `lat, lng` 一行一筆,可貼回貼上對話框或外部工具
+  - **最佳順序**(v0.2.134+):多點巡迴可一鍵跑 TSP 找最短順序,改走 BRouter 引擎避免直線估算誤差;v0.2.143+ 結果可直接帶入移動模式,toast 用使用者實際速度估時
 - **路徑點 + 路徑線**:地鐵站點風格的 S/1/2/3 標 + 動態箭頭流動線,看得出方向感
-- **地址搜尋**:預設 Nominatim(免費),可在搜尋框旁的設定切換為 **Google Geocoding API**(輸入個人 API Key,完全保存在本機)以取得更精準的中文地名與店家結果
+- **地址搜尋**:三家免費供應商任選(設定面板切換,選擇記在 localStorage)
+  - **Nominatim**(預設):OSM 官方,涵蓋全球
+  - **Photon (komoot)**(v0.2.149+):模糊搜尋 / 容錯字比 Nominatim 強
+  - **Google Geocoding API**:輸入個人 API Key,完全保存在本機,中文地名與店家結果最精準
+  - 手機網頁版會跟著電腦端的選擇走(v0.2.150+),不會卡在 Nominatim 403
 - **Cooldown 防偵測**:依跳點距離動態延遲,避免異常偵測
 - **座標格式切換**:DD / DMS / DM
 - **右鍵選單自動防出界**:選單會用 `useLayoutEffect` 測量實際尺寸,超出視窗右 / 底邊緣時自動往內推,不會被切
@@ -206,6 +215,10 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 - 模擬進行中切換模式 tab 不再清空地圖上的終點 / 路徑 / 路徑點(v0.2.90+),閒置時切換才會重置
 - 斷線自動重連 + banner 自動清除
 - **更新檢查**:啟動時從 GitHub Releases 比對版本,有新版時在底部狀態列版本號旁顯示彩色 `NEW` 膠囊提示(不再彈出對話框打斷操作),點擊版本號即跳轉到下載頁
+- **時差 chip**(狀態列,v0.2.128+):跨時區後顯示當地時間差,點開彈窗看完整時區 / 城市 / GMT 偏移;右下時鐘即時更新
+- **路線完成提示音**(v0.2.131+):路線跑完播一段音效,新增「設定」按鈕可關閉
+- **硬體加速 toggle**(v0.2.132+,設定面板):部分顯示卡驅動下關閉可解決畫面殘影 / 黑屏 ([Issue #24](https://github.com/keezxc1223/locwarp/issues/24))
+- **IP 欄位歷史**(v0.2.152+):Tunnel IP 欄位旁新增「最近」清單,可直接點選免重打
 - **Log 資料夾**按鈕(狀態列):一鍵開啟 `~/.locwarp/logs/` 資料夾,方便將 backend.log 附到 Issue
 - 右下角顯示**目前 App 版本**(有新版本時旁邊出現流動漸層 `NEW` 膠囊)
 - 介面語言:繁體中文 / English 即時切換
@@ -270,6 +283,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 | [Valhalla(FOSSGIS)](https://valhalla1.openstreetmap.de/) | backend | 不同的路徑引擎,「路徑來源」第三個選項,OSRM 全掛時可用 | 否 |
 | [BRouter](https://brouter.de/) | backend | 第四個獨立引擎,OSM 資料 + 自家路徑引擎,涵蓋全球,單車 / 健行 / 開車 profile 齊全 | 否 |
 | [Nominatim](https://nominatim.openstreetmap.org/) | backend | 正向 / 反向地理編碼、地名查詢(含 POI 智慧 short_name 選擇,預設地址搜尋來源) | 否 |
+| [Photon (komoot)](https://photon.komoot.io/) | backend | 地址搜尋第二供應商(v0.2.149+),模糊搜尋 / 容錯字比 Nominatim 強 | 否 |
 | [Google Geocoding API](https://developers.google.com/maps/documentation/geocoding) | backend | 地址搜尋備援來源(可選,免費 10K req/月);使用者於設定輸入自己的 API Key | 是(使用者自備) |
 | [Open-Meteo](https://open-meteo.com/) | **frontend(直連)** | 虛擬位置當地天氣(氣溫 + WMO weather_code);每個用戶自己 IP 各自 10000 req/day | 否 |
 | [TimezoneDB](https://timezonedb.com/) | backend | 座標 → 時區 + GMT 偏移,跨時區 toast 提醒 | 是(內建 Key) |
@@ -312,6 +326,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 - **Tile referer / OSM 替換**:OSM 的 tile 服務封鎖散佈型應用,已改用 CartoDB(OSM 資料源、CARTO 代管 CDN、免 referer)
 - **多裝置群組模式**(v0.2.0+, 三裝置上限):同步瞬移 / 同步移動,primary 不被後插裝置搶走,後插的裝置自動同步到 primary 的位置並接續 primary 正在執行的任務(fanout)
 - **Idle-gated 地理查詢**:reverse geocode + timezone + 天氣僅在 idle / teleport / disconnect 狀態且位置變動 ≥ 100m 才觸發,避免跑動態模式時 HTTP 對 DVT 頻道產生 contention
+- **並行查詢地理資訊**(v0.2.147+):國旗 / 地標 / 時差 / 天氣同時打,單一服務慢時其他資訊不再跟著卡住
 - **前端天氣直連**:`lookupWeather()` 直接從 renderer 打 Open-Meteo,每個用戶自己 IP 各自計算配額,不透過 backend proxy 避免全體用戶共享一個來源 IP 爆量
 - **座標國旗自動補全**:新增 / 編輯座標時 reverse geocode 帶出 country_code 並渲染為國旗,座標變動時自動刷新
 

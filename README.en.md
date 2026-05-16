@@ -189,12 +189,21 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
   - Custom coords (single-field `lat, lng` input), JSON full export / import (merge, no overwrite)
   - Auto-fills **place name** (short) and **country flag** on add (reverse geocode)
   - **Multi-select delete**, **per-category color picker** (10 presets + arbitrary HEX), search, sort (name / date / last-used)
+  - **Drag-and-drop reorder** (v0.2.146+): both categories and individual items can be hand-ordered, persisted to localStorage
   - "Show all on map" toggle: renders every bookmark as a neon-glass capsule pin (with flag) plus Polaroid-style cluster cards when they overlap
   - "Click also flies GPS" toggle: when ticked, clicking a bookmark teleports the iPhone (default); when unticked, only the map view pans there and the iPhone GPS stays put
   - Editing coordinates re-fetches the country flag automatically
-- **Saved routes** with **GPX import / export**
+- **Saved routes**: GPX import / export, JSON full export / import
+  - **Route categories** (v0.2.133+): saving with an existing name offers to overwrite the previous route
+  - **Drag-and-drop reorder** (v0.2.146+): both categories and route items can be hand-ordered
+  - **Copy coordinates** (v0.2.151+): multi-stop / route panels output `lat, lng` one-per-line in current order, pasteable back into the bulk-paste dialog or any external tool
+  - **Optimal order** (v0.2.134+): multi-stop runs a TSP pass through the BRouter engine (no more straight-line distance estimates); v0.2.143+ feeds the result straight into the movement modes, with ETA toasts using the user's actual configured speed
 - **Waypoint + route line**: subway-station style S/1/2/3 markers + animated flowing-arrow polyline for clear direction sense
-- **Address search**: Nominatim by default (free); you can switch to **Google Geocoding API** in the settings panel (paste your own API key, stored locally only) for more accurate Chinese place names and POI results
+- **Address search**: three free providers, swap in the settings panel (selection persisted to localStorage)
+  - **Nominatim** (default): OSM official, global coverage
+  - **Photon (komoot)** (v0.2.149+): fuzzy / typo-tolerant matching beats Nominatim on partial input
+  - **Google Geocoding API**: paste your own API key (stored locally only); best Chinese place names and POI accuracy
+  - The phone web control follows the desktop's provider choice (v0.2.150+), no more getting stuck on Nominatim 403
 - **Cooldown anti-detection**: dynamic delay based on teleport distance
 - **Coordinate format switching**: DD / DMS / DM
 - **Right-click menu auto-clamps**: `useLayoutEffect` measures the real menu size and nudges it inward when it would overflow the right / bottom edge
@@ -206,6 +215,10 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 - Tapping a different mode tab during an active sim no longer wipes the live destination / route / waypoints from the map (v0.2.90+); switching while idle still resets to a clean slate
 - Auto-reconnect on disconnect + banner auto-dismiss
 - **Update check**: at startup, compares against the latest GitHub Release. When a newer version exists, a colourful animated `NEW` pill appears next to the version number in the bottom status bar (no popup interrupting your workflow); clicking the version takes you to the download page
+- **Timezone chip** (status bar, v0.2.128+): displays local-vs-here offset after crossing a timezone; tap to open a popup with full timezone / city / GMT-offset details. Bottom-right clock ticks live.
+- **Route completion sound** (v0.2.131+): plays a short cue when a route finishes; new "Settings" button next to it can mute
+- **Hardware acceleration toggle** (v0.2.132+, settings panel): on some GPU drivers, turning it off fixes ghosting / black-screen issues ([Issue #24](https://github.com/keezxc1223/locwarp/issues/24))
+- **IP field history** (v0.2.152+): tunnel IP field has a "Recent" picker next to it, click to re-fill instead of retyping
 - **Open Log Folder** button (status bar): opens `~/.locwarp/logs/` so you can attach `backend.log` to bug reports
 - Current app version shown in the bottom-right corner (with a flowing-gradient `NEW` pill beside it when an update is available)
 - UI language: 繁體中文 / English, switchable on the fly
@@ -269,6 +282,7 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 | [Valhalla (FOSSGIS)](https://valhalla1.openstreetmap.de/) | backend | Different routing engine, third option in the routing-source picker; useful when OSRM is down | No |
 | [BRouter](https://brouter.de/) | backend | Fourth independent engine, OSM data + custom routing engine, full bike / hike / car profiles | No |
 | [Nominatim](https://nominatim.openstreetmap.org/) | backend | Default forward / reverse geocoding, place-name lookup (with POI-aware short_name picker) | No |
+| [Photon (komoot)](https://photon.komoot.io/) | backend | Second address-search provider (v0.2.149+), better fuzzy / typo-tolerant matching than Nominatim | No |
 | [Google Geocoding API](https://developers.google.com/maps/documentation/geocoding) | backend | Optional secondary geocoding source (10K req/month free); user supplies their own API key in settings | Yes (user-supplied) |
 | [Open-Meteo](https://open-meteo.com/) | **frontend (direct)** | Current weather at virtual location (temp + WMO weather_code); each user has their own 10,000 req/day per IP | No |
 | [TimezoneDB](https://timezonedb.com/) | backend | Coords → timezone + GMT offset, cross-zone toast | Yes (bundled) |
@@ -311,6 +325,7 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 - **Tile referer / OSM swap**: OSM blocks distributable apps on their public tiles, so CartoDB (OSM data hosted on CARTO's CDN, no referer needed) is the default
 - **Multi-device group mode** (v0.2.0+, up to 3 devices): synchronized teleport / movement, primary is never hijacked by a late-plugged device, late joiners sync to the primary's position and auto-resume whatever sim it's running (fanout)
 - **Idle-gated geocoding**: reverse geocode + timezone + weather lookups only fire when state is idle / teleport / disconnect AND position moved ≥ 100m; prevents HTTP contending with the DVT channel during active sim
+- **Parallel geo lookups** (v0.2.147+): flag / place name / timezone / weather fire concurrently; a slow single service no longer blocks the others
 - **Frontend-direct weather**: `lookupWeather()` calls Open-Meteo from the renderer so each user consumes their own IP's quota, never proxied through backend (would share one source IP across all users)
 - **Auto country flag**: bookmark add / edit triggers reverse geocode to populate `country_code`; re-fetched automatically when coordinates change
 
