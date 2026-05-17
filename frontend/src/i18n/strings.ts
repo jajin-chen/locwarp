@@ -422,6 +422,9 @@ export const STRINGS = {
   'eta.remaining': { zh: '剩餘', en: 'Remaining' },
   'eta.eta': { zh: '預計到達', en: 'ETA' },
   'eta.traveled': { zh: '已行', en: 'Traveled' },
+  'eta.next_stop': { zh: '下站', en: 'Next' },
+  'eta.lap': { zh: '整圈', en: 'Lap' },
+  'eta.trip': { zh: '全程', en: 'Trip' },
   'eta.pause_countdown': { zh: '到點暫停中 · 剩餘 {n}s', en: 'Paused at waypoint · {n}s left' },
 
   // ── Joystick ─────────────────────────────────

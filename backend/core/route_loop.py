@@ -157,6 +157,11 @@ class RouteLooper:
             await engine._emit("pause_countdown_end", {"source": "loop"})
             return False
 
+        # Grand-total lap distance, used to drive a whole-lap ETA in the EtaBar
+        # (the per-leg distance set by _move_along_route otherwise resets the
+        # countdown at every waypoint).
+        full_total_distance = float(route_data.get("distance") or 0.0)
+
         first_iteration = True
         # Loop until stopped. Each iteration walks one full lap by routing
         # leg-by-leg between user waypoints (mirrors multi_stop) so we can
@@ -172,6 +177,11 @@ class RouteLooper:
             )
 
             speed_profile = _pick_profile()
+
+            # Tracks meters already walked this lap so we can compute the
+            # leftover whole-lap distance handed to _route_offset_remaining
+            # before each leg.
+            completed_distance = 0.0
 
             # Walk station-by-station around the closed loop.
             # closed_waypoints already has waypoints[0] appended at the end so
@@ -210,8 +220,24 @@ class RouteLooper:
                     engine=route_engine,
                 )
                 leg_coords = [Coordinate(lat=pt[0], lng=pt[1]) for pt in leg_route["coords"]]
+                leg_distance = float(leg_route.get("distance") or 0.0)
+                # Whole-lap ETA: feed _move_along_route the distance left in
+                # *future* legs so the EtaBar reflects "time to close the lap"
+                # rather than "time to next waypoint".
+                if full_total_distance > 0:
+                    future_legs = max(
+                        full_total_distance - completed_distance - leg_distance,
+                        0.0,
+                    )
+                else:
+                    future_legs = 0.0
+                engine._route_offset_remaining = future_legs
+
                 if len(leg_coords) >= 2:
                     await engine._move_along_route(leg_coords, speed_profile)
+
+                completed_distance += leg_distance
+                engine._route_offset_remaining = 0.0
 
                 if engine._stop_event.is_set():
                     break
@@ -255,6 +281,7 @@ class RouteLooper:
             # the rest stops; jumping straight into the next lap keeps the
             # behaviour symmetric with what the user expects.
 
+        engine._route_offset_remaining = 0.0
         if engine.state == SimulationState.LOOPING:
             engine.state = SimulationState.IDLE
             await engine._emit("state_change", {"state": engine.state.value})

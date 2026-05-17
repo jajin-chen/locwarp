@@ -5,9 +5,11 @@ import type { RuntimesMap } from '../hooks/useSimulation';
 interface EtaBarProps {
   state: string;
   progress: number; // 0 to 1
-  remainingDistance: number; // meters
+  remainingDistance: number; // meters — full lap / trip
   traveledDistance: number; // meters
-  eta: number; // seconds remaining
+  eta: number; // seconds remaining for full lap / trip
+  legRemainingDistance?: number; // meters to next waypoint (multi_stop / loop)
+  legEta?: number; // seconds to next waypoint
   runtimes?: RuntimesMap;
 }
 
@@ -36,6 +38,8 @@ const EtaBar: React.FC<EtaBarProps> = ({
   remainingDistance,
   traveledDistance,
   eta,
+  legRemainingDistance,
+  legEta,
   runtimes,
 }) => {
   const t = useT();
@@ -64,6 +68,45 @@ const EtaBar: React.FC<EtaBarProps> = ({
     : traveledDistance;
 
   const percent = Math.min(Math.max(aggProgress * 100, 0), 100);
+
+  // The "next stop" pair only shows up when the per-leg countdown is
+  // meaningfully shorter than the whole lap / trip — i.e. multi_stop or
+  // route_loop with legs still queued after the current one. Single-leg
+  // modes (navigate / random_walk) emit equal values, and in that case we
+  // collapse back to the original layout so the bar stays unchanged.
+  const showLegPair = !isGroup
+    && legRemainingDistance != null
+    && legEta != null
+    && aggRemaining - legRemainingDistance > 1;
+
+  const separator = (
+    <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.15)' }} />
+  );
+
+  const clockIcon = (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.6 }}>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12,6 12,12 16,14" />
+    </svg>
+  );
+  const arrowIcon = (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.6 }}>
+      <path d="M5 12h14" />
+      <path d="M12 5l7 7-7 7" />
+    </svg>
+  );
+  const traveledIcon = (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.6 }}>
+      <polyline points="22,12 18,12 15,21 9,3 6,12 2,12" />
+    </svg>
+  );
+
+  // Pick the label for the "whole" pair. Differs by mode so the user knows
+  // whether the total is "lap" (close the loop) or "trip" (reach the last
+  // waypoint). Falls back to the original "remaining" label otherwise.
+  const totalLabel = state === 'looping'
+    ? t('eta.lap')
+    : (state === 'multi_stop' ? t('eta.trip') : t('eta.remaining'));
 
   return (
     <div
@@ -119,44 +162,52 @@ const EtaBar: React.FC<EtaBarProps> = ({
         {percent.toFixed(0)}%
       </span>
 
-      {/* Separator */}
-      <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.15)' }} />
+      {separator}
 
-      {/* Remaining distance */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.6 }}>
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12,6 12,12 16,14" />
-        </svg>
-        <span>{t('eta.remaining')} {formatDistance(aggRemaining)}</span>
-      </div>
+      {showLegPair ? (
+        <>
+          {/* Next-stop pair: distance · ETA */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {clockIcon}
+            <span>
+              {t('eta.next_stop')} {formatDistance(legRemainingDistance!)} · {formatTime(legEta!)}
+            </span>
+          </div>
+          {separator}
+          {/* Whole-lap / trip pair: distance · ETA */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {arrowIcon}
+            <span>
+              {totalLabel} {formatDistance(aggRemaining)} · {formatTime(aggEta)}
+            </span>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Single pair: remaining distance + ETA (navigate / random_walk) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {clockIcon}
+            <span>{t('eta.remaining')} {formatDistance(aggRemaining)}</span>
+          </div>
+          {separator}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {arrowIcon}
+            <span>{t('eta.eta')} {formatTime(aggEta)}</span>
+          </div>
+        </>
+      )}
 
-      {/* Separator */}
-      <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.15)' }} />
-
-      {/* ETA */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.6 }}>
-          <path d="M5 12h14" />
-          <path d="M12 5l7 7-7 7" />
-        </svg>
-        <span>{t('eta.eta')} {formatTime(aggEta)}</span>
-      </div>
-
-      {/* Separator */}
-      <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.15)' }} />
+      {separator}
 
       {/* Traveled distance */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, opacity: 0.7 }}>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.6 }}>
-          <polyline points="22,12 18,12 15,21 9,3 6,12 2,12" />
-        </svg>
+        {traveledIcon}
         <span>{t('eta.traveled')} {formatDistance(aggTraveled)}</span>
       </div>
 
       {isGroup && (
         <>
-          <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.15)' }} />
+          {separator}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, opacity: 0.85 }}>
             <span style={{ opacity: 0.6 }}>{t('eta.group_progress')}</span>
             {activeRuntimes.slice(0, 2).map((r, i) => (

@@ -31,6 +31,11 @@ export interface SimulationStatus {
   state?: string
   distance_remaining?: number
   distance_traveled?: number
+  // Per-leg countdown (route_loop / multi_stop). Differs from
+  // distance_remaining when there are still legs queued after this one,
+  // so the EtaBar can show "next stop" alongside "whole lap/trip".
+  leg_distance_remaining?: number
+  leg_eta_seconds?: number
 }
 
 export type WsSubscribe = (fn: (m: WsMessage) => void) => () => void
@@ -346,11 +351,15 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         {
           const dr = wsMessage.data.distance_remaining
           const dt = wsMessage.data.distance_traveled
-          if (dr != null || dt != null) {
+          const legDr = wsMessage.data.leg_distance_remaining
+          const legEta = wsMessage.data.leg_eta_seconds
+          if (dr != null || dt != null || legDr != null || legEta != null) {
             setStatus((prev) => ({
               ...prev,
               ...(dr != null ? { distance_remaining: dr } : {}),
               ...(dt != null ? { distance_traveled: dt } : {}),
+              ...(legDr != null ? { leg_distance_remaining: legDr } : {}),
+              ...(legEta != null ? { leg_eta_seconds: legEta } : {}),
             }))
           }
         }
