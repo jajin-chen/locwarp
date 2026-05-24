@@ -1570,6 +1570,8 @@ const App: React.FC = () => {
           currentWaypointsCount={sim.waypoints.length}
           straightLine={sim.straightLine}
           onStraightLineChange={sim.setStraightLine}
+          keepWaypoints={sim.keepWaypoints}
+          onKeepWaypointsChange={sim.setKeepWaypoints}
           routeEngine={sim.routeEngine}
           onRouteEngineChange={sim.setRouteEngine}
           clickToAddWaypoint={clickToAddWaypoint}

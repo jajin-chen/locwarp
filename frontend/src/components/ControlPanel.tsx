@@ -134,6 +134,8 @@ interface ControlPanelProps {
   currentWaypointsCount?: number;
   straightLine?: boolean;
   onStraightLineChange?: (v: boolean) => void;
+  keepWaypoints?: boolean;
+  onKeepWaypointsChange?: (v: boolean) => void;
   routeEngine?: 'osrm' | 'osrm_fossgis' | 'valhalla' | 'brouter';
   onRouteEngineChange?: (v: 'osrm' | 'osrm_fossgis' | 'valhalla' | 'brouter') => void;
   clickToAddWaypoint?: boolean;
@@ -314,6 +316,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   currentWaypointsCount = 0,
   straightLine = false,
   onStraightLineChange,
+  keepWaypoints = false,
+  onKeepWaypointsChange,
   routeEngine = 'osrm',
   onRouteEngineChange,
   clickToAddWaypoint = false,
@@ -513,6 +517,30 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 <span className="lw-checkbox-box"></span>
                 <span className="lw-checkbox-label" style={{ lineHeight: 1.15 }}>
                   {t('panel.click_waypoint')}
+                </span>
+              </label>
+            )}
+            {onKeepWaypointsChange && (simMode === SimMode.Loop || simMode === SimMode.MultiStop) && (
+              <label
+                className="lw-checkbox"
+                title={t('panel.keep_waypoints_tooltip')}
+                style={{
+                  gridColumn: '1 / -1',
+                  padding: '6px 10px',
+                  background: keepWaypoints ? 'rgba(108, 140, 255, 0.10)' : 'transparent',
+                  border: `1px solid ${keepWaypoints ? 'rgba(108, 140, 255, 0.32)' : 'transparent'}`,
+                  borderRadius: 6,
+                  fontSize: 11,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={keepWaypoints}
+                  onChange={(e) => onKeepWaypointsChange(e.target.checked)}
+                />
+                <span className="lw-checkbox-box"></span>
+                <span className="lw-checkbox-label" style={{ lineHeight: 1.15 }}>
+                  {t('panel.keep_waypoints')}
                 </span>
               </label>
             )}

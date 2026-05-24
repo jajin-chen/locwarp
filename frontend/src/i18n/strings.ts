@@ -490,6 +490,8 @@ export const STRINGS = {
   'panel.route_engine_brouter_desc': { zh: 'BRouter(brouter.de)。第四個獨立引擎,個人營運多年穩定,涵蓋全球,單車 / 健行 / 開車 profile 齊全。', en: 'BRouter (brouter.de). A fourth independent engine, run by a single maintainer for years, global coverage, with full bike / hike / car profiles.' },
   'panel.click_waypoint': { zh: '左鍵設置路徑點', en: 'Left-click to add waypoints' },
   'panel.click_waypoint_tooltip': { zh: '打開後在地圖上點左鍵即新增路徑點', en: 'When on, left-click the map to append a waypoint' },
+  'panel.keep_waypoints': { zh: '切換模式保留路徑點', en: 'Keep path points when switching modes' },
+  'panel.keep_waypoints_tooltip': { zh: '打開後切換模式時不清除已設置的路徑點與路線,可在多點與巡迴間沿用同一條路徑', en: 'When on, switching modes keeps the placed path points and route instead of clearing them' },
   'panel.jump_mode': { zh: '點對點跳躍', en: 'Point-to-point jump' },
   'panel.jump_mode_tooltip': { zh: '不走路、直接逐點瞬移,每點停留設定的秒數,適合採果掃點', en: 'Skip walking and teleport stop-to-stop with a fixed dwell at each point' },
   'panel.jump_interval': { zh: '間隔', en: 'Interval' },

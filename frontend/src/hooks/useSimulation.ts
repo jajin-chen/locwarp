@@ -147,6 +147,19 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     try { localStorage.setItem('locwarp.straight_line', v ? '1' : '0') } catch { /* ignore */ }
   }
 
+  // "Keep path points" toggle. When on, switching modes does NOT clear the
+  // placed waypoints / route line, so the user can carry the same path
+  // between multi-stop and route-loop modes. Persisted in localStorage.
+  const [keepWaypoints, setKeepWaypointsRaw] = useState<boolean>(() => {
+    try { return localStorage.getItem('locwarp.keep_waypoints') === '1' } catch { return false }
+  })
+  const keepWaypointsRef = useRef(keepWaypoints)
+  useEffect(() => { keepWaypointsRef.current = keepWaypoints }, [keepWaypoints])
+  const setKeepWaypoints = (v: boolean) => {
+    setKeepWaypointsRaw(v)
+    try { localStorage.setItem('locwarp.keep_waypoints', v ? '1' : '0') } catch { /* ignore */ }
+  }
+
   // Random-walk circle centre mode. "fixed" pins the circle to the start
   // point (bounded walk); "follow" re-centres on the current position each
   // leg (free wander). Persisted in localStorage.
@@ -588,10 +601,15 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     _setMode((prev) => {
       if (prev !== next && !statusRef.current.running && !statusRef.current.paused) {
         setDestination(null)
-        setRoutePath([])
-        setWaypoints([])
         setProgress(0)
         setEta(null)
+        // When "keep path points" is on, retain the placed waypoints + route
+        // line across mode switches so the user can reuse the same path in
+        // another mode. Otherwise clear them as before.
+        if (!keepWaypointsRef.current) {
+          setRoutePath([])
+          setWaypoints([])
+        }
       }
       return next
     })
@@ -991,6 +1009,8 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     setSpeedMaxKmh,
     straightLine,
     setStraightLine,
+    keepWaypoints,
+    setKeepWaypoints,
     randomWalkCenterMode,
     setRandomWalkCenterMode,
     forwardWalk,
