@@ -1,4 +1,4 @@
-pymobiledevice3>=9.9.0
+pymobiledevice3>=9.15.1
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 websockets>=12.0
