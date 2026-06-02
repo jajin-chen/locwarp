@@ -45,8 +45,13 @@ export function useDevice(subscribe?: WsSubscribe) {
         if (udids.length === 0) {
           setConnectedDevice(null)
           setDevices((prev) => prev.map((d) => ({ ...d, is_connected: false })))
+          // Also clear the WiFi tunnel list so the 連線 page doesn't keep
+          // showing a device that was just disconnected (issue: right-click
+          // disconnect left the tunnel chip showing "still connected").
+          setTunnels([])
         } else {
           setDevices((prev) => prev.map((d) => udids.includes(d.udid) ? { ...d, is_connected: false } : d))
+          setTunnels((prev) => prev.filter((tn) => !udids.includes(tn.udid)))
           // DON'T null out connectedDevice here. The authoritative refresh
           // below (listDevices) will pick a surviving device to promote
           // so downstream UI (MapView / StatusBar) doesn't flash
@@ -149,7 +154,16 @@ export function useDevice(subscribe?: WsSubscribe) {
         const refreshed = await listDevices()
         const list: DeviceInfo[] = Array.isArray(refreshed) ? refreshed : []
         setDevices(list)
-        setConnectedDevice(null)
+        // Only the named device was disconnected — DON'T blanket-null the
+        // active device. In dual/triple mode that made the whole UI flip to
+        // "NO device" even though the other iPhones were still connected.
+        // Keep the current active device if it survived; otherwise promote
+        // any remaining connected one; null only when nothing is left.
+        setConnectedDevice((prev) => {
+          if (prev && prev.udid !== udid && list.some((d) => d.udid === prev.udid && d.is_connected)) return prev
+          return list.find((d) => d.is_connected) ?? null
+        })
+        setTunnels((prev) => prev.filter((tn) => tn.udid !== udid))
       } catch (err) {
         console.error('Failed to disconnect device:', err)
         throw err

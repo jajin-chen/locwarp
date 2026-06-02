@@ -573,33 +573,8 @@ const MapView: React.FC<MapViewProps> = ({
       followBtnRef.current = btn;
     }
 
-    // Library (座標 / 路線) shortcut — fourth leaflet-bar. Tapping this
-    // opens the library panel without having to scroll down the left
-    // ControlPanel. Gold-pulsing star to catch the eye (animation
-    // auto-disabled under prefers-reduced-motion).
-    if (topLeftEl) {
-      const wrapper = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
-      const btn = L.DomUtil.create('button', 'locwarp-library-btn', wrapper) as HTMLButtonElement;
-      btn.type = 'button';
-      btn.title = tRef.current('map.library_open');
-      btn.setAttribute('role', 'button');
-      btn.style.cssText = [
-        'width: 30px', 'height: 30px', 'display: flex',
-        'align-items: center', 'justify-content: center',
-        'padding: 0', 'margin: 0', 'cursor: pointer',
-        'background: var(--bg-surface, #2a2f3a)',
-        'color: #ffd95b', 'border: none', 'border-radius: 0',
-      ].join(';');
-      btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 2l2.5 6.5L22 9l-5.5 5.5L18 22l-6-3.5L6 22l1.5-7.5L2 9l7.5-.5z"/>
-      </svg>`;
-      L.DomEvent.disableClickPropagation(wrapper);
-      L.DomEvent.on(btn, 'click', (e: Event) => {
-        e.preventDefault();
-        openLibraryHandlerRef.current();
-      });
-      topLeftEl.appendChild(wrapper);
-    }
+    // (Library shortcut star removed — the top navigation bar's 收藏 tab
+    // is now the single entry point for the library panel; issue #34.)
 
     // S2 cell grid toggle — fifth leaflet-bar. Tap to overlay an Ingress /
     // Pokemon GO style cell grid at the user-chosen level (default 17).

@@ -63,7 +63,7 @@ export function DeviceChip({ letter, device, runtime, onDisconnect, onRestoreOne
   }[kind]
 
   const accent = DEVICE_COLORS[letter]
-  const shortName = (device.name || 'iPhone').slice(0, 14)
+  const fullName = device.name || 'iPhone'
 
   return (
     <>
@@ -84,7 +84,7 @@ export function DeviceChip({ letter, device, runtime, onDisconnect, onRestoreOne
           fontSize: 11,
           color: 'rgba(255,255,255,0.9)',
           cursor: 'context-menu',
-          maxWidth: 160,
+          maxWidth: '100%',
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -101,7 +101,7 @@ export function DeviceChip({ letter, device, runtime, onDisconnect, onRestoreOne
           }}
         />
         <span style={{ fontWeight: 600, color: accent }}>{letter}</span>
-        <span style={{ opacity: 0.85, overflow: 'hidden', textOverflow: 'ellipsis' }}>· {shortName}</span>
+        <span style={{ opacity: 0.85, overflow: 'hidden', textOverflow: 'ellipsis' }}>· {fullName}</span>
         <span style={{ opacity: 0.6, marginLeft: 2 }}>· {label}</span>
       </div>
       {menu && createPortal(

@@ -39,7 +39,7 @@ export const STRINGS = {
   'status.open_log_failed': { zh: '無法開啟 log', en: 'Failed to open log' },
   'status.copy_coord': { zh: '複製座標', en: 'Copy coordinates' },
   'status.restore_all': { zh: '全部還原', en: 'Restore all' },
-  'status.set_initial': { zh: '預設畫面', en: 'Default view' },
+  'status.set_initial': { zh: '起始地圖位置', en: 'Startup map view' },
   'status.locate_pc': { zh: '定位電腦', en: 'Locate PC' },
   'status.locate_pc_tooltip': { zh: '抓取此電腦的目前位置 (Wi-Fi 定位, 會有誤差)', en: 'Detect this PC location via Wi-Fi positioning (some inaccuracy expected)' },
   'status.locate_pc_dialog_title': { zh: '定位到電腦當前位置', en: 'Locate to PC current position' },
@@ -56,8 +56,8 @@ export const STRINGS = {
   'status.set_initial_tooltip': { zh: '僅調整 LocWarp 啟動時地圖的預設檢視中心, 不會對 iPhone 進行任何虛擬定位操作', en: "Sets the map's default view center on launch only. Does not modify the iPhone's virtual GPS." },
   'status.set_initial_prompt': { zh: '設定啟動時地圖預設顯示的座標 (格式 lat, lng,例如 25.033, 121.564)。此設定僅影響地圖檢視, 不會變更裝置定位。留空可清除自訂值。', en: 'Set the map\'s default view on launch (format: lat, lng, e.g. 25.033, 121.564). View-only; the device\'s GPS is not affected. Leave blank to clear.' },
   'status.set_initial_invalid': { zh: '座標格式錯誤,請輸入「緯度, 經度」,範圍 lat ±90 / lng ±180', en: 'Invalid format. Use "lat, lng" with lat in ±90 and lng in ±180.' },
-  'status.set_initial_saved': { zh: '預設畫面中心已儲存:{lat}, {lng} (下次啟動生效, 不影響目前定位)', en: 'Default view saved: {lat}, {lng} (applies on next launch; current location unchanged)' },
-  'status.set_initial_cleared': { zh: '已清除自訂畫面中心,下次啟動回到預設值', en: 'Custom default view cleared. Next launch uses the built-in default.' },
+  'status.set_initial_saved': { zh: '起始地圖位置已儲存:{lat}, {lng} (下次啟動生效, 不影響目前定位)', en: 'Startup map view saved: {lat}, {lng} (applies on next launch; current location unchanged)' },
+  'status.set_initial_cleared': { zh: '已清除自訂起始地圖位置,下次啟動回到預設值', en: 'Custom startup map view cleared. Next launch uses the built-in default.' },
   'status.avatar': { zh: '地圖釘', en: 'Map pin' },
   'status.avatar_tooltip': { zh: '更換地圖釘 (使用者頭像)', en: 'Change map pin / user avatar' },
 
@@ -547,6 +547,20 @@ export const STRINGS = {
   // ── Toasts extra ─────────────────────────────
   'toast.no_position_random': { zh: '尚未取得目前位置,無法產生隨機路徑點', en: 'No current position, cannot generate random waypoints' },
   'toast.route_optimized': { zh: '路線已最佳化', en: 'Route optimized' },
+  // First-level navigation rail (iOS-style sidebar tabs).
+  'nav.navigate': { zh: '導航', en: 'Navigate' },
+  'nav.connection': { zh: '連線', en: 'Connection' },
+  'nav.library': { zh: '收藏', en: 'Library' },
+  'nav.settings': { zh: '設定', en: 'Settings' },
+  // Settings page groups + rows.
+  'settings.group_general': { zh: '一般', en: 'General' },
+  'settings.group_app': { zh: '應用程式', en: 'Application' },
+  'settings.show_pins_label': { zh: '在地圖上顯示座標釘', en: 'Show bookmark pins on map' },
+  'settings.language': { zh: '語言', en: 'Language' },
+  'settings.version': { zh: '版本', en: 'Version' },
+  'settings.check_update': { zh: '檢查更新', en: 'Check for updates' },
+  'settings.up_to_date': { zh: '已是最新版', en: 'Up to date' },
+  'settings.update_available': { zh: '有新版本', en: 'Update available' },
   // Settings panel opened from the bottom status bar.
   'status.settings': { zh: '設定', en: 'Settings' },
   'status.settings_tooltip': { zh: '開啟 LocWarp 設定面板', en: 'Open LocWarp settings' },

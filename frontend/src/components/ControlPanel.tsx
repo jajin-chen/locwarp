@@ -393,6 +393,27 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     window.addEventListener('mouseup', onUp);
   };
 
+  // Keep the floating library window inside the viewport. Its position is
+  // remembered across opens, so without this a window that was dragged to
+  // the right edge (or opened on a wide window) ends up partly or fully
+  // off-screen and unreachable after the window is shrunk (issue #34).
+  // Re-clamp on open and on every resize.
+  useEffect(() => {
+    if (!libraryOpen) return;
+    const clamp = () => {
+      // Mirror the CSS clamp(280px, 34vw, 440px) so the reposition math
+      // matches the rendered width.
+      const w = Math.max(280, Math.min(window.innerWidth * 0.34, 440));
+      setLibraryPos((p) => ({
+        x: Math.min(Math.max(8, p.x), Math.max(8, window.innerWidth - w - 8)),
+        y: Math.min(Math.max(8, p.y), Math.max(8, window.innerHeight - 80)),
+      }));
+    };
+    clamp();
+    window.addEventListener('resize', clamp);
+    return () => window.removeEventListener('resize', clamp);
+  }, [libraryOpen]);
+
   const toggleSection = (key: keyof SectionState) => {
     setSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
@@ -1026,7 +1047,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           className="anim-scale-in"
           style={{
             position: 'fixed', left: libraryPos.x, top: libraryPos.y, zIndex: 800,
-            width: 'min(420px, 90vw)', maxHeight: '75vh',
+            // Scale with the window: shrinks toward 280px on a small app
+            // window, caps at 440px on a large one (issue #34).
+            width: 'clamp(280px, 34vw, 440px)', maxHeight: '72vh',
             background: 'rgba(26, 29, 39, 0.96)',
             backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
             border: '1px solid rgba(108, 140, 255, 0.18)', borderRadius: 12,
@@ -1068,7 +1091,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 title={t('panel.close')}
               >X</button>
             </div>
-            <div style={{ padding: 12, overflowY: 'auto', flex: 1 }}>
+            <div style={{ padding: 12, overflowY: 'auto', flex: 1, minWidth: 0 }}>
               {libraryTab === 'bookmarks' ? (
                 <BookmarkList
                   bookmarks={bookmarks}

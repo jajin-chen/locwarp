@@ -174,6 +174,103 @@ textarea:focus {
   gap: 8px;
 }
 
+/* First-level navigation — a horizontal tab bar across the top of the
+   sidebar (issue #34). Full width so the content below keeps its width. */
+.nav-rail {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  padding: 5px 6px;
+  background: rgba(18, 21, 32, 0.72);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(108, 140, 255, 0.18);
+  border-radius: 16px;
+  box-shadow:
+    0 8px 24px rgba(12, 18, 40, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.nav-rail-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 7px 2px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.nav-rail-btn:hover { background: rgba(108, 140, 255, 0.10); color: #c7d2ff; }
+.nav-rail-btn.active { background: rgba(108, 140, 255, 0.20); color: #9ac0ff; }
+.nav-rail-icon svg { width: 19px; height: 19px; display: block; }
+.nav-rail-label { font-size: 10px; line-height: 1; letter-spacing: 0.02em; }
+
+/* iOS-style settings page (grouped inset cards) */
+.settings-page { padding: 4px 4px 16px; }
+.settings-page-title {
+  font-size: 22px; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--text-primary); padding: 8px 6px 12px;
+}
+.ios-group-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; color: rgba(255, 255, 255, 0.4);
+  padding: 14px 12px 6px;
+}
+.ios-card {
+  background: rgba(28, 31, 44, 0.66);
+  border: 1px solid rgba(108, 140, 255, 0.16);
+  border-radius: 14px;
+  overflow: hidden;
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+.ios-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; width: 100%;
+  padding: 11px 13px; font-size: 12px; color: var(--text-primary);
+  background: transparent; border: none; text-align: left;
+}
+.ios-row + .ios-row { border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.ios-row-tap { cursor: pointer; }
+.ios-row-tap:hover { background: rgba(108, 140, 255, 0.08); }
+/* Label takes the remaining width and may wrap; the control on the right
+   never gets overlapped (long EN labels like "Route completion alert
+   sound"). */
+.ios-row-label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.ios-row-value { display: inline-flex; align-items: center; gap: 6px; color: rgba(255, 255, 255, 0.5); font-size: 12px; white-space: nowrap; flex-shrink: 0; }
+.ios-row-sub { font-size: 12px; color: #a8b8ff; flex: 1 1 auto; min-width: 0; }
+.ios-row-control { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.ios-help {
+  width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%; cursor: help; line-height: 1; flex-shrink: 0;
+}
+.ios-pill {
+  padding: 4px 10px; font-size: 11px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  background: rgba(108, 140, 255, 0.15); color: #a8b8ff;
+  border: 1px solid rgba(108, 140, 255, 0.4); border-radius: 8px;
+}
+.ios-switch {
+  position: relative; width: 42px; height: 24px; flex-shrink: 0;
+  border-radius: 24px; border: none; cursor: pointer; padding: 0;
+  background: rgba(120, 120, 140, 0.4); transition: background 0.2s;
+}
+.ios-switch.on { background: #34c759; }
+.ios-switch-knob {
+  position: absolute; top: 2px; left: 2px; width: 20px; height: 20px;
+  border-radius: 50%; background: #fff; transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.ios-switch.on .ios-switch-knob { transform: translateX(18px); }
+
 .sidebar-header {
   padding: 12px 14px;
   display: flex;

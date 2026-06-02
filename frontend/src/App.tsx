@@ -14,6 +14,7 @@ import { parseCoord } from './utils/coords'
 import MapView from './components/MapView'
 import ControlPanel from './components/ControlPanel'
 import DeviceStatus from './components/DeviceStatus'
+import SettingsPage from './components/SettingsPage'
 import JoystickPad from './components/JoystickPad'
 import EtaBar from './components/EtaBar'
 import PauseControl from './components/PauseControl'
@@ -74,6 +75,10 @@ const App: React.FC = () => {
   // ControlPanel reacts on change via useEffect, so we don't have to
   // lift the whole libraryOpen/libraryTab state here.
   const [openLibraryToken, setOpenLibraryToken] = useState(0)
+  // First-level navigation rail (iOS-style). Only one page's content shows
+  // at a time so the sidebar isn't an endless scroll. 'library' is an
+  // action (opens the floating window) rather than a swapped page.
+  const [activePage, setActivePage] = useState<'nav' | 'connection' | 'settings'>('nav')
   const [cooldown, setCooldown] = useState(0)
   const [cooldownEnabled, setCooldownEnabled] = useState(false)
   const [randomWalkRadius, setRandomWalkRadius] = useState(500)
@@ -1304,6 +1309,40 @@ const App: React.FC = () => {
     <div className="app-layout">
       <div className="noise-overlay" aria-hidden />
       <div className="sidebar">
+        <nav className="nav-rail">
+          {([
+            { id: 'nav', label: t('nav.navigate'), icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="3 11 22 2 13 21 11 13 3 11" /></svg>
+            ) },
+            { id: 'connection', label: t('nav.connection'), icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12.55a11 11 0 0 1 14.08 0" /><path d="M1.42 9a16 16 0 0 1 21.16 0" /><path d="M8.53 16.11a6 6 0 0 1 6.95 0" /><line x1="12" y1="20" x2="12.01" y2="20" /></svg>
+            ) },
+            { id: 'library', label: t('nav.library'), icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" /></svg>
+            ) },
+            { id: 'settings', label: t('nav.settings'), icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+            ) },
+          ] as const).map((item) => {
+            const active = item.id === 'library'
+              ? false
+              : activePage === item.id
+            return (
+              <button
+                key={item.id}
+                className={`nav-rail-btn${active ? ' active' : ''}`}
+                title={item.label}
+                onClick={() => {
+                  if (item.id === 'library') { setOpenLibraryToken((n) => n + 1); return }
+                  setActivePage(item.id)
+                }}
+              >
+                <span className="nav-rail-icon">{item.icon}</span>
+                <span className="nav-rail-label">{item.label}</span>
+              </button>
+            )
+          })}
+        </nav>
         <div className="sidebar-content">
         <DeviceChipRow
           devices={device.connectedDevices}
@@ -1325,6 +1364,10 @@ const App: React.FC = () => {
             }
           }}
         />
+        {activePage === 'settings' && (
+          <SettingsPage onOpenLogFolder={handleOpenLog} />
+        )}
+        <div style={{ display: activePage === 'connection' ? 'block' : 'none' }}>
         <DeviceStatus
           device={device.connectedDevice ? {
             id: device.connectedDevice.udid,
@@ -1361,6 +1404,8 @@ const App: React.FC = () => {
             }
           }}
         />
+        </div>
+        <div style={{ display: activePage === 'nav' ? 'block' : 'none' }}>
         <ControlPanel
           simMode={sim.mode}
           moveMode={sim.moveMode}
@@ -1841,6 +1886,7 @@ const App: React.FC = () => {
           </div>
           ) : null}
         />
+        </div>
 
         </div>
       </div>
@@ -2533,6 +2579,7 @@ const App: React.FC = () => {
           onToggleCooldown={handleToggleCooldown}
           onRestore={handleRestore}
           onOpenLog={handleOpenLog}
+          onOpenSettings={() => setActivePage('settings')}
           dualDevice={device.connectedDevices.length >= 2}
           countryCode={locMeta.countryCode}
           cityName={locMeta.cityName}

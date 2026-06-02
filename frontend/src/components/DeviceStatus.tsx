@@ -671,7 +671,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                             display: 'flex', alignItems: 'center', gap: 6,
                           }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              <div style={{ fontWeight: 600, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
                                 {dispName}
                               </div>
                               <div style={{ fontSize: 10, opacity: 0.6 }}>
