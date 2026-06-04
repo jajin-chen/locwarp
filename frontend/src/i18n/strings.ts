@@ -283,12 +283,12 @@ export const STRINGS = {
   'wifi.pin_on': { zh: '已釘選', en: 'Pinned' },
   'wifi.pin_off': { zh: '釘選', en: 'Pin' },
   'wifi.pin_on_tooltip': {
-    zh: '已釘選:斷線後會自動嘗試重新連接。點一下取消釘選',
-    en: 'Pinned: auto-reconnects after a drop. Click to unpin',
+    zh: '已釘選:啟動時自動連上,斷線後也會自動嘗試重新連接。點一下取消釘選',
+    en: 'Pinned: auto-connects on launch and reconnects after a drop. Click to unpin',
   },
   'wifi.pin_off_tooltip': {
-    zh: '釘選這台:斷線後自動嘗試重新連接,不必手動按 Start',
-    en: 'Pin this device: auto-reconnect after a drop, no manual Start needed',
+    zh: '釘選這台:啟動時自動連上,斷線後也會自動嘗試重新連接',
+    en: 'Pin this device: auto-connect on launch and reconnect after a drop',
   },
   'wifi.keepalive_label': { zh: '螢幕暗掉維持連線(實驗)', en: 'Stay connected when screen off (experimental)' },
   'wifi.keepalive_tooltip': {
