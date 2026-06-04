@@ -842,10 +842,16 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               </button>
             </div>
             <button
-              className="action-btn primary"
               onClick={() => onGoldDittoStart?.()}
               disabled={goldDittoBusy}
-              style={{ width: '100%', padding: '8px 12px', fontSize: 13, fontWeight: 600 }}
+              style={{
+                width: '100%', padding: '10px 12px', fontSize: 14, fontWeight: 700,
+                borderRadius: 8, border: 'none', cursor: goldDittoBusy ? 'not-allowed' : 'pointer',
+                background: goldDittoBusy ? 'rgba(108,140,255,0.35)' : 'linear-gradient(135deg, #6c8cff 0%, #4f6fe8 100%)',
+                color: '#fff', letterSpacing: '0.03em',
+                boxShadow: goldDittoBusy ? 'none' : '0 4px 16px rgba(108,140,255,0.45)',
+                transition: 'all 0.15s', opacity: goldDittoBusy ? 0.6 : 1,
+              }}
             >
               {t('goldditto.start_button')}
             </button>

@@ -157,14 +157,23 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
     setDiscoverResults([]);
     try {
       const res = await wifiTunnelDiscover();
-      const list = res?.devices || [];
+      const rawList = res?.devices || [];
+      // Deduplicate by ip:port — mDNS can return the same device on
+      // multiple interfaces (e.g. Ethernet + WiFi) with identical IPs.
+      const seen = new Set<string>();
+      const list = rawList.filter((d: any) => {
+        const key = `${d.ip}:${d.port}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
       if (list.length === 0) {
         setTunnelError(t('wifi.device_not_detected'));
       } else if (list.length === 1) {
         setTunnelIp(list[0].ip);
         setTunnelPort(String(list[0].port));
       } else {
-        setDiscoverResults(list.map((d) => ({ ip: d.ip, port: d.port, name: d.name || d.ip })));
+        setDiscoverResults(list.map((d: any) => ({ ip: d.ip, port: d.port, name: d.name || d.ip })));
       }
     } catch (err: any) {
       setTunnelError(err.message || t('wifi.detect_failed'));
@@ -180,11 +189,11 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
 
   return (
     <div className={`device-status ${isConnected ? 'device-connected' : 'device-disconnected'}`}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
-        {/* Status indicator dot */}
+      {/* Device info card — no scan button inside */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
         <div
           style={{
-            width: 10, height: 10, borderRadius: '50%', flexShrink: 0, marginTop: 3,
+            width: 10, height: 10, borderRadius: '50%', flexShrink: 0, marginTop: 4,
             background: isConnected ? '#4caf50' : '#f44336',
             boxShadow: isConnected ? '0 0 6px #4caf50' : '0 0 6px #f44336',
           }}
@@ -196,31 +205,20 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
             const pinned = activeTunnel ? pinnedUdids.includes(device.id) : false;
             return (
               <>
-                <div style={{ fontSize: 13, fontWeight: 600, overflowWrap: 'anywhere', lineHeight: 1.3 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, overflowWrap: 'anywhere', lineHeight: 1.35 }}>
                   {device.name}
                 </div>
-                <div style={{ fontSize: 11, opacity: 0.6, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: 2 }}>
-                  iOS {device.iosVersion}
+                <div style={{ fontSize: 11, opacity: 0.65, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: 3 }}>
+                  <span>iOS {device.iosVersion}</span>
                   <span style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 3,
-                    padding: '1px 5px', borderRadius: 3, fontSize: 10,
+                    padding: '1px 6px', borderRadius: 3, fontSize: 11,
                     background: isWifi ? 'rgba(76, 175, 80, 0.15)' : 'rgba(108, 140, 255, 0.15)',
                     color: isWifi ? '#4caf50' : '#6c8cff',
                   }}>
-                    {isWifi ? (
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path d="M5 12.55a11 11 0 0114 0" /><path d="M8.53 16.11a6 6 0 016.95 0" />
-                        <circle cx="12" cy="20" r="1" fill="currentColor" />
-                      </svg>
-                    ) : (
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <rect x="9" y="2" width="6" height="20" rx="1" /><line x1="9" y1="18" x2="15" y2="18" />
-                      </svg>
-                    )}
                     {isWifi ? 'WiFi' : 'USB'}
                   </span>
                   {activeTunnel && (
-                    <span style={{ fontFamily: 'monospace', fontSize: 9, opacity: 0.8 }}>
+                    <span style={{ fontFamily: 'monospace', fontSize: 10, opacity: 0.75 }}>
                       {activeTunnel.rsd_address}:{activeTunnel.rsd_port}
                     </span>
                   )}
@@ -232,7 +230,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                         onClick={() => onTogglePin(device.id)}
                         title={pinned ? t('wifi.pin_on_tooltip') : t('wifi.pin_off_tooltip')}
                         style={{
-                          fontSize: 10, padding: '2px 8px', borderRadius: 3, cursor: 'pointer', whiteSpace: 'nowrap',
+                          fontSize: 11, padding: '3px 10px', borderRadius: 4, cursor: 'pointer', whiteSpace: 'nowrap',
                           border: pinned ? '1px solid rgba(108, 140, 255, 0.6)' : '1px solid rgba(255,255,255,0.18)',
                           background: pinned ? 'rgba(108, 140, 255, 0.18)' : 'transparent',
                           color: pinned ? '#9ac0ff' : 'var(--text-muted)',
@@ -244,7 +242,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                     <button
                       onClick={async () => { if (onStopTunnel) await onStopTunnel(device.id); }}
                       style={{
-                        fontSize: 10, padding: '2px 8px', borderRadius: 3, cursor: 'pointer',
+                        fontSize: 11, padding: '3px 10px', borderRadius: 4, cursor: 'pointer',
                         border: '1px solid rgba(244, 67, 54, 0.45)',
                         background: 'rgba(244, 67, 54, 0.08)', color: '#f44336',
                       }}
@@ -256,52 +254,44 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
               </>
             );
           })() : (
-            <div style={{ fontSize: 13, opacity: 0.6 }}>No device</div>
+            <div style={{ fontSize: 13, opacity: 0.55 }}>No device</div>
           )}
         </div>
-        <button
-          className="action-btn"
-          onClick={handleScan}
-          disabled={scanning}
-          style={{ padding: '4px 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 70, justifyContent: 'center' }}
-          title={t('device.scan_tooltip')}
-        >
-          {scanning ? (
-            <>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}>
-                <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="16" />
-              </svg>
-              {t('device.scan_scanning')}
-            </>
-          ) : scanResult != null && scanResult > 0 ? (
-            <>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4caf50" strokeWidth="3">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              <span style={{ color: '#4caf50' }}>{t('device.scan_found', { n: scanResult })}</span>
-            </>
-          ) : scanResult === 0 ? (
-            <>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f44336" strokeWidth="2.5">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="15" y1="9" x2="9" y2="15" />
-                <line x1="9" y1="9" x2="15" y2="15" />
-              </svg>
-              <span style={{ color: '#f44336' }}>{t('device.scan_none')}</span>
-            </>
-          ) : (
-            <>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M1 1l4 4" />
-                <path d="M5 12a7 7 0 0114 0" />
-                <path d="M8.5 8.5a4 4 0 017 0" />
-                <circle cx="12" cy="12" r="1" fill="currentColor" />
-              </svg>
-              USB
-            </>
-          )}
-        </button>
       </div>
+
+      {/* USB scan button — standalone row below device info */}
+      <button
+        className="action-btn"
+        onClick={handleScan}
+        disabled={scanning}
+        style={{ width: '100%', padding: '6px 10px', fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
+        title={t('device.scan_tooltip')}
+      >
+        {scanning ? (
+          <>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: 'spin 1s linear infinite' }}>
+              <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="16" />
+            </svg>
+            {t('device.scan_scanning')}
+          </>
+        ) : scanResult != null && scanResult > 0 ? (
+          <>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4caf50" strokeWidth="3">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <span style={{ color: '#4caf50' }}>{t('device.scan_found', { n: scanResult })}</span>
+          </>
+        ) : scanResult === 0 ? (
+          <>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f44336" strokeWidth="2.5">
+              <circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
+            </svg>
+            <span style={{ color: '#f44336' }}>{t('device.scan_none')}</span>
+          </>
+        ) : (
+          t('device.scan_tooltip')
+        )}
+      </button>
 
       {/* WiFi tunnel cards for additional devices not shown in the top row */}
       {tunnels.filter((tn) => tn.udid !== device?.id).length > 0 && (
@@ -320,39 +310,41 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
               }}>
                 <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#4caf50', flexShrink: 0, boxShadow: '0 0 4px #4caf50', marginTop: 3 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, overflowWrap: 'anywhere', lineHeight: 1.3 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, overflowWrap: 'anywhere', lineHeight: 1.35 }}>
                     {dispName}
                   </div>
-                  <div style={{ fontSize: 10, opacity: 0.6, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: 11, opacity: 0.65, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap', marginTop: 3 }}>
                     {dev?.iosVersion && <span>iOS {dev.iosVersion}</span>}
-                    <span style={{ padding: '0 4px', borderRadius: 2, background: 'rgba(76, 175, 80, 0.15)', color: '#4caf50', fontSize: 9 }}>WiFi</span>
-                    <span style={{ fontFamily: 'monospace', fontSize: 9, opacity: 0.8 }}>{tn.rsd_address}:{tn.rsd_port}</span>
+                    <span style={{ padding: '1px 6px', borderRadius: 3, background: 'rgba(76, 175, 80, 0.15)', color: '#4caf50', fontSize: 11 }}>WiFi</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: 10, opacity: 0.75 }}>{tn.rsd_address}:{tn.rsd_port}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, marginTop: 5 }}>
+                    {onTogglePin && (
+                      <button
+                        onClick={() => onTogglePin(tn.udid)}
+                        title={pinned ? t('wifi.pin_on_tooltip') : t('wifi.pin_off_tooltip')}
+                        style={{
+                          fontSize: 11, padding: '3px 10px', borderRadius: 4, cursor: 'pointer', whiteSpace: 'nowrap',
+                          border: pinned ? '1px solid rgba(108, 140, 255, 0.6)' : '1px solid rgba(255,255,255,0.18)',
+                          background: pinned ? 'rgba(108, 140, 255, 0.18)' : 'transparent',
+                          color: pinned ? '#9ac0ff' : 'var(--text-muted)',
+                        }}
+                      >
+                        {pinned ? t('wifi.pin_on') : t('wifi.pin_off')}
+                      </button>
+                    )}
+                    <button
+                      onClick={async () => { if (onStopTunnel) await onStopTunnel(tn.udid); }}
+                      style={{
+                        fontSize: 11, padding: '3px 10px', borderRadius: 4, cursor: 'pointer',
+                        border: '1px solid rgba(244, 67, 54, 0.45)',
+                        background: 'rgba(244, 67, 54, 0.08)', color: '#f44336',
+                      }}
+                    >
+                      {t('wifi.tunnel_stop')}
+                    </button>
                   </div>
                 </div>
-                {onTogglePin && (
-                  <button
-                    onClick={() => onTogglePin(tn.udid)}
-                    title={pinned ? t('wifi.pin_on_tooltip') : t('wifi.pin_off_tooltip')}
-                    style={{
-                      fontSize: 10, padding: '2px 6px', borderRadius: 3, cursor: 'pointer', whiteSpace: 'nowrap',
-                      border: pinned ? '1px solid rgba(108, 140, 255, 0.6)' : '1px solid rgba(255,255,255,0.18)',
-                      background: pinned ? 'rgba(108, 140, 255, 0.18)' : 'transparent',
-                      color: pinned ? '#9ac0ff' : 'var(--text-muted)',
-                    }}
-                  >
-                    {pinned ? t('wifi.pin_on') : t('wifi.pin_off')}
-                  </button>
-                )}
-                <button
-                  onClick={async () => { if (onStopTunnel) await onStopTunnel(tn.udid); }}
-                  style={{
-                    fontSize: 10, padding: '2px 6px', borderRadius: 3, cursor: 'pointer',
-                    border: '1px solid rgba(244, 67, 54, 0.45)',
-                    background: 'rgba(244, 67, 54, 0.08)', color: '#f44336',
-                  }}
-                >
-                  {t('wifi.tunnel_stop')}
-                </button>
               </div>
             );
           })}
@@ -941,7 +933,14 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                           }
                         }}
                         disabled={tunnelConnecting || portScanning}
-                        style={{ width: '100%', fontSize: 12 }}
+                        style={{
+                          width: '100%', fontSize: 13, fontWeight: 600, padding: '9px 12px',
+                          borderRadius: 7, border: 'none',
+                          background: (tunnelConnecting || portScanning) ? 'rgba(108,140,255,0.45)' : 'linear-gradient(135deg, #6c8cff 0%, #4f6fe8 100%)',
+                          color: '#fff', cursor: (tunnelConnecting || portScanning) ? 'wait' : 'pointer',
+                          boxShadow: (tunnelConnecting || portScanning) ? 'none' : '0 4px 14px rgba(108,140,255,0.45)',
+                          letterSpacing: '0.02em', transition: 'all 0.15s',
+                        }}
                       >
                         {(tunnelConnecting || portScanning) ? (
                           <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
