@@ -570,32 +570,38 @@ textarea:focus {
   pointer-events: none;
   width: 0; height: 0;
 }
+/* Toggle-switch track */
 .lw-checkbox-box {
-  width: 16px; height: 16px;
-  border: 1.5px solid var(--border-light);
-  border-radius: 4px;
-  background: var(--bg-elevated);
-  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 15px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.18);
+  border: none;
   flex-shrink: 0;
-  transition: all var(--transition-fast);
   position: relative;
+  transition: background 0.2s;
 }
+/* Toggle-switch thumb */
 .lw-checkbox-box::after {
   content: '';
-  width: 9px; height: 5px;
-  border: 2px solid #fff;
-  border-top: 0;
-  border-right: 0;
-  transform: rotate(-45deg) translate(0, -1px) scale(0);
-  transition: transform 0.16s cubic-bezier(0.65, 0, 0.35, 1);
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: left 0.18s;
+  border: none;
 }
 .lw-checkbox > input:checked ~ .lw-checkbox-box {
   background: var(--accent-blue);
-  border-color: var(--accent-blue);
-  box-shadow: 0 2px 6px rgba(108, 140, 255, 0.32);
+  box-shadow: none;
+  border-color: transparent;
 }
 .lw-checkbox > input:checked ~ .lw-checkbox-box::after {
-  transform: rotate(-45deg) translate(0, -1px) scale(1);
+  left: 14px;
+  transform: translateY(-50%);
 }
 .lw-checkbox > input:focus-visible ~ .lw-checkbox-box {
   outline: 2px solid var(--accent-blue);
