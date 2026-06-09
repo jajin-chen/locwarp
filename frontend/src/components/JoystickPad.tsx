@@ -6,6 +6,13 @@ interface JoystickPadProps {
   intensity: number;
   onMove: (direction: number, intensity: number) => void;
   onRelease: () => void;
+  // True once the user has pressed 開始 and the joystick session is live.
+  // While false the pad is shown but inert, so we surface a hint.
+  active?: boolean;
+  // Whether a simulated position exists yet. The joystick moves relative to
+  // the current location, so the backend refuses to start without one — when
+  // false we tell the user to set a position first.
+  hasPosition?: boolean;
 }
 
 const PAD_RADIUS = 70;
@@ -18,6 +25,8 @@ const JoystickPad: React.FC<JoystickPadProps> = ({
   intensity,
   onMove,
   onRelease,
+  active = true,
+  hasPosition = true,
 }) => {
   const t = useT();
   const padRef = useRef<HTMLDivElement>(null);
@@ -338,7 +347,9 @@ const JoystickPad: React.FC<JoystickPadProps> = ({
           backdropFilter: 'blur(4px)',
         }}
       >
-        {intensity > 0.01 ? (
+        {!active ? (
+          <span style={{ color: '#ffb74d' }}>{hasPosition ? t('joy.start_hint') : t('joy.need_position_hint')}</span>
+        ) : intensity > 0.01 ? (
           <>
             {getDirectionLabel(direction)} | {(intensity * 100).toFixed(0)}%
           </>

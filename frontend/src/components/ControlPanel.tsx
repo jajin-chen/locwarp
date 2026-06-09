@@ -506,7 +506,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               gap: 6,
             }}
           >
-            {Object.values(SimMode).map((mode) => (
+            {/* 多點導航 (MultiStop) is merged into 路線 (Loop): the only real
+                difference users saw was the lap count, which 路線 already
+                exposes (1 圈 = single pass). Hide it from the picker. */}
+            {Object.values(SimMode).filter((mode) => mode !== SimMode.MultiStop).map((mode) => (
               <button
                 key={mode}
                 className={`mode-btn${simMode === mode ? ' active' : ''}`}

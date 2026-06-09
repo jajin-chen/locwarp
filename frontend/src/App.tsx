@@ -924,19 +924,21 @@ const App: React.FC = () => {
       return
     }
     const udids = device.connectedDevices.map((d) => d.udid)
-    if (sim.mode === SimMode.Loop) {
+    // 圈數: 0 = single pass (original 多點導航 → multiStop backend),
+    // null = infinite loop, N>0 = N laps (both via startLoop backend).
+    if (sim.loopLapCount === 0) {
+      if (udids.length >= 2) {
+        const outcome = await sim.multiStopAll(udids, route, 0, false)
+        showToast(toastForFanout(t, t('mode.loop'), outcome, device.connectedDevices))
+      } else {
+        sim.multiStop(route, 0, false)
+      }
+    } else {
       if (udids.length >= 2) {
         const outcome = await sim.startLoopAll(udids, route)
         showToast(toastForFanout(t, t('mode.loop'), outcome, device.connectedDevices))
       } else {
         sim.startLoop(route)
-      }
-    } else if (sim.mode === SimMode.MultiStop) {
-      if (udids.length >= 2) {
-        const outcome = await sim.multiStopAll(udids, route, 0, false)
-        showToast(toastForFanout(t, t('mode.multi_stop'), outcome, device.connectedDevices))
-      } else {
-        sim.multiStop(route, 0, false)
       }
     }
   }, [sim, device, showToast, t])
@@ -945,6 +947,12 @@ const App: React.FC = () => {
   const handleStart = useCallback(async () => {
     const udids = device.connectedDevices.map((d) => d.udid)
     if (sim.mode === SimMode.Joystick) {
+      if (!sim.currentPosition) {
+        // Joystick moves relative to the current sim location; backend rejects
+        // start without one. Guide the user instead of surfacing the raw error.
+        showToast(t('toast.joystick_need_position'))
+        return
+      }
       if (udids.length >= 2) {
         const outcome = await sim.joystickStartAll(udids)
         showToast(toastForFanout(t, t('mode.joystick'), outcome, device.connectedDevices))
@@ -992,6 +1000,9 @@ const App: React.FC = () => {
   // panel so the user knows which route is active. Cleared automatically
   // once the waypoint list is emptied.
   const [loadedRouteName, setLoadedRouteName] = useState<string | null>(null)
+  // Waypoint list starts collapsed so a long route doesn't bury the speed /
+  // action controls; the user expands it when they want to edit points.
+  const [wpCollapsed, setWpCollapsed] = useState(true)
   useEffect(() => {
     if (sim.waypoints.length === 0 && loadedRouteName !== null) setLoadedRouteName(null)
   }, [sim.waypoints.length, loadedRouteName])
@@ -1005,14 +1016,18 @@ const App: React.FC = () => {
   const confirmRouteLoad = useCallback(async (flyToStart: boolean) => {
     if (!routeLoadConfirm) return
     const { waypoints } = routeLoadConfirm
-    sim.setWaypoints(waypoints)
+    // Loading a route always means the user wants to run it, so switch into
+    // the route (路線) mode and fill the waypoint list atomically. Otherwise
+    // the app stays in 瞬間移動 (the launch default) and pressing 開始 does
+    // nothing because that mode has no waypoint-route handler.
+    sim.loadRoute(waypoints)
     // Remember which route is loaded so the panel can show its name.
     setLoadedRouteName(routeLoadConfirm.name || null)
     if (flyToStart && waypoints.length > 0) {
       const first = waypoints[0]
       const udids = device.connectedDevices.map((d) => d.udid)
-      // Match wpFly flow: set current position + teleport directly (no sim.teleport,
-      // so we preserve the mode the user is already in for this route).
+      // Match wpFly flow: set current position + teleport directly so the
+      // device GPS lands on the start point without leaving 路線 mode.
       sim.setCurrentPosition({ lat: first.lat, lng: first.lng })
       if (udids.length > 0) {
         try { await sim.teleportAll(udids, first.lat, first.lng) } catch { /* ignore */ }
@@ -1678,7 +1693,7 @@ const App: React.FC = () => {
           jumpPostDelay={sim.jumpPostDelay}
           onJumpPostDelayChange={sim.setJumpPostDelay}
           openLibraryToken={openLibraryToken}
-          modeExtraSection={(sim.mode === SimMode.Loop || sim.mode === SimMode.MultiStop) ? (
+          modeExtraSection={sim.mode === SimMode.Loop ? (
           <div className="section" style={{ margin: '0 0 8px 0' }}>
             <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1691,14 +1706,16 @@ const App: React.FC = () => {
             </div>
             <div className="section-content">
               <PauseControl
-                labelKey={sim.mode === SimMode.Loop ? 'pause.loop' : 'pause.multi_stop'}
-                value={sim.mode === SimMode.Loop ? sim.pauseLoop : sim.pauseMultiStop}
-                onChange={sim.mode === SimMode.Loop ? sim.setPauseLoop : sim.setPauseMultiStop}
+                labelKey="pause.loop"
+                value={sim.pauseLoop}
+                onChange={sim.setPauseLoop}
               />
-              {sim.mode === SimMode.Loop && (
+              {(() => {
+                const lap = sim.loopLapCount // null = 無限, 0 = 單程(原多點), N = N 圈
+                return (
                 <div style={{
                   marginBottom: 6, fontSize: 11,
-                  display: 'flex', alignItems: 'center', gap: 6,
+                  display: 'flex', alignItems: 'center', gap: 8,
                 }}>
                   <span style={{ opacity: 0.7, whiteSpace: 'nowrap' }}>{t('loop.lap_count_label')}</span>
                   <input
@@ -1706,16 +1723,19 @@ const App: React.FC = () => {
                     className="lw-input"
                     min={0}
                     placeholder={t('loop.lap_count_placeholder')}
-                    value={sim.loopLapCount ?? ''}
+                    value={lap ?? ''}
                     onChange={(e) => {
                       const raw = e.target.value.trim()
                       if (raw === '') { sim.setLoopLapCount(null); return }
                       const n = parseInt(raw, 10)
-                      sim.setLoopLapCount(Number.isFinite(n) && n > 0 ? n : null)
+                      sim.setLoopLapCount(Number.isFinite(n) && n >= 0 ? n : 0)
                     }}
-                    style={{ width: 70 }}
+                    style={{ width: 64 }}
                     title={t('loop.lap_count_tooltip')}
                   />
+                  <span style={{ opacity: 0.5, fontSize: 10 }}>
+                    {lap == null ? t('loop.lap_hint_infinite') : lap === 0 ? t('loop.lap_hint_single') : t('loop.lap_hint_n', { n: lap })}
+                  </span>
                   {sim.lapProgress && (
                     <span style={{ opacity: 0.6, fontSize: 10, marginLeft: 'auto' }}>
                       {t('loop.lap_progress', {
@@ -1725,7 +1745,8 @@ const App: React.FC = () => {
                     </span>
                   )}
                 </div>
-              )}
+                )
+              })()}
               <div style={{ marginBottom: 6, fontSize: 11 }}>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
                   <span style={{ opacity: 0.7, width: 36 }}>{t('panel.waypoints_radius')}</span>
@@ -1786,12 +1807,41 @@ const App: React.FC = () => {
                   {t('panel.waypoints_empty')}
                 </div>
               )}
-              {sim.waypoints.map((wp: any, i: number) => {
+              {/* Collapse toggle: a long route would otherwise push the speed /
+                  action controls far below. Default collapsed, showing only the
+                  current target + next point; expand to edit the full list. */}
+              {sim.waypoints.length > 2 && (
+                <button
+                  className="action-btn"
+                  onClick={() => setWpCollapsed((c) => !c)}
+                  title={t('panel.waypoints_toggle_tooltip')}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', fontSize: 11, marginBottom: 4 }}
+                >
+                  <span style={{ opacity: 0.8 }}>
+                    {wpCollapsed ? t('panel.waypoints_show_all') : t('panel.waypoints_collapse')}
+                  </span>
+                  <span style={{ opacity: 0.6 }}>{wpCollapsed ? '▾' : '▴'}</span>
+                </button>
+              )}
+              {(() => {
+                const total = sim.waypoints.length
+                const seg = sim.waypointProgress?.current
+                // When collapsed, show just the current target (seg+1) and the
+                // point after it; before a run starts, fall back to start + next.
+                const collapsed = wpCollapsed && total > 2
+                let indices: number[]
+                if (!collapsed) {
+                  indices = sim.waypoints.map((_: any, i: number) => i)
+                } else {
+                  const base = seg != null ? Math.min(seg + 1, total - 1) : 0
+                  indices = Array.from(new Set([base, base + 1].filter((i) => i >= 0 && i < total)))
+                }
+                return indices.map((i) => {
+                  const wp: any = sim.waypoints[i]
                 // UI waypoints[0] = the implicit start position (current
                 // device location at add-time). Backend seg_idx N = traveling
                 // from waypoints[N] toward waypoints[N+1]; the *target* of
                 // that segment is waypoints[N+1], so highlight i == seg+1.
-                const seg = sim.waypointProgress?.current
                 const approaching = seg != null && i === seg + 1
                 const passed = seg != null && i <= seg
                 const isStart = i === 0;
@@ -1849,7 +1899,8 @@ const App: React.FC = () => {
                     >X</button>
                   </div>
                 );
-              })}
+                })
+              })()}
               {sim.waypoints.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   <button
@@ -2147,6 +2198,8 @@ const App: React.FC = () => {
             intensity={joystick.intensity}
             onMove={joystick.updateFromPad}
             onRelease={() => joystick.updateFromPad(0, 0)}
+            active={isRunning}
+            hasPosition={!!sim.currentPosition}
           />
         )}
         {addBmDialog && createPortal(

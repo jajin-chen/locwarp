@@ -144,7 +144,7 @@ export const STRINGS = {
   // ── Modes ────────────────────────────────────
   'mode.teleport': { zh: '瞬間移動', en: 'Teleport' },
   'mode.navigate': { zh: '導航移動', en: 'Navigate' },
-  'mode.loop': { zh: '路線巡迴', en: 'Route Loop' },
+  'mode.loop': { zh: '多點路徑', en: 'Multi-point Route' },
   'mode.multi_stop': { zh: '多點導航', en: 'Multi-stop' },
   'mode.random_walk': { zh: '隨機漫步', en: 'Random Walk' },
   'mode.joystick': { zh: '搖桿操控', en: 'Joystick' },
@@ -198,6 +198,9 @@ export const STRINGS = {
   'panel.waypoints_generate': { zh: '隨機產生', en: 'Random' },
   'panel.waypoints_generate_all': { zh: '全隨機', en: 'All random' },
   'panel.waypoints_empty': { zh: '在地圖上右鍵點擊 → 「添加路徑點」,或使用上方隨機產生', en: 'Right-click the map to add waypoints, or use random generate above' },
+  'panel.waypoints_show_all': { zh: '展開全部路徑點', en: 'Show all waypoints' },
+  'panel.waypoints_collapse': { zh: '收合路徑點清單', en: 'Collapse waypoint list' },
+  'panel.waypoints_toggle_tooltip': { zh: '摺疊或展開路徑點清單,摺疊時只顯示目前與下一個路徑點', en: 'Collapse or expand the waypoint list; collapsed shows only the current and next point' },
   'panel.waypoints_start_loop': { zh: '開始巡迴', en: 'Start Loop' },
   'panel.waypoints_start_multi': { zh: '開始多點導航', en: 'Start Multi-stop' },
   'panel.waypoints_start_navigate': { zh: '開始導航', en: 'Start Navigate' },
@@ -448,6 +451,8 @@ export const STRINGS = {
 
   // ── Joystick ─────────────────────────────────
   'joy.drag_or_keys': { zh: '拖曳或按 WASD / 方向鍵', en: 'Drag or press WASD / arrow keys' },
+  'joy.start_hint': { zh: '需先按「開始」才可使用搖桿', en: 'Press "Start" first to use the joystick' },
+  'joy.need_position_hint': { zh: '先設定一個位置(右鍵地圖→瞬間移動)再按開始', en: 'Set a position first (right-click map → Teleport), then press Start' },
   'joy.north': { zh: '北', en: 'N' },
   'joy.east': { zh: '東', en: 'E' },
   'joy.south': { zh: '南', en: 'S' },
@@ -548,6 +553,7 @@ export const STRINGS = {
 
   // ── Toasts extra ─────────────────────────────
   'toast.no_position_random': { zh: '尚未取得目前位置,無法產生隨機路徑點', en: 'No current position, cannot generate random waypoints' },
+  'toast.joystick_need_position': { zh: '請先設定一個位置(右鍵地圖→瞬間移動),再開始搖桿', en: 'Set a position first (right-click map → Teleport) before starting the joystick' },
   'toast.route_optimized': { zh: '路線已最佳化', en: 'Route optimized' },
   // First-level navigation rail (iOS-style sidebar tabs).
   'nav.navigate': { zh: '導航', en: 'Navigate' },
@@ -708,7 +714,10 @@ export const STRINGS = {
   'pause.loop': { zh: '每站隨機暫停', en: 'Random pause at each stop' },
   'loop.lap_count_label': { zh: '圈數', en: 'Laps' },
   'loop.lap_count_placeholder': { zh: '無限', en: '∞' },
-  'loop.lap_count_tooltip': { zh: '跑完指定圈數後自動停止。留空 = 無限圈', en: 'Auto-stop after this many laps. Empty = unlimited.' },
+  'loop.lap_count_tooltip': { zh: '0 = 跑一趟就停(原多點);輸入數字 = 繞幾圈;留空 = 無限循環', en: '0 = single pass (multi-point); a number = that many laps; empty = loop forever.' },
+  'loop.lap_hint_infinite': { zh: '無限循環', en: 'Loop forever' },
+  'loop.lap_hint_single': { zh: '單程(原多點)', en: 'Single pass' },
+  'loop.lap_hint_n': { zh: '繞 {n} 圈', en: '{n} laps' },
   'loop.lap_progress': { zh: '第 {current}/{total} 圈', en: 'Lap {current}/{total}' },
   'pause.random_walk': { zh: '每段隨機暫停', en: 'Random pause between legs' },
   'pause.min': { zh: '最小', en: 'Min' },
