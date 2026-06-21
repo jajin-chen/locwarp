@@ -50,6 +50,39 @@ const SPEED_MAP: Record<MoveMode, number> = {
   driving: 60,
 }
 
+// Number input that lets the user freely clear and retype the field (so a
+// multi-digit value like 15 is easy to enter). The draft string is held
+// locally while editing; the value is parsed and clamped via `set` only on
+// blur / Enter, so per-keystroke clamping never fights the typing.
+const NumberField: React.FC<{
+  value: number
+  set: (n: number) => void
+  min: number
+  max?: number
+  step: number
+}> = ({ value, set, min, max, step }) => {
+  const [draft, setDraft] = useState<string | null>(null)
+  const commit = () => {
+    const n = parseFloat(draft ?? '')
+    if (Number.isFinite(n)) set(n)
+    setDraft(null)
+  }
+  return (
+    <input
+      type="number"
+      className="lw-input"
+      min={min}
+      max={max}
+      step={step}
+      value={draft ?? String(value)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+      style={{ width: 64 }}
+    />
+  )
+}
+
 const App: React.FC = () => {
   const t = useT()
   const ws = useWebSocket()
@@ -1832,7 +1865,7 @@ const App: React.FC = () => {
                   </label>
                   {([
                     { label: t('flower.radius'), value: sim.flowerRadius, set: sim.setFlowerRadius, unit: 'm', min: 1, step: 5 },
-                    { label: t('flower.segments'), value: sim.flowerSegments, set: sim.setFlowerSegments, unit: t('flower.seg_unit'), min: 2, max: 10, step: 1 },
+                    { label: t('flower.segments'), value: sim.flowerSegments, set: sim.setFlowerSegments, unit: t('flower.seg_unit'), min: 2, max: 20, step: 1 },
                     { label: t('flower.circles'), value: sim.flowerCircles, set: sim.setFlowerCircles, unit: t('flower.circle_unit'), min: 1, step: 1 },
                     { label: t('flower.rounds'), value: sim.flowerRounds, set: sim.setFlowerRounds, unit: t('flower.round_unit'), min: 1, step: 1 },
                     { label: t('flower.pre_wait'), value: sim.flowerPreWait, set: sim.setFlowerPreWait, unit: t('flower.seconds'), min: 0, step: 1 },
@@ -1840,18 +1873,12 @@ const App: React.FC = () => {
                   ] as const).map((row, ri) => (
                     <div key={ri} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
                       <span style={{ opacity: 0.75, flex: 1, whiteSpace: 'nowrap' }}>{row.label}</span>
-                      <input
-                        type="number"
-                        className="lw-input"
+                      <NumberField
+                        value={row.value}
+                        set={row.set}
                         min={row.min}
                         max={(row as { max?: number }).max}
                         step={row.step}
-                        value={row.value}
-                        onChange={(e) => {
-                          const n = parseFloat(e.target.value)
-                          if (Number.isFinite(n)) row.set(n)
-                        }}
-                        style={{ width: 64 }}
                       />
                       <span style={{ opacity: 0.5, width: 18, textAlign: 'left' }}>{row.unit}</span>
                     </div>
