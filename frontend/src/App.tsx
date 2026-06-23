@@ -95,6 +95,17 @@ const App: React.FC = () => {
   const joystick = useJoystick(ws.sendMessage, sim.mode === SimMode.Joystick)
   const bm = useBookmarks()
 
+  // Stable bookmark-pin array for the map. Re-mapping inline in JSX builds a
+  // fresh array every render, which churns MapView's clustering effect (it
+  // rebuilds the whole supercluster index on each new reference). Memoize so
+  // the index only rebuilds when the bookmarks themselves change.
+  const bookmarkPins = useMemo(
+    () => bm.bookmarks.map((b: any) => ({
+      id: b.id, name: b.name, lat: b.lat, lng: b.lng, country_code: b.country_code || '',
+    })),
+    [bm.bookmarks],
+  )
+
   const [savedRoutes, setSavedRoutes] = useState<any[]>([])
   const [routeCategories, setRouteCategories] = useState<any[]>([])
   const refreshRouteCategories = useCallback(async () => {
@@ -2356,9 +2367,7 @@ const App: React.FC = () => {
           deviceConnected={device.connectedDevice !== null}
           onShowToast={showToast}
           userAvatarHtml={avatarToHtml(userAvatar, customPng)}
-          bookmarkPins={bm.bookmarks.map((b: any) => ({
-            id: b.id, name: b.name, lat: b.lat, lng: b.lng, country_code: b.country_code || '',
-          }))}
+          bookmarkPins={bookmarkPins}
           showBookmarkPins={showBookmarkPins}
           onMapReady={(api) => { mapApiRef.current = api }}
           previewPin={previewPin}

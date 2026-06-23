@@ -8,6 +8,7 @@ import '@maplibre/maplibre-gl-leaflet';
 import { cellsInBounds, approxCellSizeMeters } from '../services/s2grid';
 import type { S2CellPolygon } from '../services/s2grid';
 import { parseCoord } from '../utils/coords';
+import Supercluster from 'supercluster';
 
 // MapLibre's Leaflet binding looks up `window.maplibregl` rather than
 // taking it as a constructor argument. Hoist it once at module load so
@@ -344,6 +345,11 @@ const MapView: React.FC<MapViewProps> = ({
   // prop changes mid-session take effect.
   const onShowToastRef = useRef(onShowToast);
   useEffect(() => { onShowToastRef.current = onShowToast; }, [onShowToast]);
+  // Bookmark-pin teleport handler routed through a ref so the clustering
+  // effect doesn't rebuild the (potentially 50k-point) supercluster index
+  // just because the parent passed a new onTeleport closure.
+  const onTeleportRef = useRef(onTeleport);
+  useEffect(() => { onTeleportRef.current = onTeleport; }, [onTeleport]);
   // Waypoint marker click handlers — kept in refs so the per-marker click
   // handler captured inside the waypoints useEffect always calls the
   // freshest prop without re-creating every marker on each prop change.
@@ -1161,38 +1167,38 @@ const MapView: React.FC<MapViewProps> = ({
     bookmarkMarkersRef.current = [];
     if (!showBookmarkPins || !bookmarkPins || bookmarkPins.length === 0) return;
 
-    // Cluster bookmarks that fall within ~40 px of each other at the current
-    // zoom. One teardrop pin represents the group; clicking a cluster opens a
-    // popup list the user can tap to choose which exact bookmark to jump to.
-    // This stops a dozen pins stacking into what looks like a single dot when
-    // the user zooms out to see all of Taiwan.
-    const rebuild = () => {
+    // Scalable clustering via supercluster (O(n log n) index) + viewport
+    // culling. The old hand-rolled clusterer was O(n²) and built a DOM marker
+    // for every bookmark regardless of what was on screen — fine for a few
+    // hundred, but it freezes the UI thread at tens of thousands of points.
+    // Now we index once, then on every pan/zoom render ONLY the clusters /
+    // leaves that fall inside the current viewport, so the map never holds
+    // more than a few dozen markers at a time no matter how many are saved.
+    const index = new Supercluster({ radius: 60, maxZoom: 18, minPoints: 2 });
+    index.load(
+      bookmarkPins!.map((bm, i) => ({
+        type: 'Feature' as const,
+        properties: { idx: i },
+        geometry: { type: 'Point' as const, coordinates: [bm.lng, bm.lat] },
+      })),
+    );
+
+    const render = () => {
       bookmarkMarkersRef.current.forEach((m) => m.remove());
       bookmarkMarkersRef.current = [];
-      const clusters: Array<{ x: number; y: number; members: typeof bookmarkPins }> = [];
-      const THRESHOLD_PX = 40;
-      for (const bm of bookmarkPins!) {
-        const pt = map.latLngToLayerPoint([bm.lat, bm.lng]);
-        let matched = false;
-        for (const c of clusters) {
-          const dx = c.x - pt.x, dy = c.y - pt.y;
-          if (dx * dx + dy * dy <= THRESHOLD_PX * THRESHOLD_PX) {
-            c.members.push(bm);
-            // Update cluster centre as running average (cheap approximation).
-            c.x = (c.x * (c.members.length - 1) + pt.x) / c.members.length;
-            c.y = (c.y * (c.members.length - 1) + pt.y) / c.members.length;
-            matched = true;
-            break;
-          }
-        }
-        if (!matched) {
-          clusters.push({ x: pt.x, y: pt.y, members: [bm] });
-        }
-      }
+      const b = map.getBounds();
+      const bbox: [number, number, number, number] = [
+        b.getWest(), b.getSouth(), b.getEast(), b.getNorth(),
+      ];
+      const zoom = Math.round(map.getZoom());
+      const features = index.getClusters(bbox, zoom);
 
-      clusters.forEach((c) => {
-        if (c.members.length === 1) {
-          const bm = c.members[0];
+      features.forEach((f: any) => {
+        const [lng, lat] = f.geometry.coordinates as [number, number];
+        const isCluster = !!f.properties.cluster;
+
+        if (!isCluster) {
+          const bm = bookmarkPins![f.properties.idx as number];
           const flagHtml = bm.country_code
             ? `<img src="https://flagcdn.com/w20/${bm.country_code}.png" style="width:18px;height:12px;border-radius:2px;flex-shrink:0;display:inline-block;vertical-align:middle;" alt="" />`
             : '';
@@ -1244,13 +1250,15 @@ const MapView: React.FC<MapViewProps> = ({
             // pin stays clickable when the user is standing on it.
             zIndexOffset: 2000,
           });
-          marker.on('click', () => onTeleport(bm.lat, bm.lng));
+          marker.on('click', () => onTeleportRef.current(bm.lat, bm.lng));
           marker.addTo(map);
           bookmarkMarkersRef.current.push(marker);
         } else {
           // Design 4 — Polaroid stack cluster. Three overlapping mini cards
-          // with rotation, top one shows the count. Click = open list popup.
-          const count = c.members.length;
+          // with rotation, top one shows the count.
+          const count = f.properties.point_count as number;
+          const countLabel = f.properties.point_count_abbreviated as string;
+          const clusterId = f.properties.cluster_id as number;
           const icon = L.divIcon({
             className: 'bookmark-cluster-pin',
             html: `<div style="position:relative;width:52px;height:46px;pointer-events:none;">
@@ -1263,7 +1271,7 @@ const MapView: React.FC<MapViewProps> = ({
                 display:flex;align-items:center;justify-content:center;
                 font-weight:700;font-size:15px;color:#2d3748;
                 pointer-events:auto;cursor:pointer;
-              ">${count}</div>
+              ">${countLabel}</div>
               <div style="
                 position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) translate(0, -14px);
                 width:14px;height:3px;background:rgba(253,216,53,0.85);border-radius:1px;
@@ -1274,66 +1282,75 @@ const MapView: React.FC<MapViewProps> = ({
             iconSize: [52, 46],
             iconAnchor: [26, 23],
           });
-          const clusterLat = c.members.reduce((s, m) => s + m.lat, 0) / count;
-          const clusterLng = c.members.reduce((s, m) => s + m.lng, 0) / count;
-          const marker = L.marker([clusterLat, clusterLng], {
+          const marker = L.marker([lat, lng], {
             icon,
             pane: 'markerPane',
             // Above blue person so the cluster card is always clickable.
             zIndexOffset: 2000,
           });
-          // Click on a cluster opens a popup with a clickable list so the
-          // user can pick which specific bookmark to teleport to. Solves the
-          // 'zoom out to see whole country, markers overlap into one dot'
-          // usability issue.
-          const listHtml = c.members.map((bm) => {
-            const flag = bm.country_code
-              ? `<img src="https://flagcdn.com/w20/${bm.country_code}.png" style="width:14px;height:10px;border-radius:1px;vertical-align:middle;margin-right:6px;" />`
-              : '';
-            return `<div
-              class="bm-cluster-row"
-              data-lat="${bm.lat}" data-lng="${bm.lng}"
-              style="display:flex;align-items:center;gap:4px;padding:6px 8px;cursor:pointer;border-radius:4px;color:#e8e8ea;font-size:12px;transition:background 0.1s;"
-              onmouseenter="this.style.background='rgba(255,255,255,0.08)'"
-              onmouseleave="this.style.background='transparent'"
-            >${flag}<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(bm.name)}</span></div>`;
-          }).join('');
-          const popup = L.popup({
-            className: 'bookmark-cluster-popup',
-            maxWidth: 240,
-            offset: [0, -12],
-          }).setContent(`
-            <div style="background:rgba(26,29,39,0.96);backdrop-filter:blur(12px);border:1px solid rgba(108,140,255,0.25);border-radius:8px;padding:6px;min-width:180px;max-height:280px;overflow-y:auto;">
-              <div style="padding:4px 8px;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#9ac0ff;">${count} ${escapeHtml(count === 1 ? 'bookmark' : 'bookmarks')}</div>
-              ${listHtml}
-            </div>
-          `);
-          marker.bindPopup(popup);
-          marker.on('popupopen', () => {
-            document.querySelectorAll('.bm-cluster-row').forEach((el) => {
-              el.addEventListener('click', () => {
-                const lat = parseFloat((el as HTMLElement).dataset.lat || '');
-                const lng = parseFloat((el as HTMLElement).dataset.lng || '');
-                if (Number.isFinite(lat) && Number.isFinite(lng)) {
-                  map.closePopup();
-                  onTeleport(lat, lng);
-                }
+
+          // Small clusters (<= 12) open a clickable list so the user can pick
+          // the exact bookmark — same UX as before. Bigger clusters just zoom
+          // in to expand (a 5000-row popup is useless and slow to build).
+          if (count <= 12) {
+            const leaves = index.getLeaves(clusterId, count) as any[];
+            const listHtml = leaves.map((leaf) => {
+              const bm = bookmarkPins![leaf.properties.idx as number];
+              const flag = bm.country_code
+                ? `<img src="https://flagcdn.com/w20/${bm.country_code}.png" style="width:14px;height:10px;border-radius:1px;vertical-align:middle;margin-right:6px;" />`
+                : '';
+              return `<div
+                class="bm-cluster-row"
+                data-lat="${bm.lat}" data-lng="${bm.lng}"
+                style="display:flex;align-items:center;gap:4px;padding:6px 8px;cursor:pointer;border-radius:4px;color:#e8e8ea;font-size:12px;transition:background 0.1s;"
+                onmouseenter="this.style.background='rgba(255,255,255,0.08)'"
+                onmouseleave="this.style.background='transparent'"
+              >${flag}<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(bm.name)}</span></div>`;
+            }).join('');
+            const popup = L.popup({
+              className: 'bookmark-cluster-popup',
+              maxWidth: 240,
+              offset: [0, -12],
+            }).setContent(`
+              <div style="background:rgba(26,29,39,0.96);backdrop-filter:blur(12px);border:1px solid rgba(108,140,255,0.25);border-radius:8px;padding:6px;min-width:180px;max-height:280px;overflow-y:auto;">
+                <div style="padding:4px 8px;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#9ac0ff;">${count} ${escapeHtml(count === 1 ? 'bookmark' : 'bookmarks')}</div>
+                ${listHtml}
+              </div>
+            `);
+            marker.bindPopup(popup);
+            marker.on('popupopen', () => {
+              document.querySelectorAll('.bm-cluster-row').forEach((el) => {
+                el.addEventListener('click', () => {
+                  const lat2 = parseFloat((el as HTMLElement).dataset.lat || '');
+                  const lng2 = parseFloat((el as HTMLElement).dataset.lng || '');
+                  if (Number.isFinite(lat2) && Number.isFinite(lng2)) {
+                    map.closePopup();
+                    onTeleportRef.current(lat2, lng2);
+                  }
+                });
               });
             });
-          });
+          } else {
+            // Zoom to the level where this cluster breaks apart, centered on it.
+            marker.on('click', () => {
+              const target = Math.min(index.getClusterExpansionZoom(clusterId), 18);
+              map.setView([lat, lng], target, { animate: true });
+            });
+          }
           marker.addTo(map);
           bookmarkMarkersRef.current.push(marker);
         }
       });
     };
-    rebuild();
+    render();
 
-    // Rebuild clusters when the zoom level changes — what's 'overlapping'
-    // at world-scale is not overlapping at street-scale.
-    const onZoom = () => rebuild();
-    map.on('zoomend', onZoom);
-    return () => { map.off('zoomend', onZoom); };
-  }, [bookmarkPins, showBookmarkPins, onTeleport]);
+    // Re-cull on every pan / zoom. moveend fires for both, so a single
+    // listener covers what used to take a full O(n²) rebuild on zoomend only
+    // (and never updated on pan at all).
+    const onMove = () => render();
+    map.on('moveend', onMove);
+    return () => { map.off('moveend', onMove); };
+  }, [bookmarkPins, showBookmarkPins]);
 
   // Update route polyline
   useEffect(() => {
