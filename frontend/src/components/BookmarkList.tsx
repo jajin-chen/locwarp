@@ -606,7 +606,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             {t('bm.import')}
             <input
               type="file"
-              accept="application/json,.json"
+              accept="application/json,.json,.gpx,application/gpx+xml"
               style={{ display: 'none' }}
               onChange={async (e) => {
                 const f = e.target.files?.[0];

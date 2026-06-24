@@ -331,6 +331,16 @@ export const pushRecent = (entry: { lat: number; lng: number; kind: RecentKind; 
   request<RecentEntry>('POST', '/api/recent', entry)
 export const clearRecent = () => request<{ status: string }>('DELETE', '/api/recent')
 export const importBookmarks = (data: any) => request<{ imported: number }>('POST', '/api/bookmarks/import', data)
+export async function importBookmarksGpx(file: File): Promise<{ imported: number }> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${API}/api/bookmarks/gpx/import`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(formatError(err.detail, res.statusText))
+  }
+  return res.json()
+}
 
 export const getInitialPosition = () =>
   request<{ position: { lat: number; lng: number } | null }>('GET', '/api/location/settings/initial-position')

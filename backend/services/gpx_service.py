@@ -56,6 +56,40 @@ class GpxService:
         logger.info("Parsed %d waypoints from GPX", len(coords))
         return coords
 
+    @staticmethod
+    def parse_gpx_named(gpx_content: str) -> list[dict]:
+        """Parse GPX into points that keep their name (for bookmark import).
+
+        Prefers ``<wpt>`` waypoints (named POIs, e.g. exported coordinates);
+        if there are none, falls back to track then route points (unnamed).
+        Each dict has ``lat``, ``lng``, ``name`` and ``description``.
+        """
+        gpx = gpxpy.parse(gpx_content)
+        points: list[dict] = []
+
+        for pt in gpx.waypoints:
+            points.append({
+                "lat": pt.latitude, "lng": pt.longitude,
+                "name": pt.name or "", "description": pt.description or "",
+            })
+        if points:
+            logger.info("Parsed %d named waypoints from GPX", len(points))
+            return points
+
+        for track in gpx.tracks:
+            for segment in track.segments:
+                for pt in segment.points:
+                    points.append({"lat": pt.latitude, "lng": pt.longitude,
+                                   "name": "", "description": ""})
+        if points:
+            return points
+
+        for route in gpx.routes:
+            for pt in route.points:
+                points.append({"lat": pt.latitude, "lng": pt.longitude,
+                               "name": "", "description": ""})
+        return points
+
     # ------------------------------------------------------------------
     # Export
     # ------------------------------------------------------------------

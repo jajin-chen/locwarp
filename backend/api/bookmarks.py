@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -167,6 +167,33 @@ async def import_bookmarks(data: dict):
     import json
     bm = _bm()
     count = bm.import_json(json.dumps(data))
+    return {"imported": count}
+
+
+@router.post("/gpx/import")
+async def import_bookmarks_gpx(file: UploadFile = File(...)):
+    """Import a GPX file as saved coordinates (one bookmark per waypoint)."""
+    from services.gpx_service import GpxService
+
+    content = await file.read()
+    text = content.decode("utf-8")
+    points = GpxService.parse_gpx_named(text)
+    if not points:
+        raise HTTPException(status_code=400, detail="No points found in GPX")
+
+    bm = _bm()
+    raw_name = file.filename or "GPX"
+    base = raw_name.rsplit(".", 1)[0] if raw_name.lower().endswith(".gpx") else raw_name
+    count = 0
+    for i, pt in enumerate(points):
+        name = pt.get("name") or (base if len(points) == 1 else f"{base} {i + 1}")
+        bm.create_bookmark(
+            name=name,
+            lat=pt["lat"],
+            lng=pt["lng"],
+            address=pt.get("description") or "",
+        )
+        count += 1
     return {"imported": count}
 
 

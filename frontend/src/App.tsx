@@ -1350,9 +1350,10 @@ const App: React.FC = () => {
 
   const handleBookmarkImport = useCallback(async (file: File) => {
     try {
-      const text = await file.text()
-      const data = JSON.parse(text)
-      const res = await api.importBookmarks(data)
+      const isGpx = file.name.toLowerCase().endsWith('.gpx')
+      const res = isGpx
+        ? await api.importBookmarksGpx(file)
+        : await api.importBookmarks(JSON.parse(await file.text()))
       await bm.refresh()
       showToast(t('bm.import_success', { n: res.imported }))
     } catch (err: any) {
