@@ -187,6 +187,58 @@ async def export_category_gpx(category_id: str):
                     headers={"Content-Disposition": disposition})
 
 
+@router.get("/gpx/categories/export.zip")
+async def export_categories_zip(ids: str = ""):
+    """Export several categories as a ZIP, one GPX waypoint file per category.
+
+    *ids* is a comma-separated list of category ids. Categories with no saved
+    coordinates are skipped. Each GPX inside the zip is named after its category.
+    """
+    import io
+    import zipfile
+    from services.gpx_service import GpxService
+
+    id_list = [x for x in (ids or "").split(",") if x]
+    if not id_list:
+        raise HTTPException(status_code=400, detail="No categories selected")
+
+    bm = _bm()
+    cats = {c.id: c for c in bm.list_categories()}
+    marks = bm.list_bookmarks()
+
+    buf = io.BytesIO()
+    used: set[str] = set()
+    wrote = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for cid in id_list:
+            cat = cats.get(cid)
+            cat_name = (cat.name if cat else cid) or cid
+            cat_marks = [b for b in marks if (b.category_id or "default") == cid]
+            if not cat_marks:
+                continue
+            gpx_xml = GpxService.generate_gpx_waypoints(
+                [{"lat": m.lat, "lng": m.lng, "name": m.name,
+                  "description": m.address or None} for m in cat_marks],
+                name=cat_name,
+            )
+            base = "".join(ch if ch not in '\\/:*?"<>|' else "_" for ch in cat_name).strip() or "category"
+            fname = f"{base}.gpx"
+            n = 2
+            while fname in used:
+                fname = f"{base} ({n}).gpx"
+                n += 1
+            used.add(fname)
+            zf.writestr(fname, gpx_xml)
+            wrote += 1
+
+    if wrote == 0:
+        raise HTTPException(status_code=404, detail="No bookmarks in selected categories")
+
+    buf.seek(0)
+    return Response(content=buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="bookmarks-categories.zip"'})
+
+
 @router.post("/import")
 async def import_bookmarks(data: dict):
     import json

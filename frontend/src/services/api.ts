@@ -320,6 +320,8 @@ export const reorderBookmarkCategories = (categoryIds: string[]) =>
 export const bookmarksExportUrl = () => `${API}/api/bookmarks/export`
 export const bookmarkGpxExportUrl = (id: string) => `${API}/api/bookmarks/gpx/export/${id}`
 export const bookmarkCategoryGpxExportUrl = (categoryId: string) => `${API}/api/bookmarks/gpx/export/category/${categoryId}`
+export const bookmarkCategoriesGpxZipUrl = (categoryIds: string[]) =>
+  `${API}/api/bookmarks/gpx/categories/export.zip?ids=${encodeURIComponent(categoryIds.join(','))}`
 
 // Recent places: last 20 flights.
 // kind distinguishes the entry point AND the action, so the UI can show

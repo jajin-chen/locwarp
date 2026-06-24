@@ -1779,6 +1779,13 @@ const App: React.FC = () => {
             if (!cat) return
             window.open(api.bookmarkCategoryGpxExportUrl(cat.id), '_blank')
           }}
+          onCategoriesExportGpxZip={(names: string[]) => {
+            const ids = names
+              .map((n) => bm.categories.find((c) => c.name === n)?.id)
+              .filter((x): x is string => !!x)
+            if (ids.length === 0) return
+            window.open(api.bookmarkCategoriesGpxZipUrl(ids), '_blank')
+          }}
           bookmarkShowOnMap={showBookmarkPins}
           onBookmarkShowOnMapChange={setShowBookmarkPins}
           onBookmarkImport={handleBookmarkImport}

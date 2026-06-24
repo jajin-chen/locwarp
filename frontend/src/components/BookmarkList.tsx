@@ -52,6 +52,9 @@ interface BookmarkListProps {
   // Export every coordinate in a category as a single GPX waypoint file.
   // Receives the category name; App resolves the id and triggers the download.
   onCategoryExportGpx?: (name: string) => void;
+  // Export several categories at once as a ZIP (one GPX per category).
+  // Receives the chosen category names; App resolves ids and triggers download.
+  onCategoriesExportGpxZip?: (names: string[]) => void;
   showOnMap?: boolean;
   onShowOnMapChange?: (v: boolean) => void;
   onImport?: (file: File) => Promise<void>;
@@ -107,6 +110,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   onCategoryReorder,
   onBookmarkReorder,
   onCategoryExportGpx,
+  onCategoriesExportGpxZip,
   showOnMap = false,
   onShowOnMapChange,
   onImport,
@@ -149,6 +153,12 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   };
 
   const [contextMenu, setContextMenu] = useState<{ bm: Bookmark; x: number; y: number } | null>(null);
+  // Right-click menu on a category header (export the category, or open the
+  // multi-category export picker). Separate from the per-bookmark menu above.
+  const [catContextMenu, setCatContextMenu] = useState<{ cat: string; x: number; y: number } | null>(null);
+  // Multi-category export dialog: holds the set of category names ticked for
+  // a combined ZIP export (one GPX per category inside the zip).
+  const [catExportPick, setCatExportPick] = useState<Set<string> | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   // Full edit dialog (name + lat + lng) — triggered by context menu "Edit".
@@ -273,6 +283,30 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
       document.removeEventListener('keydown', onEsc);
     };
   }, [contextMenu]);
+
+  // Close the category right-click menu on ESC or any outside click.
+  useEffect(() => {
+    if (!catContextMenu) return;
+    const onOutside = (e: Event) => {
+      const target = e.target as Element | null;
+      if (target && target.closest?.('[data-bookmark-context-menu]')) return;
+      setCatContextMenu(null);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCatContextMenu(null);
+    };
+    const id = setTimeout(() => {
+      document.addEventListener('pointerdown', onOutside);
+      document.addEventListener('contextmenu', onOutside);
+      document.addEventListener('keydown', onEsc);
+    }, 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('pointerdown', onOutside);
+      document.removeEventListener('contextmenu', onOutside);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [catContextMenu]);
 
   // Dismiss the category color picker on outside click / ESC.
   useEffect(() => {
@@ -982,26 +1016,6 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
               ) : (
                 <span style={{ flex: 1 }}>{displayCat(cat)}</span>
               )}
-              {onCategoryExportGpx && editingCategory !== cat && (
-                <button
-                  onClick={() => onCategoryExportGpx(cat)}
-                  title={t('bm.export_category_gpx')}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--fg-muted, #888)',
-                    cursor: 'pointer',
-                    padding: '2px 4px',
-                    fontSize: 11,
-                  }}
-                >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                </button>
-              )}
               {cat !== 'Default' && cat !== '預設' && onCategoryRename && editingCategory !== cat && (
                 <button
                   onClick={() => { setEditingCategory(cat); setEditCategoryName(cat); }}
@@ -1196,6 +1210,13 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
               setDragOverCatName(null);
             }}
             onDragEnd={() => { setDraggedCatName(null); setDragOverCatName(null); }}
+            onContextMenu={(e) => {
+              if (cat === 'Uncategorized' || !onCategoryExportGpx) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setContextMenu(null);
+              setCatContextMenu({ cat, x: e.clientX, y: e.clientY });
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -1612,6 +1633,141 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
             )}
           </div>
         </>,
+        document.body,
+      )}
+
+      {/* Category right-click menu — export this category, or pick several */}
+      {catContextMenu && onCategoryExportGpx && createPortal(
+        <div
+          data-bookmark-context-menu
+          style={{
+            position: 'fixed',
+            left: Math.min(catContextMenu.x, window.innerWidth - 200),
+            top: Math.min(catContextMenu.y, window.innerHeight - 120),
+            zIndex: 9999,
+            background: '#2a2a2e',
+            border: '1px solid #444',
+            borderRadius: 6,
+            padding: '4px 0',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            minWidth: 180,
+          }}
+        >
+          <div
+            style={ctxItemStyle}
+            onMouseEnter={ctxHighlight}
+            onMouseLeave={ctxUnhighlight}
+            onClick={() => {
+              onCategoryExportGpx(catContextMenu.cat);
+              setCatContextMenu(null);
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6 }}>
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            {t('bm.export_category_gpx')}
+          </div>
+          {onCategoriesExportGpxZip && categories.length > 1 && (
+            <div
+              style={ctxItemStyle}
+              onMouseEnter={ctxHighlight}
+              onMouseLeave={ctxUnhighlight}
+              onClick={() => {
+                setCatExportPick(new Set([catContextMenu.cat]));
+                setCatContextMenu(null);
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6 }}>
+                <path d="M21 8v13H3V8" />
+                <rect x="1" y="3" width="22" height="5" rx="1" />
+                <line x1="10" y1="12" x2="14" y2="12" />
+              </svg>
+              {t('bm.export_categories_zip')}
+            </div>
+          )}
+        </div>,
+        document.body,
+      )}
+
+      {/* Multi-category export picker — tick categories, download one ZIP
+          containing a GPX per category. */}
+      {catExportPick && onCategoriesExportGpxZip && createPortal(
+        <div
+          onClick={() => setCatExportPick(null)}
+          className="anim-fade-in"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 10000,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#2a2a2e', border: '1px solid #444', borderRadius: 8,
+              padding: 16, width: 300, maxHeight: '70vh',
+              display: 'flex', flexDirection: 'column', gap: 10,
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{t('bm.export_categories_zip')}</div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, opacity: 0.8, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={catExportPick.size === categories.length && categories.length > 0}
+                ref={(el) => { if (el) el.indeterminate = catExportPick.size > 0 && catExportPick.size < categories.length; }}
+                onChange={() => {
+                  setCatExportPick((prev) => {
+                    if (prev && prev.size === categories.length) return new Set();
+                    return new Set(categories);
+                  });
+                }}
+                style={{ margin: 0, cursor: 'pointer' }}
+              />
+              {t('bm.select_all')}
+            </label>
+            <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {categories.map((cat) => (
+                <label
+                  key={cat}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 2px', cursor: 'pointer' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={catExportPick.has(cat)}
+                    onChange={() => {
+                      setCatExportPick((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(cat)) next.delete(cat); else next.add(cat);
+                        return next;
+                      });
+                    }}
+                    style={{ margin: 0, cursor: 'pointer' }}
+                  />
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: resolveColor(cat), flexShrink: 0 }} />
+                  {displayCat(cat)}
+                </label>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="action-btn" onClick={() => setCatExportPick(null)} style={{ fontSize: 12 }}>
+                {t('generic.cancel')}
+              </button>
+              <button
+                className="action-btn"
+                disabled={catExportPick.size === 0}
+                onClick={() => {
+                  onCategoriesExportGpxZip(Array.from(catExportPick));
+                  setCatExportPick(null);
+                }}
+                style={{ fontSize: 12, opacity: catExportPick.size === 0 ? 0.5 : 1 }}
+              >
+                {t('bm.export_gpx')}
+              </button>
+            </div>
+          </div>
+        </div>,
         document.body,
       )}
 

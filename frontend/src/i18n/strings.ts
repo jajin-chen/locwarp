@@ -633,6 +633,7 @@ export const STRINGS = {
   'bm.export_tooltip': { zh: '匯出所有收藏與分類為 JSON', en: 'Export all bookmarks and categories as JSON' },
   'bm.export_gpx': { zh: '匯出 GPX', en: 'Export GPX' },
   'bm.export_category_gpx': { zh: '匯出此分類 GPX', en: 'Export this category as GPX' },
+  'bm.export_categories_zip': { zh: '匯出多個分類(ZIP)', en: 'Export multiple categories (ZIP)' },
   'bm.import': { zh: '匯入', en: 'Import' },
   'bm.import_tooltip': { zh: '從 JSON 或 GPX 匯入收藏(合併,不覆蓋既有;GPX 航點會各成一筆座標)', en: 'Import bookmarks from JSON or GPX (merge, does not overwrite existing; each GPX waypoint becomes one coordinate)' },
   'bm.import_success': { zh: '匯入成功:共 {n} 筆', en: 'Imported {n} entries' },
