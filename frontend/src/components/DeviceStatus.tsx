@@ -70,6 +70,15 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   const [savedIps, setSavedIps] = useState(readSavedIps);
   const [showSavedIps, setShowSavedIps] = useState(false);
   const refreshSavedIps = () => setSavedIps(readSavedIps());
+  // Let users prune stale entries (e.g. after switching WiFi networks the
+  // old IP can never work again, and the max-5 ring buffer would otherwise
+  // stay clogged with dead addresses).
+  const removeSavedIp = (ip: string, port: number) => {
+    const next = readSavedIps().filter((e) => !(e.ip === ip && e.port === port));
+    try { localStorage.setItem('locwarp.tunnel.savedips', JSON.stringify(next)); } catch { /* ignore */ }
+    setSavedIps(next);
+    if (next.length === 0) setShowSavedIps(false);
+  };
   // Map udid -> last known device name, harvested from savedips. Lets the
   // active-tunnel card and recent list keep showing the real phone name
   // after a WiFi drop, instead of falling back to a raw UDID string
@@ -760,9 +769,26 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                                       {entry.ip}:{entry.port}
                                     </div>
                                   </div>
-                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5, flexShrink: 0 }}>
-                                    <polyline points="9 18 15 12 9 6" />
-                                  </svg>
+                                  <button
+                                    type="button"
+                                    title={t('wifi.recent_ip_delete_tooltip')}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      removeSavedIp(entry.ip, entry.port);
+                                    }}
+                                    style={{
+                                      flexShrink: 0, padding: '2px 4px', lineHeight: 0,
+                                      background: 'transparent', border: 'none',
+                                      color: '#e07a7a', opacity: 0.6, cursor: 'pointer', borderRadius: 3,
+                                    }}
+                                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '1'; }}
+                                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.6'; }}
+                                  >
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                      <line x1="18" y1="6" x2="6" y2="18" />
+                                      <line x1="6" y1="6" x2="18" y2="18" />
+                                    </svg>
+                                  </button>
                                 </div>
                               );
                             })}

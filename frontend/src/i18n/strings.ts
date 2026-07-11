@@ -148,10 +148,10 @@ export const STRINGS = {
   'mode.random_walk': { zh: '隨機漫步', en: 'Random Walk' },
   'mode.joystick': { zh: '搖桿操控', en: 'Joystick' },
   'mode.goldditto': { zh: '拉金盆', en: 'Gold Flower' },
-  'mode.flower': { zh: '種花模式', en: 'Flower Mode' },
+  'mode.flower': { zh: '花農專用', en: 'Flower Farmer' },
 
-  // ── 種花模式 (Flower mode) ───────────────────
-  'flower.title': { zh: '種花設定', en: 'Flower settings' },
+  // ── 花農專用 (Flower Farmer mode) ─────────────
+  'flower.title': { zh: '花農設定', en: 'Flower Farmer settings' },
   'flower.hint': { zh: '在每個路徑點周圍繞圈圈,可走過去或瞬移過去', en: 'Circle around each waypoint, walking or teleporting there' },
   'flower.radius': { zh: '繞圈距離', en: 'Circle radius' },
   'flower.segments': { zh: '每圈段數', en: 'Segments per circle' },
@@ -301,6 +301,7 @@ export const STRINGS = {
     zh: '從最近連線過的 IP 直接挑一個帶回欄位,免重打',
     en: 'Pick a recently used IP — fills the field without retyping',
   },
+  'wifi.recent_ip_delete_tooltip': { zh: '刪除這筆紀錄', en: 'Delete this entry' },
   'wifi.tunnel_local_endpoint': { zh: '本機通道', en: 'Local tunnel' },
   'wifi.pin_on': { zh: '已釘選', en: 'Pinned' },
   'wifi.pin_off': { zh: '釘選', en: 'Pin' },
