@@ -999,13 +999,20 @@ const RouteList: React.FC<RouteListProps> = ({
       )}
 
       {/* Context menu */}
-      {contextMenu && createPortal(
+      {contextMenu && (() => {
+        const moveTargets = categories.filter((c) => c.id !== (contextMenu.route.category_id || 'default'));
+        // Estimated menu height (move-to list capped at 9 rows) so the top clamp keeps it on-screen.
+        const estHeight = 150 + (onRouteMove && categories.length > 1 ? 30 + Math.min(moveTargets.length, 9) * 26 : 0);
+        const menuTop = Math.max(8, Math.min(contextMenu.y, window.innerHeight - estHeight - 8));
+        return createPortal(
         <div
           data-route-context-menu
           style={{
             position: 'fixed',
             left: Math.min(contextMenu.x, window.innerWidth - 180),
-            top: Math.min(contextMenu.y, window.innerHeight - 240),
+            top: menuTop,
+            maxHeight: window.innerHeight - 16,
+            overflowY: 'auto',
             zIndex: 9999,
             background: '#2a2a2e', border: '1px solid #444', borderRadius: 6,
             padding: '4px 0', boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
@@ -1066,9 +1073,8 @@ const RouteList: React.FC<RouteListProps> = ({
             <>
               <div style={{ height: 1, background: '#444', margin: '4px 0' }} />
               <div style={{ padding: '4px 12px', fontSize: 10, opacity: 0.5 }}>{t('bm.move_to')}</div>
-              {categories
-                .filter((c) => c.id !== (contextMenu.route.category_id || 'default'))
-                .map((cat) => (
+              <div style={{ maxHeight: 9 * 26, overflowY: 'auto' }}>
+                {moveTargets.map((cat) => (
                   <div
                     key={cat.id}
                     style={ctxItemStyle}
@@ -1087,11 +1093,13 @@ const RouteList: React.FC<RouteListProps> = ({
                     {displayCat(cat.name)}
                   </div>
                 ))}
+              </div>
             </>
           )}
         </div>,
         document.body,
-      )}
+        );
+      })()}
 
       {/* Overwrite-on-save dialog */}
       {overwritePrompt && createPortal(
