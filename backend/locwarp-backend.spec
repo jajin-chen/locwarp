@@ -35,6 +35,13 @@ pyimg4_meta = copy_metadata('pyimg4')
 uvicorn_hidden = collect_submodules('uvicorn')
 fastapi_hidden = collect_submodules('fastapi')
 
+# websockets: uvicorn 0.51's default `auto` now selects the websockets-sansio
+# implementation, which imports the sansio core modules (websockets.frames,
+# websockets.http11, websockets.server, ...). Those are NOT covered by the old
+# manual list below, so collect every submodule to be safe across the
+# 13.x -> 16.x upgrade (legacy + asyncio + sync + sansio core).
+websockets_hidden = collect_submodules('websockets')
+
 # psutil has a Windows-specific extension module that must be bundled
 # for NIC enumeration to work in the frozen exe.
 ps_datas, ps_binaries, ps_hidden = collect_all('psutil')
@@ -46,6 +53,7 @@ hidden = [
     *pyimg4_hidden,
     *uvicorn_hidden,
     *fastapi_hidden,
+    *websockets_hidden,
     *ps_hidden,
     'uvicorn.logging',
     'uvicorn.loops',
