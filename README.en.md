@@ -1,6 +1,6 @@
 # LocWarp
 
-**iOS Virtual Location Simulator**, a Windows-based tool that controls an iPhone's GPS location. Supports Teleport, Navigate, Route Loop, Multi-Stop, Random Walk, and Joystick modes over USB or Wi-Fi.
+**iOS Virtual Location Simulator**, a Windows-based tool that controls an iPhone's GPS location. Supports Teleport, Navigate, Multi-point Route, Flower Farmer circling, Random Walk, and Joystick modes over USB or Wi-Fi.
 
 <p align="right">
   <a href="README.md"><img alt="繁體中文" src="https://img.shields.io/badge/繁體中文-gray?style=flat-square"></a>
@@ -39,7 +39,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 >
 > LocWarp is an independently-maintained open source project, not a commercial product, and without a dedicated team. The author will make reasonable efforts to add features, respond to issues, fix bugs and track iOS / pymobiledevice3 updates, however:
 >
-> - Stable operation is only guaranteed in **the developer's own test environment** (currently iPhone 16 Pro Max / iOS 26.4.1 + Windows 11 Pro);
+> - Stable operation is only guaranteed in **the developer's own test environment** (currently iPhone 16 Pro Max / iOS 26.5 + Windows 11 Pro);
 > - **Stability on other devices, iOS patch revisions, network environments or system configurations is not guaranteed**;
 > - If you run into issues, please open an [Issue](https://github.com/keezxc1223/locwarp/issues) with full environment details and logs so the problem can be reproduced and addressed;
 > - The project makes no commitment to perpetual maintenance, and accepts no liability for consequences arising from its use.
@@ -92,18 +92,21 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 | --- | --- |
 | **Teleport** | Instantly jump to a coordinate |
 | **Navigate** | Walk / run / drive along an OSRM route to a destination |
-| **Route Loop** | Loop a closed route indefinitely, with a **random 5–20 s pause** at each station (configurable) |
-| **Multi-stop** | Sequentially visit waypoints, with a **random 5–20 s pause** at each stop (configurable) |
+| **Multi-point Route** | Sequentially visit waypoints with a **random 5–20 s pause** at each stop (configurable). Lap count: **0 = single pass, N = that many laps, empty = loop forever**. The former Route Loop and Multi-stop modes were merged into this one in v0.2.177 |
+| **Flower Farmer** | **Circles around each waypoint** (v0.2.178+): circle radius, segments per circle (3–20), circles per point (0.5 steps, 0.5 = half circle), total rounds, and per-point pre/post waits are all configurable and persisted; walk or teleport between points. The settings panel shows a live **estimated total time**, and the run auto-reconnects and resumes after a connection drop |
 | **Random Walk** | Wander randomly within a radius, with configurable pause between legs |
 | **Joystick** | Realtime direction + intensity control; supports **WASD / arrow keys** |
 
-#### Point-to-point Jump (v0.2.96+)
+#### Point-to-point Jump
 
-Loop and Multi-stop modes have a **Point-to-point jump** checkbox. When enabled the device teleports stop-to-stop and dwells at each waypoint for a configurable interval (default 12 seconds, freely editable) instead of walking the routed path. Useful when you only need the iPhone to dwell at each waypoint in order. The setting is remembered in localStorage.
+Multi-point Route mode has a **Point-to-point jump** checkbox. When enabled, the simulated location teleports stop-to-stop instead of walking the routed path. Useful when you only need the GPS to dwell at each waypoint in order. The settings are remembered in localStorage.
+
+- **Pre-jump delay** (default 2 s): wait before each teleport; both delays freeze while paused (v0.2.158+)
+- **Post-jump delay** (default 4 s): dwell time at the waypoint after each jump
 
 ### Multi-device Group Mode (v0.2.0+, up to three devices)
 
-Connect **up to three iPhones at once**. Every action (teleport, navigate, loop, multi-stop, random walk, joystick, pause, resume, stop, apply speed, restore-all) fans out to every connected device in parallel — both the desktop UI and the phone web control honour this.
+Connect **up to three iPhones at once**. Every action (teleport, navigate, multi-point route, flower, random walk, joystick, pause, resume, stop, apply speed, restore-all) fans out to every connected device in parallel — both the desktop UI and the phone web control honour this.
 
 - Device chips in the sidebar header show connection state and sim state for every device. Right-click for per-device restore / enable dev mode / disconnect.
 - Status bar pills show coords, speed, mode for each device. "Restore all" wipes every device at once.
@@ -131,8 +134,8 @@ The choice is persisted in localStorage. When any engine fails (502 / timeout / 
 - **Three presets**: Walking 5 / Running 10 / Driving 40 km/h
 - **Custom fixed speed**: override with any km/h value
 - **Random range**: enter min–max (e.g., 40–80 km/h); backend re-picks per leg for realistic variation
-- **Apply new speed mid-route**: change speed during navigate / loop / multi-stop / random-walk / joystick and press **Apply**, backend re-interpolates the remaining route from the device's current position with the new speed and continues, **no stop+restart needed**
-- Status bar shows the **backend-reported active speed** (typed-but-not-applied values don't lie about what's running)
+- **Apply new speed mid-route**: change speed during navigate / multi-point route / flower / random-walk / joystick and press **Apply**, backend re-interpolates the remaining route from the current position with the new speed and continues, **no stop+restart needed**. Applying during a dwell pause also works, and the new speed sticks after reaching the next waypoint (v0.2.189+)
+- Status bar speed display **reflects the selected speed in real time**; the chosen speed is remembered as the default across restarts (v0.2.175+)
 - Orange countdown banner shows on top of the map during pauses
 
 ### Phone Web Control (v0.2.96+)
@@ -157,10 +160,12 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 
 - **USB**: plug in and auto-connect; screen can be locked freely
 - **Wi-Fi Tunnel (USB-free mode)**:
-  - "Auto Detect" first tries mDNS, then falls back to a /24 TCP scan on port 49152
-  - Successful IP / Port is saved to localStorage and auto-filled next launch
+  - "Auto Detect" first tries mDNS, then falls back to a /24 TCP scan, trying each candidate port in turn
+  - Successful IP / Port is saved to localStorage and auto-filled next launch; the "Recent" IP list supports per-entry delete (v0.2.190+)
   - Stopping the tunnel automatically falls back to USB if still plugged in
   - **Re-pair** button: rebuilds a damaged RemotePairing record (`~/.pymobiledevice3/`) via USB in one click (iPhone shows the Trust prompt)
+  - **Pin device** (v0.2.160+): pin a connected device to auto-connect it on every launch and auto-retry after drops; while a device is pinned, other phones on the network are not auto-scanned
+  - **Keep-alive while the screen is off** (v0.2.160+, experimental): re-sends the location over the RSD tunnel every second (also while idle since v0.2.173) to keep the iPhone's network interface awake after the screen turns off; the heartbeat also runs during point-to-point jump / flower dwell waits (v0.2.188+)
 - **Real-time USB hotplug detection**:
   - Unplug detected within ~4 s: drops engine + red banner + right-click menu shows "USB disconnected"
   - Re-plug auto-detected and reconnected, engine rebuilt, **no refresh needed**
@@ -190,14 +195,17 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
   - Auto-fills **place name** (short) and **country flag** on add (reverse geocode)
   - **Multi-select delete**, **per-category color picker** (10 presets + arbitrary HEX), search, sort (name / date / last-used)
   - **Drag-and-drop reorder** (v0.2.146+): both categories and individual items can be hand-ordered, persisted to localStorage
+  - **GPX import / export** (v0.2.184+): right-click a bookmark to export it as a GPX waypoint; GPX files import as one bookmark per waypoint; right-click a category to export the whole category, or tick several categories and export them together as a ZIP (one GPX per category, v0.2.186+)
+  - **Tens of thousands of bookmarks without lag** (v0.2.183+): map rendering uses a cluster index with viewport culling, only points inside the current view are rendered; small clusters keep the list popup, large clusters zoom in on click
   - "Show all on map" toggle: renders every bookmark as a neon-glass capsule pin (with flag) plus Polaroid-style cluster cards when they overlap
   - "Click also flies GPS" toggle: when ticked, clicking a bookmark teleports the iPhone (default); when unticked, only the map view pans there and the iPhone GPS stays put
   - Editing coordinates re-fetches the country flag automatically
 - **Saved routes**: GPX import / export, JSON full export / import
+  - **Start navigation directly** (v0.2.177+): a saved route can be loaded and started straight from the list, no separate load-then-switch-mode step
   - **Route categories** (v0.2.133+): saving with an existing name offers to overwrite the previous route
   - **Drag-and-drop reorder** (v0.2.146+): both categories and route items can be hand-ordered
-  - **Copy coordinates** (v0.2.151+): multi-stop / route panels output `lat, lng` one-per-line in current order, pasteable back into the bulk-paste dialog or any external tool
-  - **Optimal order** (v0.2.134+): multi-stop runs a TSP pass through the BRouter engine (no more straight-line distance estimates); v0.2.143+ feeds the result straight into the movement modes, with ETA toasts using the user's actual configured speed
+  - **Copy coordinates** (v0.2.151+): multi-point route panels output `lat, lng` one-per-line in current order, pasteable back into the bulk-paste dialog or any external tool
+  - **Optimal order** (v0.2.134+): multi-point route runs a TSP pass through the BRouter engine (no more straight-line distance estimates); v0.2.143+ feeds the result straight into the movement modes, with ETA toasts using the user's actual configured speed
 - **Waypoint + route line**: subway-station style S/1/2/3 markers + animated flowing-arrow polyline for clear direction sense
 - **Address search**: three free providers, swap in the settings panel (selection persisted to localStorage)
   - **Nominatim** (default): OSM official, global coverage
@@ -206,7 +214,7 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
   - The phone web control follows the desktop's provider choice (v0.2.150+), no more getting stuck on Nominatim 403
 - **Cooldown anti-detection**: dynamic delay based on teleport distance
 - **Coordinate format switching**: DD / DMS / DM
-- **Right-click menu auto-clamps**: `useLayoutEffect` measures the real menu size and nudges it inward when it would overflow the right / bottom edge
+- **Right-click menu auto-clamps**: `useLayoutEffect` measures the real menu size and nudges it inward when it would overflow the right / bottom edge; the "Move to" submenu becomes scrollable when too long (v0.2.191+)
 
 ### UX
 
@@ -214,6 +222,10 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 - Real-time WebSocket push for position, progress, ETA, remaining distance, device connection state
 - Tapping a different mode tab during an active sim no longer wipes the live destination / route / waypoints from the map (v0.2.90+); switching while idle still resets to a clean slate
 - Auto-reconnect on disconnect + banner auto-dismiss
+- **iOS-style top tabs** (v0.2.169+): the sidebar is organized into four top tabs (Navigation / Connection / Favorites / Settings); connection state and device cards live in the Connection tab, settings in the Settings tab; the developer-mode toggle lives permanently in the Settings tab (v0.2.174+)
+- **Collapsible waypoint list** (v0.2.177+): when collapsed, only the current and next waypoint are shown, keeping long routes compact
+- The **left-click-sets-waypoint** option remembers its last state across restarts (v0.2.176+)
+- **Auto-zoom in route-only display** (v0.2.161+): choosing "show route only" pans and zooms the map to fit the whole route; the loaded route's name is shown in the panel with full wrapping
 - **Update check**: at startup, compares against the latest GitHub Release. When a newer version exists, a colourful animated `NEW` pill appears next to the version number in the bottom status bar (no popup interrupting your workflow); clicking the version takes you to the download page
 - **Timezone chip** (status bar, v0.2.128+): displays local-vs-here offset after crossing a timezone; tap to open a popup with full timezone / city / GMT-offset details. Bottom-right clock ticks live.
 - **Route completion sound** (v0.2.131+): plays a short cue when a route finishes; new "Settings" button next to it can mute
@@ -245,12 +257,14 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 
 | Tech | Version | Purpose |
 | --- | --- | --- |
-| [Electron](https://www.electronjs.org/) | 30 | Desktop shell: window management, spawn backend, tile referer injection |
-| [React](https://react.dev/) | 18.3 | UI framework |
-| [TypeScript](https://www.typescriptlang.org/) | 5.5 | Type-safe JS |
-| [Vite](https://vitejs.dev/) | 5.4 | Dev server + production bundling (`base: './'` for `file://` loading) |
+| [Electron](https://www.electronjs.org/) | 43 | Desktop shell: window management, spawn backend, tile referer injection |
+| [React](https://react.dev/) | 19 | UI framework |
+| [TypeScript](https://www.typescriptlang.org/) | 7 | Type-safe JS |
+| [Vite](https://vitejs.dev/) | 8 | Dev server + production bundling (`base: './'` for `file://` loading) |
 | [Leaflet](https://leafletjs.com/) | 1.9 | Interactive map (tile switcher + custom divIcon bookmark/waypoint markers + animated polyline) |
+| [MapLibre GL](https://maplibre.org/) | 5 | Renders the OpenFreeMap Liberty vector layer (mounted via the leaflet bridge) |
 | Inline SVG | n/a | Weather icons, bookmark pins, waypoint markers, controls. Zero third-party icon sets. |
+| PNG assets | n/a | 6 bundled map-pin avatars (`src/assets/avatars/`), hashed by Vite at build time |
 | CSS | n/a | Hand-written `styles.css`, includes all keyframe animations |
 
 ### Backend
@@ -258,11 +272,11 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 | Tech | Version | Purpose |
 | --- | --- | --- |
 | Python | 3.13 | Runtime (upgraded from 3.12 in v0.2.4) |
-| [FastAPI](https://fastapi.tiangolo.com/) | 0.110+ | REST API + WebSocket |
-| [uvicorn](https://www.uvicorn.org/) | 0.29+ | ASGI server (`:8777`) |
-| [websockets](https://websockets.readthedocs.io/) | 12+ | Real-time position / status push to frontend |
-| [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) | 9.9+ | iOS device protocols (DVT / RemoteServices / lockdown / LegacyLocationService) |
-| [pydantic](https://docs.pydantic.dev/) | 2+ | Request / response validation (schemas) |
+| [FastAPI](https://fastapi.tiangolo.com/) | 0.139+ | REST API + WebSocket |
+| [uvicorn](https://www.uvicorn.org/) | 0.51+ | ASGI server (`:8777`) |
+| [websockets](https://websockets.readthedocs.io/) | 16+ | Real-time position / status push to frontend |
+| [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) | 10.1+ | iOS device protocols (DVT / RemoteServices / lockdown / LegacyLocationService) |
+| [pydantic](https://docs.pydantic.dev/) | 2.13+ | Request / response validation (schemas) |
 | [httpx](https://www.python-httpx.org/) | 0.27+ | OSRM / OSRM FOSSGIS / Valhalla / BRouter / Nominatim / TimezoneDB HTTP calls |
 | [gpxpy](https://github.com/tkrajina/gpxpy) | 1.6+ | GPX route parsing |
 
@@ -310,8 +324,9 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 | `simulation_engine.py` | Central controller: state transitions, task lifecycle, `_move_along_route()` movement loop, `EtaTracker` |
 | `device_manager.py` | Device discovery, USB / Wi-Fi Tunnel connection management |
 | `navigator.py` | Single-destination OSRM navigation |
-| `route_loop.py` | Closed-route infinite loop |
+| `route_loop.py` | Multi-point route looping (0 / N / infinite laps) |
 | `multi_stop.py` | Multi-point sequential with dwell |
+| `flower.py` | Flower Farmer: circles around each waypoint |
 | `random_walk.py` | Random walk inside a radius |
 | `joystick.py` | Real-time direction / magnitude control |
 | `teleport.py` / `restore.py` | Teleport / clear virtual location |
@@ -445,7 +460,7 @@ build-installer.bat
 Pipeline:
 1. **PyInstaller (3.13)** → `dist-py/locwarp-backend/` (backend + embedded WiFi tunnel)
 2. **Vite** → `frontend/dist/`
-3. **electron-builder** → NSIS installer `frontend/release/LocWarp Setup X.Y.Z.exe` (~110 MB)
+3. **electron-builder** → NSIS installer `frontend/release/LocWarp Setup X.Y.Z.exe` (~170 MB)
 
 The installer is self-contained, end users need no Python or Node installed.
 

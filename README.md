@@ -1,6 +1,6 @@
 # LocWarp
 
-**iOS 虛擬定位模擬器**, 在 Windows 上控制 iPhone 的 GPS 定位,支援直接跳點、導航、路線循環、多點停留、隨機漫步、搖桿操作等模擬模式,可經由 USB 或 WiFi 連線。
+**iOS 虛擬定位模擬器**, 在 Windows 上控制 iPhone 的 GPS 定位,支援直接跳點、導航、多點路徑巡迴、繞點花農模式、隨機漫步、搖桿操作等模擬模式,可經由 USB 或 WiFi 連線。
 
 <p align="right">
   <a href="README.md"><img alt="繁體中文" src="https://img.shields.io/badge/繁體中文-active-2d3748?style=flat-square"></a>
@@ -91,14 +91,14 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 | --- | --- |
 | **Teleport** | 瞬間跳到指定座標 |
 | **Navigate** | 從目前位置沿 OSRM 路線步行/跑步/開車到目的地 |
-| **Route Loop** | 無限循環指定路線,**每站隨機 5~20 秒停頓**(可自訂) |
-| **Multi-stop** | 依序經過多個停靠點,**每站隨機 5~20 秒停頓**(可自訂) |
+| **多點路徑** | 依序經過多個路徑點,**每站隨機 5~20 秒停頓**(可自訂);圈數可設 **0(跑一趟)/ N(繞 N 圈)/ 留空(無限循環)**,原「路線巡迴」與「多點停留」自 v0.2.177 起合併為此模式 |
+| **花農專用** | 在每個路徑點周圍**繞圈圈**(v0.2.178+):繞圈距離、每圈段數(3~20)、每點圈數(0.5 步進,0.5 = 半圈)、總輪數、每點前後等待皆可自訂並保存,點與點之間可走過去或瞬移;設定面板即時顯示**整趟預估總時長**,斷線會自動重連續跑 |
 | **Random Walk** | 在指定半徑內隨機漫遊,每段停頓時間可調 |
 | **Joystick** | 以方向 + 力度即時操控,支援 **WASD / 方向鍵** 鍵盤操作 |
 
 #### 點對點跳躍
 
-路線巡迴 / 多點導航中可勾「**點對點跳躍**」,改成逐點瞬移、不再走 OSRM 路徑。適合不想真的走過去、只要 iPhone 依序停留在每個點上的場景。設定會記在 localStorage。
+多點路徑中可勾「**點對點跳躍**」,改成逐點瞬移、不再走 OSRM 路徑。適合不想真的走過去、只要 iPhone 依序停留在每個點上的場景。設定會記在 localStorage。
 
 - **跳躍前延遲**(預設 2 秒):瞬移前的等待,兩段延遲都會被暫停凍結(v0.2.158+)
 - **跳躍後延遲**(預設 4 秒):瞬移後在該點的停留時間
@@ -106,7 +106,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 ### 多裝置群組模式(三裝置上限)
 
-可同時連接 **最多三台 iPhone**,所有操作 (瞬移、導航、巡迴、多點導航、隨機漫步、搖桿、暫停、繼續、停止、套用速度、全部還原) 會**同步發送**到所有連線的裝置(桌面 UI 跟手機操控都支援)。
+可同時連接 **最多三台 iPhone**,所有操作 (瞬移、導航、多點路徑、花農、隨機漫步、搖桿、暫停、繼續、停止、套用速度、全部還原) 會**同步發送**到所有連線的裝置(桌面 UI 跟手機操控都支援)。
 
 - 側邊欄頂端裝置 chip 顯示連線狀態與目前模式;右鍵選單可單獨還原 / 開發者模式 / 中斷該台
 - 底部狀態列多 pill 並陳每台座標、速度、模式;「全部還原」一鍵清除全部虛擬定位
@@ -134,8 +134,8 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 - **預設三檔**:走路 5 / 跑步 10 / 開車 40 km/h
 - **自訂固定速度**:輸入任意 km/h 覆蓋模式預設
 - **隨機範圍**:輸入 min ~ max(例如 40 ~ 80 km/h),後端每段路重抽,模擬真實路況
-- **路線中即時套用新速度**:導航 / 巡迴 / 多點 / 隨機漫步 / 搖桿模式進行中可修改速度後按「**套用新速度**」,後端從當前位置以新速度重算剩餘路段並接續執行,**不需停下重來**
-- 狀態列顯示**後端實際生效**的速度(輸入新值未套用前不會誤顯示)
+- **路線中即時套用新速度**:導航 / 多點路徑 / 花農 / 隨機漫步 / 搖桿模式進行中可修改速度後按「**套用新速度**」,後端從當前位置以新速度重算剩餘路段並接續執行,**不需停下重來**;停靠等待期間套用也有效,抵達下一個路徑點不會恢復舊速度(v0.2.189+)
+- 狀態列速度顯示**即時反映所選速度**;選過的速度自動記為預設,重開程式沿用(v0.2.175+)
 - 到點/到圈暫停時,地圖上方顯示橘色倒數橫幅
 
 ### 手機網頁操控
@@ -161,11 +161,11 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 - **USB 有線**:插上即自動連線,鎖屏不影響
 - **WiFi Tunnel(USB 拔除模式)**:
   - 按「自動偵測」→ 先 mDNS 廣播 → 失敗自動退回 /24 TCP 掃描,逐一嘗試每個候選 port
-  - 成功連線的 IP / Port 記到 localStorage,下次自動預填
+  - 成功連線的 IP / Port 記到 localStorage,下次自動預填;「最近」IP 清單可逐筆刪除(v0.2.190+)
   - 停止 Tunnel 後若 USB 仍插著,**自動切回 USB 模式**
   - 「**重新配對**」按鈕:RemotePairing 記錄損毀時可一鍵透過 USB 重建 `~/.pymobiledevice3/`(iPhone 會跳信任提示)
   - **釘選裝置**(v0.2.160+):連上後點「釘選」,之後每次啟動自動連上該裝置,斷線也會自動重試;有釘選時不會自動掃網路上的其他手機
-  - **螢幕暗掉維持連線**(v0.2.160+,實驗功能):定期對 RSD tunnel 補送位置保持連線,避免 iPhone 鎖屏後網路介面休眠
+  - **螢幕暗掉維持連線**(v0.2.160+,實驗功能):每秒對 RSD tunnel 補送位置保持連線(v0.2.173 起閒置時也維持),避免 iPhone 鎖屏後網路介面休眠;點對點跳躍 / 花農等待期間也維持心跳(v0.2.188+)
 - **USB 即時熱插拔偵測**:
   - 拔除 USB 約 4 秒內偵測,清除 engine + 廣播紅色橫幅 + 右鍵選單顯示「USB 已斷開」
   - 重新插上自動偵測 + 重新連線 + 重建 engine,**不必重新整理**
@@ -195,14 +195,17 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
   - 新增時**自動抓取地名**(短名稱)與**國旗**(reverse geocode)
   - **多選刪除**、**分類顏色自訂**(10 色預設 + HEX 任意色)、搜尋、排序(名稱 / 日期 / 最後使用)
   - **拖曳排序**(v0.2.146+):分類與項目均可手動拖曳調整顯示順序,記在 localStorage
+  - **GPX 匯入 / 匯出**(v0.2.184+):單筆座標右鍵匯出 GPX 航點;GPX 檔可匯入,航點各成一筆座標;分類右鍵可整分類匯出,勾選多個分類一起匯出 ZIP(一分類一 GPX,v0.2.186+)
+  - **數萬筆收藏不卡頓**(v0.2.183+):地圖顯示改用分群索引與視野裁切,僅渲染目前畫面範圍內的點,小群維持清單彈窗、大群點擊放大展開
   - 勾選「在地圖上顯示所有收藏」:地圖上會顯示所有收藏的精緻 pin(霓虹玻璃膠囊 + 國旗 + 聚合 Polaroid 卡片)
   - 「點擊也要飛 GPS」勾選控制:打勾時點座標會把 iPhone 瞬移過去(預設);取消打勾則只把畫面飛過去看看,iPhone 定位不變
   - 編輯座標時座標改變會自動刷新國旗
 - **儲存路線**:GPX 匯入 / 匯出、JSON 全量匯出 / 匯入
+  - **直接開始導航**(v0.2.177+):收藏的路線可從清單直接載入並開始跑,不必先載入再切模式
   - **路線分類**(v0.2.133+):同名儲存可選擇覆蓋既有路線
   - **拖曳排序**(v0.2.146+):分類與路線項目可手動排序
   - **多點 / 路線複製座標**(v0.2.151+):依目前順序輸出 `lat, lng` 一行一筆,可貼回貼上對話框或外部工具
-  - **最佳順序**(v0.2.134+):多點巡迴可一鍵跑 TSP 找最短順序,改走 BRouter 引擎避免直線估算誤差;v0.2.143+ 結果可直接帶入移動模式,toast 用使用者實際速度估時
+  - **最佳順序**(v0.2.134+):多點路徑可一鍵跑 TSP 找最短順序,改走 BRouter 引擎避免直線估算誤差;v0.2.143+ 結果可直接帶入移動模式,toast 用使用者實際速度估時
 - **路徑點 + 路徑線**:地鐵站點風格的 S/1/2/3 標 + 動態箭頭流動線,看得出方向感
 - **地址搜尋**:三家免費供應商任選(設定面板切換,選擇記在 localStorage)
   - **Nominatim**(預設):OSM 官方,涵蓋全球
@@ -211,7 +214,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
   - 手機網頁版會跟著電腦端的選擇走(v0.2.150+),不會卡在 Nominatim 403
 - **Cooldown 防偵測**:依跳點距離動態延遲,避免異常偵測
 - **座標格式切換**:DD / DMS / DM
-- **右鍵選單自動防出界**:選單會用 `useLayoutEffect` 測量實際尺寸,超出視窗右 / 底邊緣時自動往內推,不會被切
+- **右鍵選單自動防出界**:選單會用 `useLayoutEffect` 測量實際尺寸,超出視窗右 / 底邊緣時自動往內推,不會被切;「移動到」子選單過長時可捲動,不再超出視窗(v0.2.191+)
 
 ### 使用者體驗
 
@@ -219,7 +222,9 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 - WebSocket 即時推播位置、進度、ETA、剩餘距離、裝置連線狀態
 - 模擬進行中切換模式 tab 不再清空地圖上的終點 / 路徑 / 路徑點,閒置時切換才會重置
 - 斷線自動重連 + banner 自動清除
-- **iOS 風格頂端分頁**(v0.2.169+):側邊欄改為導航 / 連線 / 收藏 / 設定四個頂端分頁,連線狀態與裝置卡片獨立在「連線」頁,設定獨立在「設定」頁
+- **iOS 風格頂端分頁**(v0.2.169+):側邊欄改為導航 / 連線 / 收藏 / 設定四個頂端分頁,連線狀態與裝置卡片獨立在「連線」頁,設定獨立在「設定」頁;開發者模式選項常駐「設定」頁(v0.2.174+)
+- **路徑點清單可摺疊**(v0.2.177+):摺疊時只顯示目前與下一個路徑點,長路線不佔畫面
+- **左鍵設置路徑點**選項記憶上次狀態,重開程式自動沿用(v0.2.176+)
 - **更新檢查**:啟動時從 GitHub Releases 比對版本,有新版時在底部狀態列版本號旁顯示彩色 `NEW` 膠囊提示(不再彈出對話框打斷操作),點擊版本號即跳轉到下載頁
 - **時差 chip**(狀態列,v0.2.128+):跨時區後顯示當地時間差,點開彈窗看完整時區 / 城市 / GMT 偏移;右下時鐘即時更新
 - **路線完成提示音**(v0.2.131+):路線跑完播一段音效,新增「設定」按鈕可關閉
@@ -252,11 +257,12 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 | 技術 | 版本 | 用途 |
 | --- | --- | --- |
-| [Electron](https://www.electronjs.org/) | 30 | Desktop shell,負責視窗管理、spawn backend、注入 tile referer |
-| [React](https://react.dev/) | 18.3 | UI framework |
-| [TypeScript](https://www.typescriptlang.org/) | 5.5 | Type-safe JS |
-| [Vite](https://vitejs.dev/) | 5.4 | Dev server + 生產環境打包(`base: './'` 供 `file://` 載入) |
+| [Electron](https://www.electronjs.org/) | 43 | Desktop shell,負責視窗管理、spawn backend、注入 tile referer |
+| [React](https://react.dev/) | 19 | UI framework |
+| [TypeScript](https://www.typescriptlang.org/) | 7 | Type-safe JS |
+| [Vite](https://vitejs.dev/) | 8 | Dev server + 生產環境打包(`base: './'` 供 `file://` 載入) |
 | [Leaflet](https://leafletjs.com/) | 1.9 | 互動地圖(底圖切換 + 自訂 divIcon 書籤/路徑點標記 + 動畫 polyline) |
+| [MapLibre GL](https://maplibre.org/) | 5 | OpenFreeMap Liberty 向量圖層渲染(經 leaflet 橋接層掛入) |
 | Inline SVG | n/a | 天氣圖示、書籤 pin、路徑點標、控制按鈕,完全無第三方 icon 套件 |
 | PNG 靜態資產 | n/a | 6 個地圖釘預設頭像(`src/assets/avatars/`),Vite 自動 hash 打包 |
 | CSS | n/a | 手寫,單一 `styles.css`,包含所有 keyframe 動畫 |
@@ -266,11 +272,11 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 | 技術 | 版本 | 用途 |
 | --- | --- | --- |
 | Python | 3.13 | 主 runtime(v0.2.4 起從 3.12 升級) |
-| [FastAPI](https://fastapi.tiangolo.com/) | 0.110+ | REST API + WebSocket |
-| [uvicorn](https://www.uvicorn.org/) | 0.29+ | ASGI server(`:8777`) |
-| [websockets](https://websockets.readthedocs.io/) | 12+ | 即時位置/狀態推播給前端 |
-| [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) | 9.15+ | iOS 裝置協議(DVT / RemoteServices / lockdown / LegacyLocationService) |
-| [pydantic](https://docs.pydantic.dev/) | 2+ | 資料驗證(schemas) |
+| [FastAPI](https://fastapi.tiangolo.com/) | 0.139+ | REST API + WebSocket |
+| [uvicorn](https://www.uvicorn.org/) | 0.51+ | ASGI server(`:8777`) |
+| [websockets](https://websockets.readthedocs.io/) | 16+ | 即時位置/狀態推播給前端 |
+| [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) | 10.1+ | iOS 裝置協議(DVT / RemoteServices / lockdown / LegacyLocationService) |
+| [pydantic](https://docs.pydantic.dev/) | 2.13+ | 資料驗證(schemas) |
 | [httpx](https://www.python-httpx.org/) | 0.27+ | OSRM / OSRM FOSSGIS / Valhalla / BRouter / Nominatim / TimezoneDB HTTP 呼叫 |
 | [gpxpy](https://github.com/tkrajina/gpxpy) | 1.6+ | GPX 路線解析 |
 
@@ -318,8 +324,9 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 | `simulation_engine.py` | 中央控制器,管理狀態轉換、任務生命週期、`_move_along_route()` 核心移動迴圈、`EtaTracker` |
 | `device_manager.py` | 裝置探索、USB / WiFi Tunnel 連線管理 |
 | `navigator.py` | 單一目的地 OSRM 導航 |
-| `route_loop.py` | 封閉路線無限循環 |
+| `route_loop.py` | 多點路徑循環(圈數 0 / N / 無限) |
 | `multi_stop.py` | 多點依序經過,可停留 |
+| `flower.py` | 花農專用:繞每個路徑點圈圈 |
 | `random_walk.py` | 在半徑內隨機漫遊 |
 | `joystick.py` | 即時方向/力度控制 |
 | `teleport.py` / `restore.py` | 瞬移 / 恢復 |
@@ -402,7 +409,7 @@ build-installer.bat
 依序執行:
 1. **PyInstaller(3.13)** 編譯 backend(含 WiFi tunnel)→ `dist-py/locwarp-backend/`
 2. **Vite** 建置前端 → `frontend/dist/`
-3. **electron-builder** 產出 NSIS 安裝檔 → `frontend/release/LocWarp Setup X.Y.Z.exe`(~110 MB)
+3. **electron-builder** 產出 NSIS 安裝檔 → `frontend/release/LocWarp Setup X.Y.Z.exe`(~170 MB)
 
 產物為單一 exe,使用者無需安裝 Python / Node / 任何套件。
 
@@ -474,6 +481,7 @@ locwarp/
 │   │   ├── navigator.py
 │   │   ├── route_loop.py
 │   │   ├── multi_stop.py
+│   │   ├── flower.py
 │   │   ├── random_walk.py
 │   │   ├── joystick.py
 │   │   └── device_manager.py
