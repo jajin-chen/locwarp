@@ -457,6 +457,12 @@ const App: React.FC = () => {
             const p = JSON.parse(localStorage.getItem('locwarp.tunnel.pinned') || '[]')
             if (Array.isArray(p)) pinnedUdids.push(...p.filter((x: any) => typeof x === 'string'))
           } catch { /* ignore */ }
+          // Case-insensitive identity check: pair-record filenames / RSD
+          // peer_info can differ in case from the udid we originally saved
+          // (backend already compares UDIDs case-insensitively — see
+          // backend/api/device.py). Compare lowercased so a legitimately
+          // pinned phone isn't mistaken for an unpinned stranger and kicked.
+          const pinnedUdidsLc = pinnedUdids.map((u) => u.toLowerCase())
 
           let discovered: Array<{ ip: string; port: number }> = []
           try {
@@ -483,7 +489,7 @@ const App: React.FC = () => {
             candidates.map(async (entry) => {
               const info = await device.startWifiTunnel(entry.ip, entry.port, entry.udid).catch(() => null)
               if (!info) return
-              if (pinnedUdids.length > 0 && !pinnedUdids.includes(info.udid)) {
+              if (pinnedUdidsLc.length > 0 && !pinnedUdidsLc.includes(info.udid.toLowerCase())) {
                 // Discovery reached a device the user never pinned —
                 // undo the connect and scrub it from savedips so it
                 // doesn't come back next launch.

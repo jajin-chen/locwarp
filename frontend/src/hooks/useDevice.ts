@@ -266,11 +266,17 @@ export function useDevice(subscribe?: WsSubscribe) {
 
   const schedulePinReconnect = useCallback((udid: string, delayMs = 5000) => {
     if (pinRetryTimers.current[udid]) return // already scheduled
+    // Case-insensitive identity checks throughout this retry loop: pair-record
+    // filenames / RSD peer_info can differ in case from the udid we originally
+    // saved (backend already compares UDIDs case-insensitively — see
+    // backend/api/device.py). Without this, a pinned phone that reconnects
+    // with different-case udid looks like an unpinned stranger and gets kicked.
+    const udidLc = udid.toLowerCase()
     const attempt = async () => {
       delete pinRetryTimers.current[udid]
       // Stop if the user unpinned, or the tunnel already came back.
-      if (!pinnedRef.current.includes(udid)) return
-      if (tunnelsRef.current.some((tn) => tn.udid === udid)) return
+      if (!pinnedRef.current.some((u) => u.toLowerCase() === udidLc)) return
+      if (tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)) return
       const entry = readSavedEntryFor(udid)
       const failures = pinRetryFailures.current[udid] ?? 0
       if (entry && failures < 2) {
@@ -288,14 +294,14 @@ export function useDevice(subscribe?: WsSubscribe) {
         try {
           const dres = await wifiTunnelDiscover()
           for (const d of dres?.devices || []) {
-            if (tunnelsRef.current.some((tn) => tn.udid === udid)) break
+            if (tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)) break
             try {
               const info = await startWifiTunnelRef.current?.(
                 String(d.ip), Number(d.port) || 49152, udid,
               )
               if (!info) continue
-              if (info.udid === udid) return // reconnected our target
-              if (!pinnedRef.current.includes(info.udid)) {
+              if (info.udid.toLowerCase() === udidLc) return // reconnected our target
+              if (!pinnedRef.current.some((u) => u.toLowerCase() === info.udid.toLowerCase())) {
                 // Reached an unpinned stranger — undo and scrub. Use the
                 // hook's own stopTunnel (not the raw API call) so the
                 // `tunnels` state list drops the entry too; otherwise the
@@ -310,7 +316,10 @@ export function useDevice(subscribe?: WsSubscribe) {
         } catch { /* discover failed — retry cycle continues below */ }
         pinRetryFailures.current[udid] = 0 // next cycle starts with the saved entry again
       }
-      if (pinnedRef.current.includes(udid) && !tunnelsRef.current.some((tn) => tn.udid === udid)) {
+      if (
+        pinnedRef.current.some((u) => u.toLowerCase() === udidLc) &&
+        !tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)
+      ) {
         pinRetryTimers.current[udid] = setTimeout(attempt, 15000)
       }
     }
