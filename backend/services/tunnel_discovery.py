@@ -187,3 +187,45 @@ async def discover_tunnel_candidates(
         seen.add(key)
         unique.append(r)
     return unique
+
+
+async def find_fallback_endpoints(
+    ip: str | None,
+    *,
+    port_scan=None,
+    discover=None,
+) -> list[tuple[str, int]]:
+    """Ordered candidate endpoints to try after direct reconnects failed.
+
+    1. Every open dynamic-range port on the last-known IP — cheap (a few
+       seconds), covers the common case where the iPhone rebound its
+       RemotePairing port after a reboot / WiFi rejoin.
+    2. Full discover results — covers a DHCP address change.
+
+    Deduped on (ip, port); each phase tolerates failure independently.
+    """
+    port_scan = port_scan or _scan_ports_for_ip
+    discover = discover or discover_tunnel_candidates
+    out: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+
+    if ip:
+        try:
+            for p in await port_scan(ip):
+                key = (ip, int(p))
+                if key not in seen:
+                    seen.add(key)
+                    out.append(key)
+        except Exception:
+            logger.warning("Fallback port scan failed for %s", ip, exc_info=True)
+
+    try:
+        for cand in await discover():
+            key = (str(cand["ip"]), int(cand["port"]))
+            if key not in seen:
+                seen.add(key)
+                out.append(key)
+    except Exception:
+        logger.warning("Fallback discover failed", exc_info=True)
+
+    return out
