@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Optional
@@ -55,6 +56,43 @@ class UnsupportedIosVersionError(RuntimeError):
         super().__init__(f"iOS {version} is not supported (requires {self.MIN_VERSION}+)")
 
 logger = logging.getLogger(__name__)
+
+
+class UsbmuxAvailability:
+    """Debounce usbmuxd connection failures.
+
+    On machines without Apple Mobile Device Service every USB poll fails;
+    without this, discover_devices logs a full ERROR traceback every few
+    seconds forever. State machine: first failure logs once and pauses
+    usbmux attempts for `cooldown` seconds; recovery logs once.
+    """
+
+    def __init__(self, cooldown: float = 60.0) -> None:
+        self.cooldown = cooldown
+        self._down_until: float = 0.0
+        self._was_down = False
+
+    def should_attempt(self, now: float) -> bool:
+        return now >= self._down_until
+
+    def record_failure(self, now: float) -> bool:
+        """Register a failed attempt. Returns True iff this is a fresh
+        outage (caller should log it)."""
+        self._down_until = now + self.cooldown
+        fresh = not self._was_down
+        self._was_down = True
+        return fresh
+
+    def record_success(self) -> bool:
+        """Register a successful attempt. Returns True iff the service
+        just recovered from an outage."""
+        recovered = self._was_down
+        self._was_down = False
+        self._down_until = 0.0
+        return recovered
+
+
+usbmux_availability = UsbmuxAvailability()
 
 
 def _parse_ios_version(version_string: str) -> tuple[int, ...]:
@@ -146,11 +184,22 @@ class DeviceManager:
         devices: list[DeviceInfo] = []
         seen_udids: set[str] = set()
 
+        now = time.monotonic()
+        if not usbmux_availability.should_attempt(now):
+            return devices
         try:
             raw_devices = await list_devices()
-        except Exception:
-            logger.exception("Failed to list usbmux devices")
+        except Exception as exc:
+            if usbmux_availability.record_failure(time.monotonic()):
+                logger.warning(
+                    "usbmuxd unreachable (%s: %s) — USB discovery paused, "
+                    "retrying every %.0fs. Is Apple Mobile Device Service "
+                    "(iTunes / Apple Devices) installed and running?",
+                    type(exc).__name__, exc, usbmux_availability.cooldown,
+                )
             return devices
+        if usbmux_availability.record_success():
+            logger.info("usbmuxd reachable again — USB discovery resumed")
 
         for raw in raw_devices:
             try:

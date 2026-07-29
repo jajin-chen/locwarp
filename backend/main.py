@@ -368,11 +368,16 @@ async def _usbmux_presence_watchdog():
                     connected_original[udid.lower()] = udid
             connected = set(connected_original.keys())
 
+            from core.device_manager import usbmux_availability
+            if not usbmux_availability.should_attempt(time.monotonic()):
+                continue
             try:
                 raw = await list_devices()
             except Exception:
+                usbmux_availability.record_failure(time.monotonic())
                 logger.debug("usbmux list_devices failed in watchdog", exc_info=True)
                 continue
+            usbmux_availability.record_success()
             present_usb_original: dict[str, str] = {}  # lowercase → original
             for r in raw:
                 if getattr(r, "connection_type", "USB") == "USB":
