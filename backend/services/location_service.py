@@ -96,10 +96,12 @@ class DvtLocationService(LocationService):
         dvt_provider: DvtProvider,
         lockdown=None,
         dvt_factory: Callable[[], Awaitable[DvtProvider]] | None = None,
+        udid: str | None = None,
     ) -> None:
         self._dvt = dvt_provider
         self._lockdown = lockdown
         self._dvt_factory = dvt_factory
+        self._udid = udid
         self._location_sim: LocationSimulation | None = None
         self._active = False
         self._reconnect_lock = asyncio.Lock()
@@ -193,7 +195,7 @@ class DvtLocationService(LocationService):
             sim = await self._ensure_instrument()
             await sim.set(lat, lng)
             self._active = True
-            logger.info("DVT location set to (%.6f, %.6f)", lat, lng)
+            logger.info("DVT location set to (%.6f, %.6f) [%s]", lat, lng, self._udid or "?")
         except (ConnectionTerminatedError, OSError, EOFError, BrokenPipeError,
                 ConnectionResetError, asyncio.TimeoutError) as exc:
             logger.warning("DVT channel dropped (%s: %s); reconnecting and retrying",
@@ -202,7 +204,7 @@ class DvtLocationService(LocationService):
             sim = await self._ensure_instrument()
             await sim.set(lat, lng)
             self._active = True
-            logger.info("DVT location set to (%.6f, %.6f) after reconnect", lat, lng)
+            logger.info("DVT location set to (%.6f, %.6f) after reconnect [%s]", lat, lng, self._udid or "?")
         except Exception:
             logger.exception("Failed to set DVT simulated location")
             raise

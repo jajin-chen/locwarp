@@ -644,6 +644,7 @@ class DeviceManager:
                 dvt,
                 lockdown=conn.lockdown,
                 dvt_factory=_factory,
+                udid=udid,
             )
         except Exception as dvt_exc:
             logger.warning(
