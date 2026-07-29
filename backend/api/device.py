@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from models.schemas import DeviceInfo
+from services.tunnel_discovery import _scan_ports_for_ip, discover_tunnel_candidates
 
 router = APIRouter(prefix="/api/device", tags=["device"])
 
@@ -279,89 +280,6 @@ class WifiTunnelStartRequest(BaseModel):
     udid: str | None = None
 
 
-def _get_primary_local_ip() -> str | None:
-    """Return this machine's primary IPv4 (the one used to reach the internet)."""
-    import socket as _s
-    try:
-        s = _s.socket(_s.AF_INET, _s.SOCK_DGRAM)
-        s.settimeout(0.5)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except OSError:
-        return None
-
-
-async def _tcp_probe(ip: str, port: int, timeout: float = 0.4) -> bool:
-    try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(ip, port), timeout=timeout,
-        )
-        writer.close()
-        try:
-            await writer.wait_closed()
-        except (OSError, ConnectionError):
-            pass
-        return True
-    except (OSError, ConnectionError, asyncio.TimeoutError):
-        return False
-
-
-async def _scan_subnet_for_port(port: int = 49152) -> list[str]:
-    """Scan the local /24 subnet for hosts responding on the given TCP port."""
-    my_ip = _get_primary_local_ip()
-    if not my_ip:
-        return []
-    try:
-        parts = my_ip.split(".")
-        prefix = ".".join(parts[:3])
-    except (AttributeError, IndexError):
-        return []
-
-    candidates = [f"{prefix}.{i}" for i in range(1, 255) if f"{prefix}.{i}" != my_ip]
-    results = await asyncio.gather(
-        *[_tcp_probe(ip, port, 0.4) for ip in candidates],
-        return_exceptions=True,
-    )
-    hits = [ip for ip, ok in zip(candidates, results) if ok is True]
-    return hits
-
-
-async def _scan_ports_for_ip(
-    ip: str,
-    start: int = 49152,
-    end: int = 65535,
-    concurrency: int = 1024,
-    timeout: float = 0.35,
-) -> list[int]:
-    """Scan the IANA dynamic / ephemeral range on a single IP for open TCP ports.
-
-    iOS picks the RemotePairing port from this range at boot / network rebind,
-    so the actual port on a given iPhone is rarely the legacy 49152 default.
-    Scanning one host across 16k ports finishes in a few seconds because most
-    closed ports return RST immediately on a same-LAN probe.
-    """
-    sem = asyncio.Semaphore(concurrency)
-
-    async def _probe_one(p: int) -> int | None:
-        async with sem:
-            ok = await _tcp_probe(ip, p, timeout)
-            return p if ok else None
-
-    tasks = [asyncio.create_task(_probe_one(p)) for p in range(start, end + 1)]
-    hits: list[int] = []
-    for fut in asyncio.as_completed(tasks):
-        try:
-            res = await fut
-        except (OSError, ConnectionError, asyncio.TimeoutError):
-            res = None
-        if res is not None:
-            hits.append(res)
-    hits.sort()
-    return hits
-
-
 class WifiTunnelFindPortRequest(BaseModel):
     ip: str
 
@@ -385,112 +303,8 @@ async def wifi_tunnel_find_port(req: WifiTunnelFindPortRequest):
 @router.get("/wifi/tunnel/discover")
 async def wifi_tunnel_discover():
     """Find iPhones on the local network. First tries mDNS (Bonjour RemotePairing
-    broadcast); if that yields nothing, falls back to a /24 subnet TCP scan on the
-    standard RemotePairing port (49152)."""
-    results: list[dict] = []
-
-    # --- 1) mDNS / Bonjour broadcast ---
-    try:
-        from pymobiledevice3.bonjour import browse_remotepairing
-        instances = await browse_remotepairing(timeout=3.0)
-        for inst in instances:
-            # Newer pymobiledevice3 returns Address objects with .ip and
-            # .iface attributes; older releases returned plain string IPs.
-            # Pull the bare IP either way so the UI shows e.g.
-            # "192.168.0.185" not "Address(ip='192.168.0.185',
-            # iface='Intel(R) Ethernet Controller (3) I225-V')".
-            raw_addrs = inst.addresses or []
-            str_addrs: list[str] = []
-            for a in raw_addrs:
-                if hasattr(a, "ip"):
-                    str_addrs.append(str(a.ip))
-                else:
-                    str_addrs.append(str(a))
-            ipv4s = [s for s in str_addrs if ":" not in s]
-            addrs = ipv4s if ipv4s else str_addrs
-            for addr in addrs:
-                results.append({
-                    "ip": addr,
-                    "port": inst.port,
-                    "host": inst.host,
-                    "name": inst.instance or inst.host,
-                    "method": "mdns",
-                })
-    except Exception as e:
-        _tunnel_logger.warning("mDNS browse failed: %s", e)
-
-    # --- 2) Fallback: smart /24 scan ---
-    # Old behavior tested only port 49152 across /24, which missed any iPhone
-    # that bound RemotePairing higher in the 49152-65535 dynamic range (most
-    # of them, after the first reboot). Two-phase replacement:
-    #   a) probe every host on /24 against a small set of "iPhone tells"
-    #      (49152 legacy port + 62078 lockdown) to find live candidates
-    #   b) full-range scan (49152-65535) on each candidate to find the
-    #      port iOS actually picked this boot
-    if not results:
-        _tunnel_logger.info(
-            "mDNS empty; falling back to smart /24 scan (probe + full-range)",
-        )
-        try:
-            my_ip = _get_primary_local_ip()
-            candidates: set[str] = set()
-            if my_ip:
-                # Phase a: probe a few likely ports across the /24 in
-                # parallel. ANY hit means "host is alive and probably
-                # interesting" — we'll full-range scan it next.
-                probe_ports = (49152, 62078)
-                for p in probe_ports:
-                    try:
-                        hits = await _scan_subnet_for_port(p)
-                        candidates.update(hits)
-                    except Exception as e:
-                        _tunnel_logger.warning("probe scan port %d failed: %s", p, e)
-
-            if candidates:
-                _tunnel_logger.info(
-                    "Smart scan found %d live host(s); full-range scanning each",
-                    len(candidates),
-                )
-                # Phase b: full 49152-65535 scan in parallel across all
-                # candidate IPs. RemotePairing answers immediately on the
-                # right port, so the first hit per IP is what we want.
-                async def _scan_one(ip: str) -> tuple[str, list[int]]:
-                    try:
-                        ports = await _scan_ports_for_ip(ip)
-                    except Exception as e:
-                        _tunnel_logger.warning("port scan for %s failed: %s", ip, e)
-                        return ip, []
-                    return ip, ports
-
-                scan_results = await asyncio.gather(
-                    *[_scan_one(ip) for ip in candidates],
-                )
-                for ip, ports in scan_results:
-                    if not ports:
-                        continue
-                    # Use the first open port in the dynamic range. We
-                    # add one entry per IP — the user picks from the list.
-                    results.append({
-                        "ip": ip,
-                        "port": ports[0],
-                        "host": ip,
-                        "name": ip,
-                        "method": "tcp_scan",
-                    })
-        except Exception as e:
-            _tunnel_logger.warning("Smart fallback scan failed: %s", e)
-
-    # De-dupe on (ip, port)
-    seen = set()
-    unique = []
-    for r in results:
-        key = (r["ip"], r["port"])
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(r)
-
-    return {"devices": unique}
+    broadcast); if that yields nothing, falls back to a smart /24 subnet scan."""
+    return {"devices": await discover_tunnel_candidates()}
 
 
 async def _cleanup_wifi_connection_for(udid: str, *, caller: str) -> bool:
