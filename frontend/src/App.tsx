@@ -10,6 +10,8 @@ import UserAvatarPicker from './components/UserAvatarPicker'
 import { UserAvatar, avatarToHtml, loadAvatar, saveAvatar, loadCustomPng, saveCustomPng } from './userAvatars'
 import * as api from './services/api'
 import { parseCoord } from './utils/coords'
+import { buildAutoConnectCandidates } from './utils/autoConnect'
+import { readSavedIps, removeSavedIpByUdid, writeSavedIps } from './utils/savedIps'
 
 import MapView from './components/MapView'
 import ControlPanel from './components/ControlPanel'
@@ -442,56 +444,53 @@ const App: React.FC = () => {
           // iPhone via the auto-connect path itself (so it never went
           // through the manual save) — without it, only one iPhone keeps
           // auto-connecting on every launch even though both are paired.
-          const seen = new Set<string>()
-          const uniq: Array<{ ip: string; port: number; udid?: string }> = []
-          const addCand = (ip: string, port: number, udid?: string) => {
-            const key = `${ip}:${port}`
-            if (seen.has(key)) return
-            if (alreadyTunneled.has(key)) return
-            seen.add(key)
-            uniq.push({ ip, port, udid })
-          }
-          // When the user has pinned devices, only auto-connect those UDIDs.
-          // This prevents a friend's device (present on the same WiFi but
-          // in savedips from a previous session) from being auto-connected
-          // on startup (issue #35). If no pins are set, fall back to the
-          // original behaviour so first-time users are unaffected.
+          // When the user has pinned devices we still want ONLY those
+          // devices — but the old approach (skip discovery, replay stale
+          // saved endpoints) meant a rebooted iPhone could never
+          // auto-connect: RemotePairing rebinds its port on every boot.
+          // New approach (see docs/superpowers/specs/
+          // 2026-07-30-reconnect-discovery-design.md): always discover,
+          // connect, then verify the handshake udid against the pin list
+          // and immediately drop anything unpinned (issue #35 intent).
           const pinnedUdids: string[] = []
           try {
             const p = JSON.parse(localStorage.getItem('locwarp.tunnel.pinned') || '[]')
             if (Array.isArray(p)) pinnedUdids.push(...p.filter((x: any) => typeof x === 'string'))
           } catch { /* ignore */ }
-          const hasPins = pinnedUdids.length > 0
-          const filteredList = hasPins
-            ? savedList.filter((e) => e.udid && pinnedUdids.includes(e.udid))
-            : savedList
 
-          for (const entry of filteredList) addCand(entry.ip, entry.port, entry.udid)
-          // Skip mDNS discover when user has pins — avoids connecting to
-          // unintended devices on the same network. Discover only runs
-          // when no pins are set so new users can still auto-connect.
-          if (!hasPins) {
-            try {
-              const dres = await api.wifiTunnelDiscover()
-              for (const d of (dres?.devices || [])) {
-                addCand(String(d.ip), Number(d.port) || 49152)
-              }
-            } catch { /* discover failed — savedips entries still try */ }
-          }
-          // Cap at MAX_DEVICES the backend enforces — anything beyond
-          // would 409 anyway.
-          const limited = uniq.slice(0, 3)
-          if (limited.length === 0) return
+          let discovered: Array<{ ip: string; port: number }> = []
+          try {
+            const dres = await api.wifiTunnelDiscover()
+            discovered = (dres?.devices || []).map((d: any) => ({
+              ip: String(d.ip),
+              port: Number(d.port) || 49152,
+            }))
+          } catch { /* discover failed — saved entries still try */ }
+
+          const candidates = buildAutoConnectCandidates({
+            saved: savedList,
+            discovered,
+            pinnedUdids,
+            alreadyTunneled,
+            max: 3,
+          })
+          if (candidates.length === 0) return
           // Parallel: every iPhone gets a tunnel attempt at the same
           // time so the user doesn't wait sequentially for unreachable
           // ones to time out (~10s each). Pass entry.udid so the backend
-          // tries the right pair record FIRST — without the hint, the
-          // second device's request can stall on the wrong candidate's
-          // 8s handshake timeout and bail.
+          // tries the right pair record FIRST.
           await Promise.allSettled(
-            limited.map((entry) =>
-              device.startWifiTunnel(entry.ip, entry.port, entry.udid).catch(() => {}),
-            ),
+            candidates.map(async (entry) => {
+              const info = await device.startWifiTunnel(entry.ip, entry.port, entry.udid).catch(() => null)
+              if (!info) return
+              if (pinnedUdids.length > 0 && !pinnedUdids.includes(info.udid)) {
+                // Discovery reached a device the user never pinned —
+                // undo the connect and scrub it from savedips so it
+                // doesn't come back next launch.
+                await device.stopTunnel(info.udid).catch(() => {})
+                writeSavedIps(removeSavedIpByUdid(readSavedIps(), info.udid))
+              }
+            }),
           )
         } catch {
           // Silent — tunnel section will show its own error when opened.
