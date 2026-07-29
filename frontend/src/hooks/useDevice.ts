@@ -243,9 +243,10 @@ export function useDevice(subscribe?: WsSubscribe) {
   tunnelsRef.current = tunnels
   const pinRetryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const pinRetryFailures = useRef<Record<string, number>>({})
-  // Set after startWifiTunnel is defined below; the retry loop calls
-  // through the ref so we avoid a definition-order cycle.
+  // Set after startWifiTunnel / stopTunnel are defined below; the retry
+  // loop calls through the refs so we avoid a definition-order cycle.
   const startWifiTunnelRef = useRef<((ip: string, port?: number, udidHint?: string) => Promise<any>) | null>(null)
+  const stopTunnelRef = useRef<((udid?: string) => Promise<void>) | null>(null)
 
   const clearPinRetry = useCallback((udid: string) => {
     const tmr = pinRetryTimers.current[udid]
@@ -295,8 +296,12 @@ export function useDevice(subscribe?: WsSubscribe) {
               if (!info) continue
               if (info.udid === udid) return // reconnected our target
               if (!pinnedRef.current.includes(info.udid)) {
-                // Reached an unpinned stranger — undo and scrub.
-                await wifiTunnelStop(info.udid).catch(() => {})
+                // Reached an unpinned stranger — undo and scrub. Use the
+                // hook's own stopTunnel (not the raw API call) so the
+                // `tunnels` state list drops the entry too; otherwise the
+                // kicked device leaves a zombie chip in the panel until
+                // the next tunnel_lost/device_disconnected broadcast.
+                await stopTunnelRef.current?.(info.udid)
                 writeSavedIps(removeSavedIpByUdid(readSavedIps(), info.udid))
               }
               // A different pinned device is a keeper; keep looking for ours.
@@ -495,6 +500,9 @@ export function useDevice(subscribe?: WsSubscribe) {
       console.error('Failed to stop tunnel:', err)
     }
   }, [])
+  // Expose the latest stopTunnel to the pin-retry loop without making it
+  // a hook dependency (the callback is stable, deps: []).
+  stopTunnelRef.current = stopTunnel
 
   // Group-mode derived state: every device in `devices` marked is_connected.
   // `primaryDevice` sticks to whichever device we picked first; we only
