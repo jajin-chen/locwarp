@@ -2,7 +2,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from models.schemas import DeviceInfo
-from services.tunnel_discovery import _scan_ports_for_ip, discover_tunnel_candidates
+from services.tunnel_discovery import (
+    _scan_ports_for_ip,
+    discover_tunnel_candidates,
+    find_fallback_endpoints,
+)
 
 router = APIRouter(prefix="/api/device", tags=["device"])
 
@@ -465,6 +469,12 @@ async def _attempt_tunnel_restart(
                     await new_runner.stop()
                 except Exception:
                     pass
+                # True here means "stop retrying" (racing user stop / a
+                # concurrent restart already won), not "this candidate
+                # succeeded". Both the direct-retry loop and the fallback
+                # candidate loop in _per_tunnel_watchdog treat any truthy
+                # return the same way: return immediately, don't try more
+                # candidates.
                 return True  # not really success, but caller should NOT retry
             _tunnels[udid] = new_runner
 
@@ -478,8 +488,14 @@ async def _attempt_tunnel_restart(
         # out to be a DIFFERENT iPhone (family device on the same LAN).
         # The pair-record handshake usually rejects that first, but if it
         # does connect, verify identity and bail — the except path below
-        # rolls back the runner we registered.
-        if dev_info.udid != udid:
+        # rolls back the runner we registered. Compare case-insensitively:
+        # dev_info.udid comes from the RSD peer_info while `udid` comes
+        # from the pair-record filename / request, and those two sources
+        # don't always agree on case (see main.py's connected_original /
+        # present_usb_original normalization for the same issue). Skip the
+        # check entirely for the "pending:ip:port" sentinel key used before
+        # a real udid is known — it can never equal a real udid anyway.
+        if not udid.startswith("pending:") and dev_info.udid.lower() != udid.lower():
             _tunnel_logger.warning(
                 "Tunnel restart for %s reached a different device (%s); disconnecting",
                 udid, dev_info.udid,
@@ -567,11 +583,16 @@ async def _attempt_tunnel_restart(
             "Tunnel restart for %s started but post-setup failed; rolling back",
             udid,
         )
-        # Roll back the new runner we registered. Leave the old runner
-        # entry empty so the outer retry loop tries a fresh new one.
+        # Roll back the new runner we registered, restoring the caller's
+        # original runner rather than popping the slot empty. An empty
+        # slot would make the "_tunnels.get(udid) is not runner" guards in
+        # the watchdog's retry/fallback loops misread this as a user-
+        # initiated stop and return early — skipping remaining fallback
+        # candidates and the tunnel_lost teardown that's supposed to run
+        # once every candidate is exhausted.
         async with _tunnels_lock:
             if _tunnels.get(udid) is new_runner:
-                _tunnels.pop(udid, None)
+                _tunnels[udid] = original_runner
         try:
             await new_runner.stop()
         except Exception:
@@ -697,8 +718,6 @@ async def _per_tunnel_watchdog(udid: str, runner: TunnelRunner) -> None:
             # rejoin) or got a new DHCP lease — re-discover before giving
             # up. Each phase runs once; total added time is bounded by
             # one port scan + one discover pass.
-            from services.tunnel_discovery import find_fallback_endpoints
-
             candidates: list[tuple[str, int]] = []
             try:
                 candidates = await find_fallback_endpoints(ip)
@@ -706,6 +725,16 @@ async def _per_tunnel_watchdog(udid: str, runner: TunnelRunner) -> None:
                 _tunnel_logger.exception(
                     "Fallback endpoint discovery failed for %s", udid,
                 )
+            if len(candidates) > 8:
+                # Bound worst-case time: each candidate attempt can take
+                # several seconds, so an unbounded list turns one bad blip
+                # into a long thrash. 8 was picked as a generous cap for a
+                # home/office LAN scan, not a measured limit.
+                _tunnel_logger.info(
+                    "Fallback discovery returned %d candidates for %s; trying first 8",
+                    len(candidates), udid,
+                )
+                candidates = candidates[:8]
             for cand_ip, cand_port in candidates:
                 if _tunnels.get(udid) is not runner:
                     _tunnel_logger.info(
@@ -715,6 +744,20 @@ async def _per_tunnel_watchdog(udid: str, runner: TunnelRunner) -> None:
                     return
                 if cand_ip == ip and cand_port == port:
                     continue  # the direct-retry loop already tried this exact endpoint
+                if any(
+                    r is not runner and r.target_ip == cand_ip and r.target_port == cand_port
+                    for r in _tunnels.values()
+                ):
+                    # This endpoint is already claimed by another live
+                    # tunnel (e.g. a second, currently-connected iPhone on
+                    # the same LAN). Starting a new tunnel against it would
+                    # tear down that device's active connection via
+                    # connect_wifi_tunnel's implicit disconnect(udid).
+                    _tunnel_logger.info(
+                        "Skipping fallback candidate %s:%d for %s; claimed by another tunnel",
+                        cand_ip, cand_port, udid,
+                    )
+                    continue
                 _tunnel_logger.info(
                     "Fallback restart attempt for %s via %s:%d",
                     udid, cand_ip, cand_port,
@@ -745,6 +788,12 @@ async def _per_tunnel_watchdog(udid: str, runner: TunnelRunner) -> None:
                 _tunnel_logger.exception("Failed to emit tunnel_lost event")
     except asyncio.CancelledError:
         raise
+    except Exception:
+        # Anything unhandled here (e.g. an exception leaking out of
+        # _attempt_tunnel_restart) would otherwise die silently as an
+        # unobserved task exception — log it so a crashed watchdog is at
+        # least visible instead of just going quiet.
+        _tunnel_logger.exception("Watchdog for %s crashed unexpectedly", udid)
 
 
 def _build_tunnel_udid_candidates(req: WifiTunnelStartRequest) -> list[str]:
