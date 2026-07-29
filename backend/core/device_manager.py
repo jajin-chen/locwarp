@@ -185,21 +185,20 @@ class DeviceManager:
         seen_udids: set[str] = set()
 
         now = time.monotonic()
-        if not usbmux_availability.should_attempt(now):
-            return devices
-        try:
-            raw_devices = await list_devices()
-        except Exception as exc:
-            if usbmux_availability.record_failure(time.monotonic()):
-                logger.warning(
-                    "usbmuxd unreachable (%s: %s) — USB discovery paused, "
-                    "retrying every %.0fs. Is Apple Mobile Device Service "
-                    "(iTunes / Apple Devices) installed and running?",
-                    type(exc).__name__, exc, usbmux_availability.cooldown,
-                )
-            return devices
-        if usbmux_availability.record_success():
-            logger.info("usbmuxd reachable again — USB discovery resumed")
+        raw_devices = []
+        if usbmux_availability.should_attempt(now):
+            try:
+                raw_devices = await list_devices()
+                if usbmux_availability.record_success():
+                    logger.info("usbmuxd reachable again — USB discovery resumed")
+            except Exception as exc:
+                if usbmux_availability.record_failure(time.monotonic()):
+                    logger.warning(
+                        "usbmuxd unreachable (%s: %s) — USB discovery paused, "
+                        "retrying every %.0fs. Is Apple Mobile Device Service "
+                        "(iTunes / Apple Devices) installed and running?",
+                        type(exc).__name__, exc, usbmux_availability.cooldown,
+                    )
 
         for raw in raw_devices:
             try:

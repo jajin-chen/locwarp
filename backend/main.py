@@ -334,6 +334,7 @@ async def _usbmux_presence_watchdog():
     import time
     from pymobiledevice3.usbmux import list_devices
     from api.websocket import broadcast
+    from core.device_manager import usbmux_availability
 
     miss_counts: dict[str, int] = {}
     miss_threshold = 3
@@ -368,16 +369,22 @@ async def _usbmux_presence_watchdog():
                     connected_original[udid.lower()] = udid
             connected = set(connected_original.keys())
 
-            from core.device_manager import usbmux_availability
             if not usbmux_availability.should_attempt(time.monotonic()):
                 continue
             try:
                 raw = await list_devices()
-            except Exception:
-                usbmux_availability.record_failure(time.monotonic())
+            except Exception as exc:
+                if usbmux_availability.record_failure(time.monotonic()):
+                    logger.warning(
+                        "usbmuxd unreachable (%s: %s) — USB watchdog paused, "
+                        "retrying every %.0fs. Is Apple Mobile Device Service "
+                        "(iTunes / Apple Devices) installed and running?",
+                        type(exc).__name__, exc, usbmux_availability.cooldown,
+                    )
                 logger.debug("usbmux list_devices failed in watchdog", exc_info=True)
                 continue
-            usbmux_availability.record_success()
+            if usbmux_availability.record_success():
+                logger.info("usbmuxd reachable again — USB watchdog resumed")
             present_usb_original: dict[str, str] = {}  # lowercase → original
             for r in raw:
                 if getattr(r, "connection_type", "USB") == "USB":
