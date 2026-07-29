@@ -2,10 +2,11 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   listDevices, connectDevice, disconnectDevice,
   wifiConnect, wifiScan,
-  wifiTunnelStartAndConnect, wifiTunnelStatus, wifiTunnelStop,
+  wifiTunnelStartAndConnect, wifiTunnelStatus, wifiTunnelStop, wifiTunnelDiscover,
   type TunnelInfo,
 } from '../services/api'
 import type { WsMessage } from './useWebSocket'
+import { readSavedIps, removeSavedIpByUdid, upsertSavedIp, writeSavedIps } from '../utils/savedIps'
 
 export interface DeviceInfo {
   udid: string
@@ -241,6 +242,7 @@ export function useDevice(subscribe?: WsSubscribe) {
   const tunnelsRef = useRef<TunnelInfo[]>(tunnels)
   tunnelsRef.current = tunnels
   const pinRetryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const pinRetryFailures = useRef<Record<string, number>>({})
   // Set after startWifiTunnel is defined below; the retry loop calls
   // through the ref so we avoid a definition-order cycle.
   const startWifiTunnelRef = useRef<((ip: string, port?: number, udidHint?: string) => Promise<any>) | null>(null)
@@ -248,6 +250,7 @@ export function useDevice(subscribe?: WsSubscribe) {
   const clearPinRetry = useCallback((udid: string) => {
     const tmr = pinRetryTimers.current[udid]
     if (tmr) { clearTimeout(tmr); delete pinRetryTimers.current[udid] }
+    delete pinRetryFailures.current[udid]
   }, [])
 
   const readSavedEntryFor = (udid: string): { ip: string; port: number } | null => {
@@ -268,11 +271,39 @@ export function useDevice(subscribe?: WsSubscribe) {
       if (!pinnedRef.current.includes(udid)) return
       if (tunnelsRef.current.some((tn) => tn.udid === udid)) return
       const entry = readSavedEntryFor(udid)
-      if (entry && startWifiTunnelRef.current) {
+      const failures = pinRetryFailures.current[udid] ?? 0
+      if (entry && failures < 2) {
         try {
-          await startWifiTunnelRef.current(entry.ip, entry.port, udid)
+          await startWifiTunnelRef.current?.(entry.ip, entry.port, udid)
           return // success path clears the timer via startWifiTunnel
-        } catch { /* fall through and reschedule */ }
+        } catch {
+          pinRetryFailures.current[udid] = failures + 1
+        }
+      } else {
+        // Two direct failures (or nothing saved) — the iPhone likely
+        // rebound its RemotePairing port or moved to a new DHCP lease.
+        // Re-discover once and try the fresh endpoints; identity is
+        // verified after connect (drop anything not pinned).
+        try {
+          const dres = await wifiTunnelDiscover()
+          for (const d of dres?.devices || []) {
+            if (tunnelsRef.current.some((tn) => tn.udid === udid)) break
+            try {
+              const info = await startWifiTunnelRef.current?.(
+                String(d.ip), Number(d.port) || 49152, udid,
+              )
+              if (!info) continue
+              if (info.udid === udid) return // reconnected our target
+              if (!pinnedRef.current.includes(info.udid)) {
+                // Reached an unpinned stranger — undo and scrub.
+                await wifiTunnelStop(info.udid).catch(() => {})
+                writeSavedIps(removeSavedIpByUdid(readSavedIps(), info.udid))
+              }
+              // A different pinned device is a keeper; keep looking for ours.
+            } catch { /* try next candidate */ }
+          }
+        } catch { /* discover failed — retry cycle continues below */ }
+        pinRetryFailures.current[udid] = 0 // next cycle starts with the saved entry again
       }
       if (pinnedRef.current.includes(udid) && !tunnelsRef.current.some((tn) => tn.udid === udid)) {
         pinRetryTimers.current[udid] = setTimeout(attempt, 15000)
@@ -323,6 +354,18 @@ export function useDevice(subscribe?: WsSubscribe) {
       } else if (msg.type === 'tunnel_recovered' || msg.type === 'device_connected') {
         const udid = msg.data?.udid
         if (udid) clearPinRetry(udid)
+        if (msg.type === 'tunnel_recovered' && udid && msg.data?.ip) {
+          // The watchdog may have recovered on a NEW endpoint (port
+          // rebind / DHCP change). Persist it so the next launch and
+          // future pin retries use the fresh address instead of the
+          // stale one that just failed.
+          writeSavedIps(upsertSavedIp(readSavedIps(), {
+            ip: String(msg.data.ip),
+            port: Number(msg.data.port) || 49152,
+            udid,
+            lastUsed: Date.now(),
+          }))
+        }
       }
     })
   }, [subscribe, schedulePinReconnect, clearPinRetry])
