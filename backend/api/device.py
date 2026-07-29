@@ -474,6 +474,26 @@ async def _attempt_tunnel_restart(
         dm = _dm()
         dev_info = await dm.connect_wifi_tunnel(new_rsd_address, new_rsd_port)
 
+        # Discovery-assisted fallback can hand us an endpoint that turned
+        # out to be a DIFFERENT iPhone (family device on the same LAN).
+        # The pair-record handshake usually rejects that first, but if it
+        # does connect, verify identity and bail — the except path below
+        # rolls back the runner we registered.
+        if dev_info.udid != udid:
+            _tunnel_logger.warning(
+                "Tunnel restart for %s reached a different device (%s); disconnecting",
+                udid, dev_info.udid,
+            )
+            try:
+                await dm.disconnect(dev_info.udid)
+            except Exception:
+                _tunnel_logger.debug(
+                    "Disconnect of mismatched device failed", exc_info=True,
+                )
+            raise RuntimeError(
+                f"udid mismatch: expected {udid}, got {dev_info.udid}"
+            )
+
         # Rebuild the sim engine bound to the new location service. The
         # old engine pointed at the dead RSD and would throw
         # ConnectionTerminatedError on the next teleport / position push.
@@ -525,6 +545,8 @@ async def _attempt_tunnel_restart(
                 "udid": dev_info.udid,
                 "rsd_address": new_rsd_address,
                 "rsd_port": new_rsd_port,
+                "ip": ip,
+                "port": port,
             })
             await broadcast("device_connected", {
                 "udid": dev_info.udid,
@@ -668,6 +690,39 @@ async def _per_tunnel_watchdog(udid: str, runner: TunnelRunner) -> None:
                 if ok:
                     # On success the new watchdog has been armed and this
                     # one's job is done.
+                    return
+
+            # Direct retries against the old endpoint are exhausted. The
+            # iPhone likely rebound its RemotePairing port (reboot / WiFi
+            # rejoin) or got a new DHCP lease — re-discover before giving
+            # up. Each phase runs once; total added time is bounded by
+            # one port scan + one discover pass.
+            from services.tunnel_discovery import find_fallback_endpoints
+
+            candidates: list[tuple[str, int]] = []
+            try:
+                candidates = await find_fallback_endpoints(ip)
+            except Exception:
+                _tunnel_logger.exception(
+                    "Fallback endpoint discovery failed for %s", udid,
+                )
+            for cand_ip, cand_port in candidates:
+                if _tunnels.get(udid) is not runner:
+                    _tunnel_logger.info(
+                        "Tunnel for %s no longer registered during fallback; aborting",
+                        udid,
+                    )
+                    return
+                if cand_ip == ip and cand_port == port:
+                    continue  # the direct-retry loop already tried this exact endpoint
+                _tunnel_logger.info(
+                    "Fallback restart attempt for %s via %s:%d",
+                    udid, cand_ip, cand_port,
+                )
+                ok = await _attempt_tunnel_restart(
+                    udid, cand_ip, cand_port, snapshot, runner,
+                )
+                if ok:
                     return
 
         # All retries exhausted (or no target to retry against).
