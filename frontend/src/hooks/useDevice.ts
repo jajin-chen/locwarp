@@ -364,7 +364,11 @@ export function useDevice(subscribe?: WsSubscribe) {
     return subscribe((msg) => {
       if (msg.type === 'tunnel_lost') {
         const udid = msg.data?.udid
-        if (udid && pinnedRef.current.includes(udid)) schedulePinReconnect(udid)
+        // Case-insensitive: see the comment in schedulePinReconnect for why
+        // (pair-record / RSD peer_info case can differ from the saved pin).
+        if (udid && pinnedRef.current.some((u) => u.toLowerCase() === String(udid).toLowerCase())) {
+          schedulePinReconnect(udid)
+        }
       } else if (msg.type === 'tunnel_recovered' || msg.type === 'device_connected') {
         const udid = msg.data?.udid
         if (udid) clearPinRetry(udid)
@@ -546,6 +550,6 @@ export function useDevice(subscribe?: WsSubscribe) {
     connectWifi, scanWifi, wifiScanning, wifiDevices,
     startWifiTunnel, checkTunnelStatus, stopTunnel, tunnelStatus, tunnels,
     connectedDevices, primaryDevice,
-    pinnedUdids, togglePin,
+    pinnedUdids, togglePin, schedulePinReconnect,
   }
 }

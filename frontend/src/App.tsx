@@ -498,6 +498,31 @@ const App: React.FC = () => {
               }
             }),
           )
+          // Cold-start retry: the pin retry loop (schedulePinReconnect)
+          // otherwise only arms off the `tunnel_lost` WS event, which only
+          // fires for a device that connected THIS session and later
+          // dropped. If a pinned iPhone is already offline at launch
+          // (locked screen, mid-reboot, not back on WiFi yet), the single
+          // attempt above just fails and nothing ever retries it — the
+          // user is stuck manually clicking Discover -> Connect. Re-check
+          // which tunnels are actually up now and arm the retry loop for
+          // every pinned UDID still missing.
+          if (pinnedUdids.length > 0) {
+            const finalStatus = await api.wifiTunnelStatus().catch(() => null)
+            const connectedUdidsLc = new Set(
+              (finalStatus?.tunnels || []).map((tn) => String(tn.udid || '').toLowerCase()),
+            )
+            pinnedUdids
+              .filter((udid) => !connectedUdidsLc.has(udid.toLowerCase()))
+              .forEach((udid, index) => {
+                // Stagger start times so several offline pinned phones don't
+                // all trigger a full mDNS + /24 + full-range discovery scan
+                // at the same moment — that fallback path (see
+                // schedulePinReconnect in useDevice.ts) is heavy enough that
+                // running it concurrently for 3 devices can swamp the LAN.
+                device.schedulePinReconnect(udid, 5000 + index * 5000)
+              })
+          }
         } catch {
           // Silent — tunnel section will show its own error when opened.
         }

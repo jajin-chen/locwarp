@@ -21,8 +21,14 @@ export function buildAutoConnectCandidates(opts: {
   const { saved, discovered, pinnedUdids, alreadyTunneled } = opts
   const max = opts.max ?? DEFAULT_MAX
   const hasPins = pinnedUdids.length > 0
+  // Case-insensitive match: backend compares UDIDs case-insensitively (see
+  // backend/api/device.py), and pair-record / RSD peer_info casing can
+  // differ from what was originally saved. A strict `includes` here made a
+  // legitimately pinned phone with different-case udid look unpinned and
+  // get filtered out of its own auto-connect candidate list.
+  const pinnedUdidsLc = pinnedUdids.map((u) => u.toLowerCase())
   const savedFiltered = hasPins
-    ? saved.filter((e) => e.udid && pinnedUdids.includes(e.udid))
+    ? saved.filter((e) => e.udid && pinnedUdidsLc.includes(e.udid.toLowerCase()))
     : saved
 
   const seen = new Set<string>()

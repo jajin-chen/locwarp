@@ -43,6 +43,21 @@ describe('buildAutoConnectCandidates', () => {
     expect(result).toEqual([{ ip: '192.168.1.10', port: 50000, udid: 'PINNED' }])
   })
 
+  test('with pins: matches saved entry udid case-insensitively', () => {
+    const result = buildAutoConnectCandidates({
+      saved: [
+        { ip: '192.168.1.10', port: 50000, udid: 'abcd1234' },
+        { ip: '192.168.1.11', port: 50001, udid: 'OTHER' },
+      ],
+      discovered: [],
+      pinnedUdids: ['ABCD1234'],
+      alreadyTunneled: noTunnels,
+    })
+    expect(result).toEqual([
+      { ip: '192.168.1.10', port: 50000, udid: 'abcd1234' },
+    ])
+  })
+
   test('caps at max (default 3)', () => {
     const result = buildAutoConnectCandidates({
       saved: [],
