@@ -44,3 +44,16 @@ export function buildAutoConnectCandidates(opts: {
   for (const d of discovered) add(d.ip, d.port, undefined)
   return out.slice(0, max)
 }
+
+// Which pinned UDIDs still need a reconnect retry armed after a launch
+// auto-connect pass — i.e. pinned but not among the tunnels that actually
+// came up. Case-insensitive: `liveTunnelUdids` comes from the backend's
+// live tunnel status (RSD peer_info casing), which can differ from the
+// casing the udid was originally pinned/saved under.
+export function pinnedUdidsNeedingRetry(opts: {
+  pinnedUdids: string[]
+  liveTunnelUdids: string[]
+}): string[] {
+  const liveLc = new Set(opts.liveTunnelUdids.map((u) => u.toLowerCase()))
+  return opts.pinnedUdids.filter((udid) => !liveLc.has(udid.toLowerCase()))
+}

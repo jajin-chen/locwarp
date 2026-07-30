@@ -241,50 +241,66 @@ export function useDevice(subscribe?: WsSubscribe) {
   pinnedRef.current = pinnedUdids
   const tunnelsRef = useRef<TunnelInfo[]>(tunnels)
   tunnelsRef.current = tunnels
+  // All three maps below are keyed by lowercased udid (see schedulePinReconnect
+  // for why the key must be normalized).
   const pinRetryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const pinRetryFailures = useRef<Record<string, number>>({})
+  // Consecutive reschedule count per device, used to back off the retry
+  // interval for devices that stay offline a long time (see schedulePinReconnect).
+  const pinRetryRounds = useRef<Record<string, number>>({})
   // Set after startWifiTunnel / stopTunnel are defined below; the retry
   // loop calls through the refs so we avoid a definition-order cycle.
   const startWifiTunnelRef = useRef<((ip: string, port?: number, udidHint?: string) => Promise<any>) | null>(null)
   const stopTunnelRef = useRef<((udid?: string) => Promise<void>) | null>(null)
 
   const clearPinRetry = useCallback((udid: string) => {
-    const tmr = pinRetryTimers.current[udid]
-    if (tmr) { clearTimeout(tmr); delete pinRetryTimers.current[udid] }
-    delete pinRetryFailures.current[udid]
+    const key = udid.toLowerCase()
+    const tmr = pinRetryTimers.current[key]
+    if (tmr) { clearTimeout(tmr); delete pinRetryTimers.current[key] }
+    delete pinRetryFailures.current[key]
+    delete pinRetryRounds.current[key]
   }, [])
 
   const readSavedEntryFor = (udid: string): { ip: string; port: number } | null => {
     try {
       const arr = JSON.parse(localStorage.getItem('locwarp.tunnel.savedips') || '[]')
       if (!Array.isArray(arr)) return null
-      const hit = arr.find((e: any) => e && e.udid === udid && typeof e.ip === 'string')
+      // Case-insensitive: savedips entries can be written under a
+      // different-case udid than the one the retry loop is chasing (see
+      // schedulePinReconnect). A strict match here silently skipped the
+      // direct-reconnect attempt on every round and fell straight through
+      // to the heavy discover fallback, turning the ~45s full-network-scan
+      // cadence into every ~15s.
+      const udidLc = udid.toLowerCase()
+      const hit = arr.find((e: any) => e && typeof e.udid === 'string' && e.udid.toLowerCase() === udidLc && typeof e.ip === 'string')
       if (hit) return { ip: hit.ip, port: Number(hit.port) || 49152 }
     } catch { /* ignore */ }
     return null
   }
 
   const schedulePinReconnect = useCallback((udid: string, delayMs = 5000) => {
-    if (pinRetryTimers.current[udid]) return // already scheduled
-    // Case-insensitive identity checks throughout this retry loop: pair-record
-    // filenames / RSD peer_info can differ in case from the udid we originally
-    // saved (backend already compares UDIDs case-insensitively — see
-    // backend/api/device.py). Without this, a pinned phone that reconnects
-    // with different-case udid looks like an unpinned stranger and gets kicked.
+    // Normalize the dedup key to lowercase up front. Callers pass different
+    // casings for the same physical device — App.tsx's cold-start retry uses
+    // the pinned-list casing, while the tunnel_lost WS handler uses whatever
+    // case the backend's RSD peer_info happened to report. If the timer /
+    // failure-count maps were keyed by the raw udid, those two callers could
+    // each arm their own independent 15s loop for the same iPhone, doubling
+    // network load and fighting each other over the connection.
     const udidLc = udid.toLowerCase()
+    if (pinRetryTimers.current[udidLc]) return // already scheduled
     const attempt = async () => {
-      delete pinRetryTimers.current[udid]
+      delete pinRetryTimers.current[udidLc]
       // Stop if the user unpinned, or the tunnel already came back.
       if (!pinnedRef.current.some((u) => u.toLowerCase() === udidLc)) return
       if (tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)) return
       const entry = readSavedEntryFor(udid)
-      const failures = pinRetryFailures.current[udid] ?? 0
+      const failures = pinRetryFailures.current[udidLc] ?? 0
       if (entry && failures < 2) {
         try {
           await startWifiTunnelRef.current?.(entry.ip, entry.port, udid)
           return // success path clears the timer via startWifiTunnel
         } catch {
-          pinRetryFailures.current[udid] = failures + 1
+          pinRetryFailures.current[udidLc] = failures + 1
         }
       } else {
         // Two direct failures (or nothing saved) — the iPhone likely
@@ -314,16 +330,28 @@ export function useDevice(subscribe?: WsSubscribe) {
             } catch { /* try next candidate */ }
           }
         } catch { /* discover failed — retry cycle continues below */ }
-        pinRetryFailures.current[udid] = 0 // next cycle starts with the saved entry again
+        pinRetryFailures.current[udidLc] = 0 // next cycle starts with the saved entry again
       }
       if (
         pinnedRef.current.some((u) => u.toLowerCase() === udidLc) &&
         !tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)
       ) {
-        pinRetryTimers.current[udid] = setTimeout(attempt, 15000)
+        // Back off for devices that stay offline a long time. Cold-start
+        // retries (App.tsx) now arm this loop for pinned devices that were
+        // ALREADY offline at launch, not just ones that dropped mid-session
+        // — and a phone left locked in a pocket can stay offline for a
+        // long while. Without backing off, every ~45s cycle (2 direct
+        // attempts + 1 discover round, at 15s each) re-runs the discover
+        // fallback's full mDNS + /24 + full-range scan forever. After 8
+        // rounds (~3 minutes) with no luck, stretch the interval to 60s.
+        // Reset to 0 the moment the device reconnects (see clearPinRetry).
+        const round = (pinRetryRounds.current[udidLc] ?? 0) + 1
+        pinRetryRounds.current[udidLc] = round
+        const interval = round > 8 ? 60000 : 15000
+        pinRetryTimers.current[udidLc] = setTimeout(attempt, interval)
       }
     }
-    pinRetryTimers.current[udid] = setTimeout(attempt, delayMs)
+    pinRetryTimers.current[udidLc] = setTimeout(attempt, delayMs)
   }, [])
 
   const PIN_IP_MAP_KEY = 'locwarp.tunnel.pin_ip_map'

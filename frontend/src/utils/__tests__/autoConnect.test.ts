@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { buildAutoConnectCandidates } from '../autoConnect'
+import { buildAutoConnectCandidates, pinnedUdidsNeedingRetry } from '../autoConnect'
 
 const noTunnels = new Set<string>()
 
@@ -69,5 +69,31 @@ describe('buildAutoConnectCandidates', () => {
       alreadyTunneled: noTunnels,
     })
     expect(result).toHaveLength(3)
+  })
+})
+
+describe('pinnedUdidsNeedingRetry', () => {
+  test('returns pinned udids that have no live tunnel', () => {
+    const result = pinnedUdidsNeedingRetry({
+      pinnedUdids: ['AAAA', 'BBBB', 'CCCC'],
+      liveTunnelUdids: ['BBBB'],
+    })
+    expect(result).toEqual(['AAAA', 'CCCC'])
+  })
+
+  test('matches live tunnel udids case-insensitively', () => {
+    const result = pinnedUdidsNeedingRetry({
+      pinnedUdids: ['AbCd1234'],
+      liveTunnelUdids: ['abcd1234'],
+    })
+    expect(result).toEqual([])
+  })
+
+  test('returns empty array when nothing is pinned', () => {
+    const result = pinnedUdidsNeedingRetry({
+      pinnedUdids: [],
+      liveTunnelUdids: ['abcd1234'],
+    })
+    expect(result).toEqual([])
   })
 })

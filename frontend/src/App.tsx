@@ -10,7 +10,7 @@ import UserAvatarPicker from './components/UserAvatarPicker'
 import { UserAvatar, avatarToHtml, loadAvatar, saveAvatar, loadCustomPng, saveCustomPng } from './userAvatars'
 import * as api from './services/api'
 import { parseCoord } from './utils/coords'
-import { buildAutoConnectCandidates } from './utils/autoConnect'
+import { buildAutoConnectCandidates, pinnedUdidsNeedingRetry } from './utils/autoConnect'
 import { readSavedIps, removeSavedIpByUdid, writeSavedIps } from './utils/savedIps'
 
 import MapView from './components/MapView'
@@ -509,19 +509,16 @@ const App: React.FC = () => {
           // every pinned UDID still missing.
           if (pinnedUdids.length > 0) {
             const finalStatus = await api.wifiTunnelStatus().catch(() => null)
-            const connectedUdidsLc = new Set(
-              (finalStatus?.tunnels || []).map((tn) => String(tn.udid || '').toLowerCase()),
-            )
-            pinnedUdids
-              .filter((udid) => !connectedUdidsLc.has(udid.toLowerCase()))
-              .forEach((udid, index) => {
-                // Stagger start times so several offline pinned phones don't
-                // all trigger a full mDNS + /24 + full-range discovery scan
-                // at the same moment — that fallback path (see
-                // schedulePinReconnect in useDevice.ts) is heavy enough that
-                // running it concurrently for 3 devices can swamp the LAN.
-                device.schedulePinReconnect(udid, 5000 + index * 5000)
-              })
+            const liveTunnelUdids = (finalStatus?.tunnels || []).map((tn) => String(tn.udid || ''))
+            const needsRetry = pinnedUdidsNeedingRetry({ pinnedUdids, liveTunnelUdids })
+            needsRetry.forEach((udid, index) => {
+              // Stagger start times so several offline pinned phones don't
+              // all trigger a full mDNS + /24 + full-range discovery scan
+              // at the same moment — that fallback path (see
+              // schedulePinReconnect in useDevice.ts) is heavy enough that
+              // running it concurrently for 3 devices can swamp the LAN.
+              device.schedulePinReconnect(udid, 5000 + index * 5000)
+            })
           }
         } catch {
           // Silent — tunnel section will show its own error when opened.
