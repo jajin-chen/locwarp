@@ -57,3 +57,25 @@ export function pinnedUdidsNeedingRetry(opts: {
   const liveLc = new Set(opts.liveTunnelUdids.map((u) => u.toLowerCase()))
   return opts.pinnedUdids.filter((udid) => !liveLc.has(udid.toLowerCase()))
 }
+
+// Outcome of one pin-retry attempt against a tunnel start call whose udid
+// argument is only a HINT to the backend's candidate search — the call can
+// resolve successfully against a device other than the one requested. The
+// retry loop (useDevice's schedulePinReconnect) must classify what actually
+// came back instead of treating "didn't throw" as "our device reconnected",
+// or it will stop rescheduling the moment a resolve happens to land on a
+// different phone.
+export type PinAttemptOutcome = 'reconnected' | 'stranger' | 'other-pinned' | 'failed'
+
+export function classifyPinAttempt(opts: {
+  targetUdid: string
+  resultUdid?: string | null
+  pinnedUdids: string[]
+}): PinAttemptOutcome {
+  const { targetUdid, resultUdid, pinnedUdids } = opts
+  if (!resultUdid) return 'failed'
+  const resultLc = resultUdid.toLowerCase()
+  if (resultLc === targetUdid.toLowerCase()) return 'reconnected'
+  const pinnedLc = pinnedUdids.map((u) => u.toLowerCase())
+  return pinnedLc.includes(resultLc) ? 'other-pinned' : 'stranger'
+}

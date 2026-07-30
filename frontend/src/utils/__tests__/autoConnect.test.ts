@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { buildAutoConnectCandidates, pinnedUdidsNeedingRetry } from '../autoConnect'
+import { buildAutoConnectCandidates, classifyPinAttempt, pinnedUdidsNeedingRetry } from '../autoConnect'
 
 const noTunnels = new Set<string>()
 
@@ -95,5 +95,79 @@ describe('pinnedUdidsNeedingRetry', () => {
       liveTunnelUdids: ['abcd1234'],
     })
     expect(result).toEqual([])
+  })
+})
+
+describe('classifyPinAttempt', () => {
+  test('reconnected: resolved udid matches the target', () => {
+    const result = classifyPinAttempt({
+      targetUdid: 'TARGET',
+      resultUdid: 'TARGET',
+      pinnedUdids: ['TARGET'],
+    })
+    expect(result).toBe('reconnected')
+  })
+
+  test('reconnected: matches case-insensitively', () => {
+    const result = classifyPinAttempt({
+      targetUdid: 'AbCd1234',
+      resultUdid: 'abcd1234',
+      pinnedUdids: ['AbCd1234'],
+    })
+    expect(result).toBe('reconnected')
+  })
+
+  test('other-pinned: resolved udid belongs to a different pinned device', () => {
+    const result = classifyPinAttempt({
+      targetUdid: 'TARGET',
+      resultUdid: 'OTHER',
+      pinnedUdids: ['TARGET', 'OTHER'],
+    })
+    expect(result).toBe('other-pinned')
+  })
+
+  test('other-pinned: matches pinned list case-insensitively', () => {
+    const result = classifyPinAttempt({
+      targetUdid: 'TARGET',
+      resultUdid: 'oThEr',
+      pinnedUdids: ['TARGET', 'OTHER'],
+    })
+    expect(result).toBe('other-pinned')
+  })
+
+  test('stranger: resolved udid is not in the pinned list', () => {
+    const result = classifyPinAttempt({
+      targetUdid: 'TARGET',
+      resultUdid: 'RANDOM',
+      pinnedUdids: ['TARGET'],
+    })
+    expect(result).toBe('stranger')
+  })
+
+  test('failed: no resultUdid (undefined)', () => {
+    const result = classifyPinAttempt({
+      targetUdid: 'TARGET',
+      resultUdid: undefined,
+      pinnedUdids: ['TARGET'],
+    })
+    expect(result).toBe('failed')
+  })
+
+  test('failed: resultUdid is null', () => {
+    const result = classifyPinAttempt({
+      targetUdid: 'TARGET',
+      resultUdid: null,
+      pinnedUdids: ['TARGET'],
+    })
+    expect(result).toBe('failed')
+  })
+
+  test('failed: resultUdid is an empty string', () => {
+    const result = classifyPinAttempt({
+      targetUdid: 'TARGET',
+      resultUdid: '',
+      pinnedUdids: ['TARGET'],
+    })
+    expect(result).toBe('failed')
   })
 })
