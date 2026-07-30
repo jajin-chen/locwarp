@@ -44,4 +44,27 @@ describe('removeSavedIpByUdid', () => {
     expect(next.map((e) => e.udid)).toEqual(['U2'])
     expect(list).toHaveLength(2)
   })
+
+  test('removes matching udid case-insensitively', () => {
+    // Regression guard: savedips entries are written with the udid casing
+    // reported by RSD at tunnel-connect time, while a caller scrubbing a
+    // stale entry (e.g. the pin-retry loop) may be chasing a udid sourced
+    // from usbmuxd's device list, which can differ in case for the same
+    // physical device.
+    const list = [entry({ udid: 'AbCd1234' }), entry({ udid: 'U2', ip: '192.168.1.11' })]
+    const next = removeSavedIpByUdid(list, 'ABCD1234')
+    expect(next.map((e) => e.udid)).toEqual(['U2'])
+  })
+
+  test('equivalent to a udid lookup returning null after removal (readSavedEntryFor semantics)', () => {
+    // useDevice.ts's readSavedEntryFor does `arr.find(e => e.udid.toLowerCase()
+    // === udidLc)` over this same saved-ips shape. Once a target udid's own
+    // stale entry is scrubbed via removeSavedIpByUdid, that lookup must miss
+    // so the pin-retry loop falls through to rediscovering the device fresh
+    // instead of redialing the same dead endpoint.
+    const list = [entry({ udid: 'TARGET', ip: '192.168.1.50', port: 49152 }), entry({ udid: 'OTHER', ip: '192.168.1.11' })]
+    const next = removeSavedIpByUdid(list, 'TARGET')
+    const hit = next.find((e) => typeof e.udid === 'string' && e.udid.toLowerCase() === 'target')
+    expect(hit).toBeUndefined()
+  })
 })

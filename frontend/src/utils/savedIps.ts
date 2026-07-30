@@ -39,5 +39,12 @@ export function upsertSavedIp(list: SavedIpEntry[], entry: SavedIpEntry): SavedI
 }
 
 export function removeSavedIpByUdid(list: SavedIpEntry[], udid: string): SavedIpEntry[] {
-  return list.filter((e) => e.udid !== udid)
+  // Case-insensitive: callers pass udids sourced from different backend
+  // responses (usbmuxd device list vs. RSD peer_info at tunnel-connect
+  // time) that can differ in case for the same physical device — see the
+  // identical rationale in useDevice.ts's readSavedEntryFor. A strict
+  // comparison here would silently fail to scrub a stale entry whose
+  // casing doesn't match the udid the caller is chasing.
+  const udidLc = udid.toLowerCase()
+  return list.filter((e) => !(typeof e.udid === 'string' && e.udid.toLowerCase() === udidLc))
 }

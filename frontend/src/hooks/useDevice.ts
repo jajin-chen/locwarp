@@ -339,9 +339,29 @@ export function useDevice(subscribe?: WsSubscribe) {
             await stopTunnelRef.current?.(info.udid)
             writeSavedIps(removeSavedIpByUdid(readSavedIps(), info.udid))
           }
+          if (outcome === 'stranger' || outcome === 'other-pinned') {
+            // The (ip, port) we just dialed for `udid` resolved to a
+            // DIFFERENT device — proof that udid's own savedips entry is
+            // stale (the endpoint moved on: DHCP lease change, port
+            // rebind, etc). Scrub it too, not just the stranger/other-
+            // pinned entry above. Left in place, readSavedEntryFor(udid)
+            // keeps returning this same dead endpoint every ~15s round,
+            // and connect_wifi_tunnel's backend path calls disconnect()
+            // for any already-connected udid before reconnecting —
+            // disconnect() calls location_service.clear()
+            // (backend/core/device_manager.py:766-767) — so each retry
+            // round kicks whoever now legitimately owns this endpoint and
+            // wipes their running location simulation. Clearing it here
+            // makes the next round's readSavedEntryFor return null and
+            // fall straight to the discover branch below, which re-finds
+            // udid's real, current endpoint instead of repeating this.
+            writeSavedIps(removeSavedIpByUdid(readSavedIps(), udid))
+          }
           // 'other-pinned' reached a keeper for its own owner — leave its
-          // tunnel up. Either way (including 'failed'), OUR target still
-          // isn't back, so this attempt is a miss; fall through to retry.
+          // tunnel up (no stopTunnel call: it's the user's own device and
+          // staying connected is desired). Either way (including
+          // 'failed'), OUR target still isn't back, so this attempt is a
+          // miss; fall through to retry.
           pinRetryFailures.current[udidLc] = failures + 1
         } else {
           // Two direct failures (or nothing saved) — the iPhone likely
@@ -378,6 +398,16 @@ export function useDevice(subscribe?: WsSubscribe) {
                 // the next tunnel_lost/device_disconnected broadcast.
                 await stopTunnelRef.current?.(info.udid)
                 writeSavedIps(removeSavedIpByUdid(readSavedIps(), info.udid))
+              }
+              if (outcome === 'stranger' || outcome === 'other-pinned') {
+                // Same reasoning as the direct-reconnect branch above:
+                // this candidate resolved to someone other than `udid`,
+                // so scrub udid's own savedips entry defensively (if any
+                // still points at this or a similarly stale endpoint) —
+                // otherwise a future round could rediscover and redial
+                // the same wrong endpoint, kicking that device's tunnel
+                // and clearing its location simulation.
+                writeSavedIps(removeSavedIpByUdid(readSavedIps(), udid))
               }
               // A different pinned device ('other-pinned') is a keeper;
               // keep looking for ours among the remaining candidates.
