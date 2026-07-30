@@ -974,10 +974,13 @@ class DeviceManager:
             conn = self._connections.get(udid)
         conn_type = conn.connection_type if conn else None
 
-        if conn_type == "Network":
-            try:
-                from api.device import _tunnels, _attempt_tunnel_restart
-            except ImportError:
+        try:
+            from api.device import _tunnels, _attempt_tunnel_restart
+        except ImportError:
+            _tunnels, _attempt_tunnel_restart = None, None
+
+        if _should_use_wifi_recovery(conn_type, _tunnels or {}, udid):
+            if _attempt_tunnel_restart is None:
                 logger.debug("full_reconnect: api.device not importable")
                 return False
             runner = _tunnels.get(udid)
@@ -1014,6 +1017,33 @@ class DeviceManager:
         for udid in udids:
             await self.disconnect(udid)
         logger.info("All devices disconnected")
+
+
+def _should_use_wifi_recovery(
+    conn_type: str | None, tunnels_map: dict, udid: str,
+) -> bool:
+    """Decide whether ``full_reconnect`` should take the WiFi tunnel-restart
+    path for *udid* instead of the blunt USB disconnect/reconnect fallback.
+
+    ``conn_type`` is ``None`` whenever the connection record has already
+    been removed — the most common case, since ``full_reconnect`` is
+    invoked as the API-layer safety net after a ``DeviceLostError`` has
+    already triggered cleanup. In that case, fall back to checking whether
+    a WiFi tunnel runner still exists for *udid*: its presence means the
+    device was WiFi-connected, so it should still get the tunnel-restart
+    path rather than the USB fallback, which would first disconnect any
+    recoverable state and then attempt a connection method that cannot
+    succeed on a machine without usbmuxd.
+
+    Note this only decides routing; the WiFi path re-validates the runner
+    (target IP/port) before using it, so an incomplete runner entry still
+    falls back to reporting failure rather than silently using USB.
+    """
+    if conn_type == "Network":
+        return True
+    if conn_type is None:
+        return tunnels_map.get(udid) is not None
+    return False
 
 
 def _load_pair_record(udid: str | None = None) -> dict | None:
