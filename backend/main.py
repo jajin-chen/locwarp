@@ -180,6 +180,13 @@ class AppState:
             await broadcast(event_type, data)
             if event_type == "position_update" and "lat" in data:
                 self.update_last_position(data["lat"], data["lng"])
+            # Follower feed (VirtualRun) — read-only tap; a broken follower
+            # pipeline must never take down the iOS event pipeline.
+            try:
+                from api import follow
+                await follow.forward(event_type, data)
+            except Exception:
+                logger.debug("follow forward error (ignored)", exc_info=True)
 
         engine = SimulationEngine(loc_service, event_callback)
         self.simulation_engines[udid] = engine
@@ -713,6 +720,7 @@ from api.recent import router as recent_router
 from api.websocket import router as ws_router
 from api.system import router as system_router
 from api.phone_control import router as phone_router
+from api.follow import router as follow_router
 
 app.include_router(device_router)
 app.include_router(location_router)
@@ -723,6 +731,7 @@ app.include_router(bookmarks_router)
 app.include_router(recent_router)
 app.include_router(ws_router)
 app.include_router(phone_router)
+app.include_router(follow_router)
 
 
 @app.get("/")

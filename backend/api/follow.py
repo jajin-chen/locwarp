@@ -9,6 +9,7 @@ docs/superpowers/specs/2026-08-01-virtualrun-follow-design.md
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -18,6 +19,10 @@ router = APIRouter(tags=["follow"])
 logger = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = 1
+
+# Per-follower send timeout: a wedged socket that hangs without raising
+# must not block event_callback / the iOS pipeline.
+_SEND_TIMEOUT = 2.0
 
 # Live follower connections. Guarded by the event loop (all access is from
 # async handlers on the same loop), so a plain list is race-free here.
@@ -81,10 +86,37 @@ async def forward(event_type: str, data: dict) -> None:
     dead = []
     for ws in list(_followers):
         try:
-            await ws.send_text(text)
+            await asyncio.wait_for(ws.send_text(text), timeout=_SEND_TIMEOUT)
         except Exception:
             dead.append(ws)
     for ws in dead:
         if ws in _followers:
             _followers.remove(ws)
         logger.info("Follower dropped (%d remaining)", len(_followers))
+
+
+@router.websocket("/ws/follow")
+async def follow_endpoint(ws: WebSocket):
+    """One-way follower feed. Sends hello, then streams translated events
+    pushed by forward(). Inbound text is ignored (protocol is one-way)."""
+    await ws.accept()
+    try:
+        from main import app, app_state
+
+        await ws.send_text(json.dumps(hello(app_state._primary_udid, app.version)))
+    except Exception:
+        logger.debug("follow hello failed; closing", exc_info=True)
+        return
+    _followers.append(ws)
+    logger.info("Follower connected (%d total)", len(_followers))
+    try:
+        while True:
+            await ws.receive_text()  # one-way protocol: drain and ignore
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.debug("follower socket error (ignored)", exc_info=True)
+    finally:
+        if ws in _followers:
+            _followers.remove(ws)
+        logger.info("Follower disconnected (%d remaining)", len(_followers))
