@@ -682,6 +682,13 @@ async def lifespan(application: FastAPI):
     watchdog_task = asyncio.create_task(_usbmux_presence_watchdog())
     keepalive_task = asyncio.create_task(_wifi_tunnel_keepalive())
 
+    # Advertise the follower feed on the LAN (best-effort; see follow_discovery).
+    try:
+        from services import follow_discovery
+        await asyncio.to_thread(follow_discovery.start_advertise, API_PORT, application.version)
+    except Exception:
+        logger.warning("follow mDNS startup failed (ignored)", exc_info=True)
+
     yield
 
     # ── Shutdown ──
@@ -692,6 +699,12 @@ async def lifespan(application: FastAPI):
             await _t
         except (asyncio.CancelledError, Exception):
             pass
+
+    try:
+        from services import follow_discovery
+        await asyncio.to_thread(follow_discovery.stop_advertise)
+    except Exception:
+        logger.debug("follow mDNS shutdown failed (ignored)", exc_info=True)
 
     app_state.save_settings()
     await app_state.device_manager.disconnect_all()
