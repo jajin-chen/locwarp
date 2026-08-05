@@ -6,8 +6,7 @@ import logging
 import math
 
 from models.schemas import Coordinate, MovementMode, SimulationState
-from config import resolve_speed_profile
-from core.multi_stop import jump_wait
+from core.jump_mode import jump_wait, pick_speed_profile
 
 logger = logging.getLogger(__name__)
 
@@ -86,10 +85,8 @@ class FlowerHandler:
         osrm_profile = "foot" if mode in (MovementMode.WALKING, MovementMode.RUNNING) else "car"
 
         def _pick_profile() -> dict:
-            if engine._speed_was_applied and engine._active_speed_profile is not None:
-                return dict(engine._active_speed_profile)
-            return resolve_speed_profile(
-                profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
+            return pick_speed_profile(
+                engine, profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
             )
 
         engine.state = SimulationState.FLOWER

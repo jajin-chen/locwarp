@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 
 from models.schemas import Coordinate, MovementMode, SimulationState
-from config import resolve_speed_profile
+from core.jump_mode import pick_speed_profile, run_jump_sequence, sample_pause_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +61,19 @@ class MultiStopNavigator:
         # order, without walking. Honors loop=True to repeat. stop_duration
         # / pause_* are ignored. Both delays honour pause + stop.
         if jump_mode:
-            await _run_jump_multistop(
+            await run_jump_sequence(
                 engine,
                 waypoints,
                 pre_delay=max(0.0, float(jump_pre_delay)),
                 post_delay=max(0.0, float(jump_post_delay)),
-                loop=loop,
+                state=SimulationState.MULTI_STOP,
+                source="multi_stop",
+                close_loop=False,
+                repeat=loop,
+                lap_limit=None,
+                emit_stop_reached=True,
+                state_change_extra={"stop_duration": 0, "loop": loop},
+                complete_event="multi_stop_complete",
             )
             return
 
@@ -82,10 +88,8 @@ class MultiStopNavigator:
         def _pick_profile() -> dict:
             # Honor mid-flight apply_speed across legs / laps; otherwise
             # re-pick from the original args (so range mode varies).
-            if engine._speed_was_applied and engine._active_speed_profile is not None:
-                return dict(engine._active_speed_profile)
-            return resolve_speed_profile(
-                profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
+            return pick_speed_profile(
+                engine, profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
             )
 
         # Resume support: when this engine is taking over from a peer
@@ -252,13 +256,8 @@ class MultiStopNavigator:
                 is_last = i == len(waypoints) - 2
                 if stop_duration and stop_duration > 0:
                     this_pause = float(stop_duration)
-                elif pause_enabled:
-                    lo, hi = sorted((float(pause_min), float(pause_max)))
-                    if lo < 0:
-                        lo = 0.0
-                    this_pause = random.uniform(lo, hi) if hi > 0 else 0.0
                 else:
-                    this_pause = 0.0
+                    this_pause = sample_pause_seconds(pause_enabled, pause_min, pause_max)
                 should_pause = this_pause > 0 and (not is_last or loop)
 
                 if should_pause:
@@ -302,165 +301,3 @@ class MultiStopNavigator:
         dlat = math.radians(b.lat - a.lat)
         dlng = math.radians(b.lng - a.lng) * math.cos(math.radians(a.lat))
         return 6_371_000 * math.sqrt(dlat ** 2 + dlng ** 2)
-
-
-async def jump_wait(engine, seconds: float, *, source: str) -> bool:
-    """Sleep for *seconds*, honouring both stop and pause.
-
-    - Stop wakes the wait immediately and returns True.
-    - Pause freezes the remaining countdown: when resumed, the leftover
-      time runs to completion. Without this, pause was a no-op in jump
-      mode (issue #32) — the next teleport fired regardless.
-
-    Polls in 100 ms slices so a pause that lands mid-delay takes effect
-    promptly without spinning a dedicated watcher task.
-    """
-    remaining = max(0.0, float(seconds))
-    emitted = False
-    # Keep the WiFi tunnel fed during the dwell. The engine pushes nothing
-    # while it just sleeps here, so on a screen-off iPhone the socket can go
-    # quiet long enough for iOS to reap it. Re-push the current (frozen)
-    # coordinate every ~1s, mirroring the idle keepalive — it both keeps the
-    # fake location pinned and gives the tunnel traffic to stay alive.
-    since_push = 0.0
-    KEEPALIVE_EVERY = 1.0
-    try:
-        while True:
-            if engine._stop_event.is_set():
-                return True
-            if not engine._pause_event.is_set():
-                pause_task = asyncio.ensure_future(engine._pause_event.wait())
-                stop_task = asyncio.ensure_future(engine._stop_event.wait())
-                try:
-                    await asyncio.wait(
-                        {pause_task, stop_task},
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                finally:
-                    for t in (pause_task, stop_task):
-                        if not t.done():
-                            t.cancel()
-                if engine._stop_event.is_set():
-                    return True
-            if remaining <= 0:
-                return False
-            if not emitted and seconds > 0:
-                await engine._emit("pause_countdown", {
-                    "duration_seconds": seconds,
-                    "source": source,
-                })
-                emitted = True
-            slice_s = min(remaining, 0.1)
-            try:
-                await asyncio.wait_for(engine._stop_event.wait(), timeout=slice_s)
-                return True
-            except asyncio.TimeoutError:
-                remaining -= slice_s
-                since_push += slice_s
-                if since_push >= KEEPALIVE_EVERY:
-                    since_push = 0.0
-                    pos = engine.current_position
-                    if pos is not None:
-                        try:
-                            await engine.location_service.set(pos.lat, pos.lng)
-                        except Exception:
-                            logger.debug(
-                                "jump_wait keepalive re-push failed", exc_info=True,
-                            )
-    finally:
-        if emitted:
-            await engine._emit("pause_countdown_end", {"source": source})
-
-
-async def _run_jump_multistop(
-    engine,
-    waypoints: list[Coordinate],
-    *,
-    pre_delay: float,
-    post_delay: float,
-    loop: bool,
-) -> None:
-    """Teleport sequentially through *waypoints*. Each stop is preceded
-    by *pre_delay* seconds and followed by *post_delay* seconds. When
-    *loop* is True, repeats from the first stop after reaching the last.
-    Stops cleanly when ``engine._stop_event`` is set; pause freezes both
-    delays."""
-    engine.state = SimulationState.MULTI_STOP
-    engine.total_segments = len(waypoints)
-    engine.lap_count = 0
-    engine.segment_index = 0
-    engine.distance_traveled = 0.0
-    engine.distance_remaining = 0.0
-    engine._user_waypoints = list(waypoints)
-    engine._user_waypoint_next = 1 if len(waypoints) > 1 else 0
-
-    await engine._emit("route_path", {
-        "coords": [{"lat": wp.lat, "lng": wp.lng} for wp in waypoints],
-    })
-    await engine._emit("state_change", {
-        "state": engine.state.value,
-        "waypoints": [{"lat": wp.lat, "lng": wp.lng} for wp in waypoints],
-        "stop_duration": 0,
-        "loop": loop,
-    })
-
-    logger.info(
-        "Jump multi-stop started: %d waypoints, pre=%.1fs post=%.1fs, loop=%s",
-        len(waypoints), pre_delay, post_delay, loop,
-    )
-
-    running = True
-    while running and not engine._stop_event.is_set():
-        for i, wp in enumerate(waypoints):
-            if engine._stop_event.is_set():
-                break
-            if await jump_wait(engine, pre_delay, source="multi_stop"):
-                break
-            if engine._stop_event.is_set():
-                break
-            await engine._set_position(wp.lat, wp.lng)
-            engine.segment_index = i
-            engine._user_waypoint_next = min(i + 1, len(waypoints))
-            await engine._emit("position_update", {
-                "lat": wp.lat, "lng": wp.lng,
-                "speed_mps": 0.0,
-                "progress": (i + 1) / max(len(waypoints), 1),
-                "segment_index": i,
-                "total_segments": len(waypoints),
-                "lap_count": engine.lap_count,
-                "distance_traveled": 0.0,
-                "distance_remaining": 0.0,
-                "eta_seconds": 0.0,
-                "eta_arrival": "",
-                "is_paused": False,
-            })
-            await engine._emit("user_waypoint_advance", {
-                "current_index": i,
-                "next_index": min(i + 1, len(waypoints) - 1),
-            })
-            await engine._emit("stop_reached", {
-                "index": i + 1,
-                "total": len(waypoints),
-                "lat": wp.lat, "lng": wp.lng,
-            })
-            # Skip the post-delay after the very last stop on a non-looping
-            # run — the simulation is finished, so the wait would just
-            # delay the IDLE transition without serving any purpose.
-            is_last = (i == len(waypoints) - 1)
-            if is_last and not loop:
-                continue
-            if await jump_wait(engine, post_delay, source="multi_stop"):
-                break
-
-        if not loop or engine._stop_event.is_set():
-            running = False
-        else:
-            engine.lap_count += 1
-            await engine._emit("lap_complete", {"lap": engine.lap_count})
-            logger.info("Jump multi-stop lap %d complete", engine.lap_count)
-
-    if engine.state == SimulationState.MULTI_STOP:
-        engine.state = SimulationState.IDLE
-        await engine._emit("multi_stop_complete", {"laps": engine.lap_count})
-        await engine._emit("state_change", {"state": engine.state.value})
-    logger.info("Jump multi-stop finished after %d laps", engine.lap_count)
