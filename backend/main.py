@@ -15,7 +15,6 @@ from services.cooldown import CooldownTimer
 from services.bookmarks import BookmarkManager
 from services.route_store import RouteManager
 from services.coord_format import CoordinateFormatter
-from services.reconnect import ReconnectManager
 
 # Configure logging — console + rotating file in ~/.locwarp/logs/
 _log_fmt = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
@@ -52,7 +51,6 @@ class AppState:
         self.bookmark_manager = BookmarkManager()
         self.route_manager = RouteManager()
         self.coord_formatter = CoordinateFormatter()
-        self.reconnect_manager = None
         self._last_position = None
         # User-chosen initial map center (persisted between launches). When
         # None, the frontend falls back to a hardcoded default.
@@ -205,9 +203,6 @@ class AppState:
         # The map UI still shows a default center (Taipei or the user's
         # `initial_map_position` setting) — that's purely a visual default
         # for the Leaflet view, not a virtual GPS coordinate.
-
-        # Setup reconnect manager
-        self.reconnect_manager = ReconnectManager(self.device_manager)
 
         logger.info("Simulation engine created for device %s (no initial location pushed)", udid)
 
