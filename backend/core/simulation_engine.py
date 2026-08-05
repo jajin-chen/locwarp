@@ -952,6 +952,7 @@ class SimulationEngine:
                 jittered_lat, jittered_lng = RouteInterpolator.add_jitter(lat, lng, jitter)
 
                 pushed = False
+                push_error = "position push failed after 3 attempts"
                 for attempt in range(3):
                     try:
                         await self._set_position(jittered_lat, jittered_lng)
@@ -961,14 +962,17 @@ class SimulationEngine:
                         logger.warning(
                             "position push failed (attempt %d/3): %s", attempt + 1, exc,
                         )
+                        push_error = f"position push failed after 3 attempts: {exc}"
                         await asyncio.sleep(0.5 * (attempt + 1))
                     except asyncio.CancelledError:
                         raise
-                    except Exception:
+                    except Exception as exc:
                         logger.exception("Unexpected error pushing position")
+                        push_error = f"unexpected error pushing position: {exc}"
                         break
                 if not pushed:
                     logger.error("Giving up on this route after repeated push failures")
+                    await self._emit("route_error", {"reason": push_error})
                     break
 
                 # Update tracking

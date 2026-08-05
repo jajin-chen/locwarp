@@ -12,18 +12,32 @@ logger = logging.getLogger(__name__)
 # Active WebSocket connections
 _connections: list[WebSocket] = []
 
+# Per-client send timeout: a wedged socket that hangs without raising
+# must not block the simulation tick pipeline.
+_SEND_TIMEOUT = 2.0
+
 
 async def broadcast(event_type: str, data: dict):
-    """Broadcast event to all connected WebSocket clients."""
+    """Broadcast event to all connected WebSocket clients. Never raises.
+
+    Dead connections are dropped on first send failure or timeout — no
+    retry, no blocking, so a stalled client can't slow the tick pipeline.
+    """
     message = json.dumps({"type": event_type, "data": data})
     dead = []
-    for ws in _connections:
+    for ws in list(_connections):
         try:
-            await ws.send_text(message)
+            await asyncio.wait_for(ws.send_text(message), timeout=_SEND_TIMEOUT)
         except Exception:
             dead.append(ws)
     for ws in dead:
-        _connections.remove(ws)
+        if ws in _connections:
+            _connections.remove(ws)
+        try:
+            await ws.close()
+        except Exception:
+            pass
+        logger.info("WebSocket client dropped (%d remaining)", len(_connections))
 
 
 @router.websocket("/ws/status")
