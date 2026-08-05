@@ -810,4 +810,6 @@ const StatusBar: React.FC<StatusBarProps> = ({
   );
 };
 
-export default StatusBar;
+// Memoized: App re-renders on every WS position tick; the bar only needs
+// to re-render when one of its own props actually changed.
+export default React.memo(StatusBar);

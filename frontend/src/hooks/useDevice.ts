@@ -1,7 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   listDevices, connectDevice, disconnectDevice,
-  wifiConnect, wifiScan,
   wifiTunnelStartAndConnect, wifiTunnelStatus, wifiTunnelStop, wifiTunnelDiscover,
   type TunnelInfo,
 } from '../services/api'
@@ -19,13 +18,6 @@ export interface DeviceInfo {
   // failed, or device not yet connected). Used to decide whether to show
   // the "Reveal Developer Mode option" button.
   developer_mode_enabled?: boolean | null
-}
-
-export interface WifiScanResult {
-  ip: string
-  name: string
-  udid: string
-  ios_version: string
 }
 
 export type WsSubscribe = (fn: (m: WsMessage) => void) => () => void
@@ -96,8 +88,6 @@ export function useDevice(subscribe?: WsSubscribe) {
     })
   }, [subscribe])
   const [scanning, setScanning] = useState(false)
-  const [wifiScanning, setWifiScanning] = useState(false)
-  const [wifiDevices, setWifiDevices] = useState<WifiScanResult[]>([])
 
   const scan = useCallback(async () => {
     setScanning(true)
@@ -174,55 +164,17 @@ export function useDevice(subscribe?: WsSubscribe) {
     [],
   )
 
-  const connectWifi = useCallback(
-    async (ip: string) => {
-      try {
-        const res = await wifiConnect(ip)
-        const info: DeviceInfo = {
-          udid: res.udid,
-          name: res.name,
-          ios_version: res.ios_version,
-          connection_type: 'Network',
-          is_connected: true,
-        }
-        setConnectedDevice(info)
-        setDevices((prev) => {
-          const filtered = prev.filter((d) => d.udid !== info.udid)
-          return [...filtered, info]
-        })
-        return info
-      } catch (err) {
-        console.error('WiFi connect failed:', err)
-        throw err
-      }
-    },
-    [],
-  )
-
-  const scanWifi = useCallback(async () => {
-    setWifiScanning(true)
-    try {
-      const results = await wifiScan()
-      const list: WifiScanResult[] = Array.isArray(results) ? results : []
-      setWifiDevices(list)
-      return list
-    } catch (err) {
-      console.error('WiFi scan failed:', err)
-      return []
-    } finally {
-      setWifiScanning(false)
-    }
-  }, [])
-
   // v0.2.83: WiFi tunnel state went from a singleton to a per-device list.
   // Each connected iOS 17+ WiFi device gets its own runner on the backend;
   // `tunnels` mirrors that list. `tunnelStatus` is kept as a derived
   // singleton (mirrors first tunnel) for any leftover single-tunnel callers
   // until they migrate.
   const [tunnels, setTunnels] = useState<TunnelInfo[]>([])
-  const tunnelStatus = tunnels.length > 0
+  // Memoized so the derived object only changes identity when `tunnels`
+  // does (the hook's return object below depends on it).
+  const tunnelStatus = useMemo(() => tunnels.length > 0
     ? { running: true, rsd_address: tunnels[0].rsd_address, rsd_port: tunnels[0].rsd_port }
-    : { running: false }
+    : { running: false }, [tunnels])
 
   // ── Pin & auto-reconnect (issue #33) ──────────────────────────────
   // A pinned device keeps trying to reconnect on its own after the
@@ -643,7 +595,8 @@ export function useDevice(subscribe?: WsSubscribe) {
   // surviving device in charge so the rejoining one's replay stays
   // filtered out and invisible until the user explicitly chooses to
   // switch.
-  const connectedDevices: DeviceInfo[] = devices.filter((d) => d.is_connected)
+  const connectedDevices: DeviceInfo[] = useMemo(
+    () => devices.filter((d) => d.is_connected), [devices])
   const [stickyPrimaryUdid, setStickyPrimaryUdid] = useState<string | null>(null)
   useEffect(() => {
     if (connectedDevices.length === 0) {
@@ -656,14 +609,22 @@ export function useDevice(subscribe?: WsSubscribe) {
     setStickyPrimaryUdid(connectedDevices[0].udid)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devices])
-  const primaryDevice: DeviceInfo | null =
-    devices.find((d) => d.udid === stickyPrimaryUdid && d.is_connected) ?? null
+  const primaryDevice: DeviceInfo | null = useMemo(
+    () => devices.find((d) => d.udid === stickyPrimaryUdid && d.is_connected) ?? null,
+    [devices, stickyPrimaryUdid])
 
-  return {
+  // Memoize the public API object so consumers (App.tsx useCallbacks that
+  // list `device` as a dep) only re-bind when device state actually changes,
+  // not on every render of the host component.
+  return useMemo(() => ({
     devices, connectedDevice, scanning, scan, connect, disconnect,
-    connectWifi, scanWifi, wifiScanning, wifiDevices,
     startWifiTunnel, checkTunnelStatus, stopTunnel, tunnelStatus, tunnels,
     connectedDevices, primaryDevice,
     pinnedUdids, togglePin, schedulePinReconnect,
-  }
+  }), [
+    devices, connectedDevice, scanning, scan, connect, disconnect,
+    startWifiTunnel, checkTunnelStatus, stopTunnel, tunnelStatus, tunnels,
+    connectedDevices, primaryDevice,
+    pinnedUdids, togglePin, schedulePinReconnect,
+  ])
 }

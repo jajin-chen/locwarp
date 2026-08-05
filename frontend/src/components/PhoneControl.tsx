@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
+import { API_BASE as API } from '../services/api';
 
 interface PhoneNic {
   ip: string;
@@ -20,8 +21,6 @@ interface PhoneInfo {
 interface PhoneControlButtonProps {
   showToast?: (msg: string) => void;
 }
-
-const API = 'http://127.0.0.1:8777';
 
 const PhoneControlButton: React.FC<PhoneControlButtonProps> = ({ showToast }) => {
   const t = useT();

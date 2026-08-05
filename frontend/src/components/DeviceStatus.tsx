@@ -29,7 +29,6 @@ interface DeviceStatusProps {
   onStopTunnel?: (udid?: string) => Promise<void>;
   tunnelStatus?: TunnelStatus;
   tunnels?: TunnelInfo[];
-  onWifiConnect?: (ip: string) => Promise<any>;
   pinnedUdids?: string[];
   onTogglePin?: (udid: string) => void;
 }
@@ -44,7 +43,6 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   onStopTunnel,
   tunnelStatus = { running: false },
   tunnels = [],
-  onWifiConnect,
   pinnedUdids = [],
   onTogglePin,
 }) => {
@@ -481,7 +479,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
       )}
 
       {/* WiFi Connection Section — collapsible with iOS version tabs */}
-      {(onStartWifiTunnel || onWifiConnect) && (
+      {onStartWifiTunnel && (
         <div style={{ borderTop: '1px solid #333', paddingTop: 8, marginTop: 4 }}>
           {/* Collapsible header */}
           <button
@@ -1118,4 +1116,6 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   );
 };
 
-export default DeviceStatus;
+// Memoized: App re-renders on every WS position tick; the panel only needs
+// to re-render when one of its own props actually changed.
+export default React.memo(DeviceStatus);

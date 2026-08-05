@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import * as api from '../services/api'
 import type { WsMessage } from './useWebSocket'
 import { playCompletionAlert } from '../services/alertSound'
@@ -169,10 +169,10 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
   const [straightLine, setStraightLineRaw] = useState<boolean>(() => {
     try { return localStorage.getItem('locwarp.straight_line') === '1' } catch { return false }
   })
-  const setStraightLine = (v: boolean) => {
+  const setStraightLine = useCallback((v: boolean) => {
     setStraightLineRaw(v)
     try { localStorage.setItem('locwarp.straight_line', v ? '1' : '0') } catch { /* ignore */ }
-  }
+  }, [])
 
   // "Keep path points" toggle. When on, switching modes does NOT clear the
   // placed waypoints / route line, so the user can carry the same path
@@ -182,10 +182,10 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
   })
   const keepWaypointsRef = useRef(keepWaypoints)
   useEffect(() => { keepWaypointsRef.current = keepWaypoints }, [keepWaypoints])
-  const setKeepWaypoints = (v: boolean) => {
+  const setKeepWaypoints = useCallback((v: boolean) => {
     setKeepWaypointsRaw(v)
     try { localStorage.setItem('locwarp.keep_waypoints', v ? '1' : '0') } catch { /* ignore */ }
-  }
+  }, [])
 
   // Random-walk circle centre mode. "fixed" pins the circle to the start
   // point (bounded walk); "follow" re-centres on the current position each
@@ -193,10 +193,10 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
   const [randomWalkCenterMode, setRandomWalkCenterModeRaw] = useState<'fixed' | 'follow'>(() => {
     try { return localStorage.getItem('locwarp.rw_center_mode') === 'follow' ? 'follow' : 'fixed' } catch { return 'fixed' }
   })
-  const setRandomWalkCenterMode = (v: 'fixed' | 'follow') => {
+  const setRandomWalkCenterMode = useCallback((v: 'fixed' | 'follow') => {
     setRandomWalkCenterModeRaw(v)
     try { localStorage.setItem('locwarp.rw_center_mode', v) } catch { /* ignore */ }
-  }
+  }, [])
 
   // Forward (correlated) random walk: directional persistence so the path
   // flows forward instead of doubling back onto the road just walked.
@@ -211,10 +211,10 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     } catch { /* ignore */ }
     return { enabled: false, turnDeg: 35 }
   })
-  const setForwardWalk = (v: ForwardWalk) => {
+  const setForwardWalk = useCallback((v: ForwardWalk) => {
     setForwardWalkRaw(v)
     try { localStorage.setItem('locwarp.rw_forward', JSON.stringify(v)) } catch { /* ignore */ }
-  }
+  }, [])
   // Captured centre of the active random walk (the start point the backend
   // pins the sampling circle to). Lets the map circle freeze there in
   // "fixed" mode instead of drifting with the avatar.
@@ -231,10 +231,10 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     } catch { /* ignore */ }
     return 'osrm'
   })
-  const setRouteEngine = (v: RouteEngine) => {
+  const setRouteEngine = useCallback((v: RouteEngine) => {
     setRouteEngineRaw(v)
     try { localStorage.setItem('locwarp.route_engine', v) } catch { /* ignore */ }
-  }
+  }, [])
 
   // Per-mode pause settings, persisted in localStorage.
   interface PauseSetting { enabled: boolean; min: number; max: number }
@@ -258,9 +258,14 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
   }
   const [pauseLoop, setPauseLoopRaw] = useState<PauseSetting>(() => loadPause('locwarp.pause.loop'))
   const [pauseRandomWalk, setPauseRandomWalkRaw] = useState<PauseSetting>(() => loadPause('locwarp.pause.random_walk'))
-  const setPauseLoop = (v: PauseSetting) => { setPauseLoopRaw(v); savePause('locwarp.pause.loop', v) }
-  const setPauseRandomWalk = (v: PauseSetting) => { setPauseRandomWalkRaw(v); savePause('locwarp.pause.random_walk', v) }
+  const setPauseLoop = useCallback((v: PauseSetting) => { setPauseLoopRaw(v); savePause('locwarp.pause.loop', v) }, [])
+  const setPauseRandomWalk = useCallback((v: PauseSetting) => { setPauseRandomWalkRaw(v); savePause('locwarp.pause.random_walk', v) }, [])
   const [error, setError] = useState<string | null>(null)
+  // Reason string from the backend's `route_error` broadcast — set when a
+  // running route aborts mid-way (e.g. location push kept failing). App
+  // surfaces it as a toast so the user learns WHY the route stopped, then
+  // clears it via clearRouteError.
+  const [routeError, setRouteError] = useState<string | null>(null)
   // Random-walk pause countdown (unix epoch seconds of when pause ends)
   const [pauseEndAt, setPauseEndAt] = useState<number | null>(null)
   const [pauseRemaining, setPauseRemaining] = useState<number | null>(null)
@@ -686,11 +691,20 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         setError(wsMessage.data?.message ?? 'Simulation error')
         break
       }
+      case 'route_error': {
+        // Backend aborted a running route (payload: reason string). Keep the
+        // reason around for App to toast; the accompanying state_change /
+        // stop broadcasts already reset the running flags.
+        const reason = wsMessage.data?.reason
+        setRouteError(typeof reason === 'string' && reason ? reason : 'route error')
+        break
+      }
     }
     })
   }, [subscribe, updateRuntime])
 
   const clearError = useCallback(() => setError(null), [])
+  const clearRouteError = useCallback(() => setRouteError(null), [])
 
   // Public mode setter: clears the destination marker + route path when the
   // user switches mode tabs. Internal handlers (teleport/navigate/loop/...)
@@ -1113,16 +1127,21 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
   const joystickStopAll = useCallback((udids: string[]) =>
     fanout(udids, 'joystick-stop', (u) => api.joystickStop(u)), [fanout])
 
-  // Derived: primary runtime for legacy single-device components.
-  const primaryRuntime: DeviceRuntime | null = (() => {
+  // Derived: primary runtime for legacy single-device components. Memoized
+  // so the returned object below only changes identity when `runtimes` does.
+  const primaryRuntime: DeviceRuntime | null = useMemo(() => {
     const keys = Object.keys(runtimes)
     return keys.length ? runtimes[keys[0]] : null
-  })()
-  const anyRunning = Object.values(runtimes).some((r) =>
+  }, [runtimes])
+  const anyRunning = useMemo(() => Object.values(runtimes).some((r) =>
     r.state && r.state !== 'idle' && r.state !== 'disconnected',
-  )
+  ), [runtimes])
 
-  return {
+  // Memoize the public API object. Without this every render returned a
+  // fresh object literal, which defeated every useCallback in App.tsx that
+  // lists `sim` as a dependency — and with position ticks arriving at up to
+  // ~10 Hz that meant the whole component tree re-rendered per tick.
+  return useMemo(() => ({
     runtimes,
     primaryRuntime,
     anyRunning,
@@ -1193,6 +1212,8 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     applySpeed,
     error,
     clearError,
+    routeError,
+    clearRouteError,
     teleport,
     stop,
     navigate,
@@ -1219,5 +1240,27 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     pause,
     resume,
     restore,
-  }
+  }), [
+    runtimes, primaryRuntime, anyRunning,
+    teleportAll, navigateAll, startLoopAll, multiStopAll, flowerAll,
+    randomWalkAll, applySpeedAll, pauseAll, resumeAll, stopAll, restoreAll,
+    joystickStartAll, joystickStopAll, goldDittoCycle, goldDittoCycleAll,
+    mode, setMode, loadRoute, moveMode, setMoveMode, status,
+    currentPosition, destination, progress, eta, waypoints, routePath,
+    customSpeedKmh, setCustomSpeedKmh, speedMinKmh, speedMaxKmh,
+    straightLine, setStraightLine, keepWaypoints, setKeepWaypoints,
+    randomWalkCenterMode, setRandomWalkCenterMode, forwardWalk, setForwardWalk,
+    randomWalkCenter, routeEngine, setRouteEngine,
+    pauseLoop, setPauseLoop, pauseRandomWalk, setPauseRandomWalk,
+    pauseRemaining, ddiMounting, ddiStage, waypointProgress, lapProgress,
+    loopLapCount, setLoopLapCount,
+    jumpMode, setJumpMode, jumpPreDelay, setJumpPreDelay, jumpPostDelay, setJumpPostDelay,
+    effectiveSpeed, applySpeed, error, clearError, routeError, clearRouteError,
+    teleport, stop, navigate, startLoop, multiStop, flower, randomWalk,
+    flowerRadius, setFlowerRadius, flowerSegments, setFlowerSegments,
+    flowerCircles, setFlowerCircles, flowerRounds, setFlowerRounds,
+    flowerPreWait, setFlowerPreWait, flowerPostWait, setFlowerPostWait,
+    flowerTeleport, setFlowerTeleport,
+    joystickStart, joystickStop, pause, resume, restore,
+  ])
 }
