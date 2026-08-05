@@ -22,7 +22,7 @@ const api = vi.hoisted(() => ({
   wifiTunnelStartAndConnect: vi.fn(),
   wifiTunnelStatus: vi.fn(async () => ({ tunnels: [], running: false })),
   wifiTunnelStop: vi.fn(async () => ({ status: 'stopped' })),
-  wifiTunnelDiscover: vi.fn(async () => ({ devices: [] })),
+  wifiTunnelDiscover: vi.fn(async (): Promise<{ devices: Array<{ ip: string; port: number }> }> => ({ devices: [] })),
 }))
 
 vi.mock('../../services/api', () => api)
