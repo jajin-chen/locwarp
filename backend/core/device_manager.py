@@ -881,7 +881,7 @@ class DeviceManager:
         Used by ``DvtLocationService._reconnect`` after the DVT instrument
         channel drops. Probes connection health, transparently waits for
         any in-flight WiFi tunnel restart driven by ``_per_tunnel_watchdog``
-        (see ``api/device.py``), then opens a new ``DvtProvider`` on the
+        (see ``services/tunnel_manager.py``), then opens a new ``DvtProvider`` on the
         *current* lockdown. The previous provider stored on the active
         connection is closed best-effort.
 
@@ -909,12 +909,8 @@ class DeviceManager:
             # runner appears (success path swaps in a new TunnelRunner and
             # replaces conn.lockdown along the way) or we time out.
             if conn.connection_type == "Network":
-                runner = None
-                try:
-                    from api.device import _tunnels  # local import: avoids cycle at module load
-                    runner = _tunnels.get(udid)
-                except ImportError:
-                    runner = None
+                from services.tunnel_manager import _tunnels
+                runner = _tunnels.get(udid)
                 if runner is not None and not runner.is_running():
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
@@ -974,15 +970,9 @@ class DeviceManager:
             conn = self._connections.get(udid)
         conn_type = conn.connection_type if conn else None
 
-        try:
-            from api.device import _tunnels, _attempt_tunnel_restart
-        except ImportError:
-            _tunnels, _attempt_tunnel_restart = None, None
+        from services.tunnel_manager import _tunnels, _attempt_tunnel_restart
 
-        if _should_use_wifi_recovery(conn_type, _tunnels or {}, udid):
-            if _attempt_tunnel_restart is None:
-                logger.debug("full_reconnect: api.device not importable")
-                return False
+        if _should_use_wifi_recovery(conn_type, _tunnels, udid):
             runner = _tunnels.get(udid)
             if runner is None or not runner.target_ip or not runner.target_port:
                 logger.debug(

@@ -64,9 +64,9 @@ async def test_full_reconnect_network_conn_uses_tunnel_restart(monkeypatch) -> N
         restart_calls.append((u, ip, port, snapshot, orig_runner))
         return True
 
-    import api.device as api_device_module
-    monkeypatch.setitem(api_device_module._tunnels, udid, runner)
-    monkeypatch.setattr(api_device_module, "_attempt_tunnel_restart", fake_restart)
+    import services.tunnel_manager as tunnel_manager_module
+    monkeypatch.setitem(tunnel_manager_module._tunnels, udid, runner)
+    monkeypatch.setattr(tunnel_manager_module, "_attempt_tunnel_restart", fake_restart)
 
     connect_calls = []
     disconnect_calls = []
@@ -95,9 +95,9 @@ async def test_full_reconnect_missing_conn_record_with_live_tunnel_uses_wifi_pat
         restart_calls.append((u, ip, port, snapshot, orig_runner))
         return True
 
-    import api.device as api_device_module
-    monkeypatch.setitem(api_device_module._tunnels, udid, runner)
-    monkeypatch.setattr(api_device_module, "_attempt_tunnel_restart", fake_restart)
+    import services.tunnel_manager as tunnel_manager_module
+    monkeypatch.setitem(tunnel_manager_module._tunnels, udid, runner)
+    monkeypatch.setattr(tunnel_manager_module, "_attempt_tunnel_restart", fake_restart)
 
     connect_calls = []
     disconnect_calls = []
@@ -119,8 +119,8 @@ async def test_full_reconnect_missing_conn_record_without_tunnel_uses_usb_path(m
     udid = "00008103-000A74441499401E"
     assert udid not in dm._connections
 
-    import api.device as api_device_module
-    monkeypatch.delitem(api_device_module._tunnels, udid, raising=False)
+    import services.tunnel_manager as tunnel_manager_module
+    monkeypatch.delitem(tunnel_manager_module._tunnels, udid, raising=False)
 
     restart_calls = []
 
@@ -128,7 +128,7 @@ async def test_full_reconnect_missing_conn_record_without_tunnel_uses_usb_path(m
         restart_calls.append(args)
         return True
 
-    monkeypatch.setattr(api_device_module, "_attempt_tunnel_restart", fake_restart)
+    monkeypatch.setattr(tunnel_manager_module, "_attempt_tunnel_restart", fake_restart)
 
     connect_calls = []
     disconnect_calls = []
