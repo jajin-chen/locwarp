@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 
 from models.schemas import Coordinate, MovementMode, SimulationState
-from config import resolve_speed_profile
-from core.multi_stop import jump_wait
+from core.jump_mode import pick_speed_profile, run_jump_sequence, sample_pause_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +56,17 @@ class RouteLooper:
         # per-station random pause / speed profile are not used in this
         # mode because there's no continuous movement to interpolate.
         if jump_mode:
-            await _run_jump_loop(
+            await run_jump_sequence(
                 engine,
                 waypoints,
                 pre_delay=max(0.0, float(jump_pre_delay)),
                 post_delay=max(0.0, float(jump_post_delay)),
-                lap_count=lap_count,
+                state=SimulationState.LOOPING,
+                source="loop",
                 close_loop=True,
+                repeat=True,
+                lap_limit=lap_count,
+                emit_stop_reached=False,
             )
             return
 
@@ -119,32 +121,10 @@ class RouteLooper:
                     len(waypoints), profile_name,
                     f" (resuming at segment {resume_seg}, lap {engine.lap_count})" if resume_snap else "")
 
-        # Helper that re-picks the speed profile per lap. If the user applied
-        # a speed mid-flight, that takes precedence; otherwise re-resolve from
-        # the original args (so range mode produces per-lap variation).
-        def _pick_profile() -> dict:
-            if engine._speed_was_applied and engine._active_speed_profile is not None:
-                return dict(engine._active_speed_profile)
-            return resolve_speed_profile(
-                profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
-            )
-
-        # Per-station pause sampler. Returns a non-negative duration; 0 means
-        # "skip the pause entirely".
-        def _next_pause_seconds() -> float:
-            if not pause_enabled:
-                return 0.0
-            lo, hi = sorted((float(pause_min), float(pause_max)))
-            if lo < 0:
-                lo = 0.0
-            if hi <= 0:
-                return 0.0
-            return random.uniform(lo, hi)
-
         async def _pause_at_stop(stop_index: int) -> bool:
             """Pause for a random duration. Returns True if the simulation was
             stopped during the pause (caller should break out of its loop)."""
-            secs = _next_pause_seconds()
+            secs = sample_pause_seconds(pause_enabled, pause_min, pause_max)
             if secs <= 0:
                 return False
             logger.info("Loop: pausing %.1fs at stop %d", secs, stop_index)
@@ -179,7 +159,11 @@ class RouteLooper:
                 resume_uwn if first_iteration else (1 if len(waypoints) > 1 else 0)
             )
 
-            speed_profile = _pick_profile()
+            # Re-picked per lap: a speed applied mid-flight wins; otherwise
+            # range mode produces per-lap variation.
+            speed_profile = pick_speed_profile(
+                engine, profile_name, speed_kmh, speed_min_kmh, speed_max_kmh,
+            )
 
             # Tracks meters already walked this lap so we can compute the
             # leftover whole-lap distance handed to _route_offset_remaining
@@ -290,105 +274,3 @@ class RouteLooper:
             await engine._emit("state_change", {"state": engine.state.value})
 
         logger.info("Route loop stopped after %d laps", engine.lap_count)
-
-
-async def _run_jump_loop(
-    engine,
-    waypoints: list[Coordinate],
-    *,
-    pre_delay: float,
-    post_delay: float,
-    lap_count: int | None,
-    close_loop: bool,
-) -> None:
-    """Teleport sequentially through *waypoints*. Each stop is preceded by
-    *pre_delay* seconds and followed by *post_delay* seconds. When
-    *close_loop* is True, the final teleport returns to waypoints[0]
-    (start of next lap). Stops cleanly when ``engine._stop_event`` is
-    set; pause freezes both delays."""
-    engine.state = SimulationState.LOOPING
-    engine.total_segments = len(waypoints)
-    engine.lap_count = 0
-    engine.segment_index = 0
-    engine.distance_traveled = 0.0
-    engine.distance_remaining = 0.0
-    engine._user_waypoints = list(waypoints)
-    engine._user_waypoint_next = 1 if len(waypoints) > 1 else 0
-
-    await engine._emit("route_path", {
-        "coords": [{"lat": wp.lat, "lng": wp.lng} for wp in waypoints],
-    })
-    await engine._emit("state_change", {
-        "state": engine.state.value,
-        "waypoints": [{"lat": wp.lat, "lng": wp.lng} for wp in waypoints],
-    })
-
-    logger.info(
-        "Jump loop started: %d waypoints, pre=%.1fs post=%.1fs, laps=%s",
-        len(waypoints), pre_delay, post_delay, lap_count or "∞",
-    )
-
-    limit = lap_count if (lap_count is not None and lap_count > 0) else None
-
-    while not engine._stop_event.is_set():
-        for i, wp in enumerate(waypoints):
-            if engine._stop_event.is_set():
-                break
-            if await jump_wait(engine, pre_delay, source="loop"):
-                break
-            if engine._stop_event.is_set():
-                break
-            await engine._set_position(wp.lat, wp.lng)
-            engine.segment_index = i
-            engine._user_waypoint_next = min(i + 1, len(waypoints))
-            await engine._emit("position_update", {
-                "lat": wp.lat, "lng": wp.lng,
-                "speed_mps": 0.0,
-                "progress": (i + 1) / max(len(waypoints), 1),
-                "segment_index": i,
-                "total_segments": len(waypoints),
-                "lap_count": engine.lap_count,
-                "distance_traveled": 0.0,
-                "distance_remaining": 0.0,
-                "eta_seconds": 0.0,
-                "eta_arrival": "",
-                "is_paused": False,
-            })
-            await engine._emit("user_waypoint_advance", {
-                "current_index": i,
-                "next_index": min(i + 1, len(waypoints) - 1),
-            })
-            if await jump_wait(engine, post_delay, source="loop"):
-                break
-
-        if engine._stop_event.is_set():
-            break
-
-        # Teleport back to start before counting the lap so the visible
-        # path closes (only relevant for the closed-loop mode).
-        if close_loop and not engine._stop_event.is_set():
-            wp0 = waypoints[0]
-            await engine._set_position(wp0.lat, wp0.lng)
-            await engine._emit("position_update", {
-                "lat": wp0.lat, "lng": wp0.lng,
-                "speed_mps": 0.0, "progress": 1.0,
-                "segment_index": 0, "total_segments": len(waypoints),
-                "lap_count": engine.lap_count + 1,
-                "distance_traveled": 0.0, "distance_remaining": 0.0,
-                "eta_seconds": 0.0, "eta_arrival": "", "is_paused": False,
-            })
-
-        engine.lap_count += 1
-        await engine._emit("lap_complete", {
-            "lap": engine.lap_count, "total": limit,
-        })
-        logger.info("Jump loop lap %d%s complete",
-                    engine.lap_count, f"/{limit}" if limit else "")
-        if limit is not None and engine.lap_count >= limit:
-            await engine._emit("loop_complete", {"laps": engine.lap_count})
-            break
-
-    if engine.state == SimulationState.LOOPING:
-        engine.state = SimulationState.IDLE
-        await engine._emit("state_change", {"state": engine.state.value})
-    logger.info("Jump loop stopped after %d laps", engine.lap_count)

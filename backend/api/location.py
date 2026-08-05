@@ -269,7 +269,7 @@ async def apply_speed(req: ApplySpeedRequest):
     _move_along_route loop re-interpolates from the current position
     with the new speed; already-completed progress is kept."""
     from config import resolve_speed_profile
-    engine = await _engine(getattr(req, "udid", None) if 'req' in dir() else None)
+    engine = await _engine(req.udid)
     profile = resolve_speed_profile(
         req.mode.value,
         speed_kmh=req.speed_kmh,
@@ -288,7 +288,7 @@ async def apply_speed(req: ApplySpeedRequest):
 
 @router.post("/teleport")
 async def teleport(req: TeleportRequest):
-    engine = await _engine(getattr(req, "udid", None) if 'req' in dir() else None)
+    engine = await _engine(req.udid)
     cooldown = _cooldown()
 
     # Group mode (2+ engines): bypass cooldown entirely. The UI also locks the
@@ -372,7 +372,7 @@ def _spawn(coro):
 
 @router.post("/navigate")
 async def navigate(req: NavigateRequest):
-    engine = await _engine(getattr(req, "udid", None) if 'req' in dir() else None)
+    engine = await _engine(req.udid)
     _spawn(engine.navigate(
         Coordinate(lat=req.lat, lng=req.lng), req.mode,
         speed_kmh=req.speed_kmh,
@@ -385,7 +385,7 @@ async def navigate(req: NavigateRequest):
 
 @router.post("/loop")
 async def loop(req: LoopRequest):
-    engine = await _engine(getattr(req, "udid", None) if 'req' in dir() else None)
+    engine = await _engine(req.udid)
     _spawn(engine.start_loop(
         req.waypoints, req.mode,
         speed_kmh=req.speed_kmh,
@@ -401,7 +401,7 @@ async def loop(req: LoopRequest):
 
 @router.post("/multistop")
 async def multi_stop(req: MultiStopRequest):
-    engine = await _engine(getattr(req, "udid", None) if 'req' in dir() else None)
+    engine = await _engine(req.udid)
     _spawn(engine.multi_stop(
         req.waypoints, req.mode, req.stop_duration, req.loop,
         speed_kmh=req.speed_kmh,
@@ -416,7 +416,7 @@ async def multi_stop(req: MultiStopRequest):
 
 @router.post("/flower")
 async def flower(req: FlowerRequest):
-    engine = await _engine(getattr(req, "udid", None) if 'req' in dir() else None)
+    engine = await _engine(req.udid)
     _spawn(engine.flower(
         req.waypoints, req.mode,
         radius_m=req.radius_m, segments=req.segments,
@@ -453,7 +453,7 @@ async def insert_waypoint(req: InsertWaypointRequest):
 
 @router.post("/randomwalk")
 async def random_walk(req: RandomWalkRequest):
-    engine = await _engine(getattr(req, "udid", None) if 'req' in dir() else None)
+    engine = await _engine(req.udid)
     _spawn(engine.random_walk(
         req.center, req.radius_m, req.mode,
         speed_kmh=req.speed_kmh,
@@ -471,7 +471,7 @@ async def random_walk(req: RandomWalkRequest):
 
 @router.post("/joystick/start")
 async def joystick_start(req: JoystickStartRequest):
-    engine = await _engine(getattr(req, "udid", None) if 'req' in dir() else None)
+    engine = await _engine(req.udid)
     try:
         await engine.joystick_start(req.mode)
     except Exception as e:

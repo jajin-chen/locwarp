@@ -1,4 +1,9 @@
-const API = 'http://127.0.0.1:8777'
+// Single source of truth for the backend address on the frontend side.
+// (electron/main.js, start.py, stop.py are separate processes with their own copy.)
+export const API_HOST = '127.0.0.1'
+export const API_PORT = 8777
+export const API_BASE = `http://${API_HOST}:${API_PORT}`
+const API = API_BASE
 
 // Connection-refused means backend isn't up yet, retry with backoff.
 // Other HTTP errors (4xx/5xx) are real errors and propagate immediately.

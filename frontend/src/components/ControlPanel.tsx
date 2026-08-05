@@ -1191,4 +1191,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   );
 };
 
-export default ControlPanel;
+// Memoized: App re-renders on every WS position tick; the panel only needs
+// to re-render when one of its own props actually changed.
+export default React.memo(ControlPanel);

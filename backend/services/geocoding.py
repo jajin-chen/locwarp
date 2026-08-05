@@ -30,6 +30,19 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 _GOOGLE_GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 
+# Lazily-created client shared by every call site so repeated lookups reuse
+# TCP+TLS connections instead of handshaking per request. Created on first
+# use (never at import time) and kept for the life of the process — fine for
+# this desktop app, which has no geocoding-specific shutdown hook.
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(timeout=_TIMEOUT)
+    return _client
+
 
 class GeocodingService:
     """Async wrapper around forward / reverse geocoding."""
@@ -70,14 +83,13 @@ class GeocodingService:
             "limit": min(limit, 40),
         }
         logger.debug("Nominatim search: %s", query)
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(
-                f"{NOMINATIM_BASE_URL}/search",
-                params=params,
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        resp = await _get_client().get(
+            f"{NOMINATIM_BASE_URL}/search",
+            params=params,
+            headers=self._headers(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
 
         results: list[GeocodingResult] = []
         for item in data:
@@ -102,14 +114,13 @@ class GeocodingService:
         # synthesise one from the properties for parity with Nominatim.
         params = {"q": query, "limit": min(limit, 40)}
         logger.debug("Photon search: %s", query)
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(
-                f"{PHOTON_BASE_URL}/api",
-                params=params,
-                headers={"User-Agent": NOMINATIM_USER_AGENT},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        resp = await _get_client().get(
+            f"{PHOTON_BASE_URL}/api",
+            params=params,
+            headers={"User-Agent": NOMINATIM_USER_AGENT},
+        )
+        resp.raise_for_status()
+        data = resp.json()
 
         results: list[GeocodingResult] = []
         for feat in data.get("features", []):
@@ -163,8 +174,7 @@ class GeocodingService:
             "language": "zh-TW",
         }
         logger.debug("Google geocode search: %s", query)
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(_GOOGLE_GEOCODE_URL, params=params)
+        resp = await _get_client().get(_GOOGLE_GEOCODE_URL, params=params)
         if resp.status_code != 200:
             text = resp.text[:200] if resp.text else ""
             raise HTTPException(
@@ -222,14 +232,13 @@ class GeocodingService:
 
         logger.debug("Nominatim reverse: %.6f, %.6f", lat, lng)
 
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(
-                f"{NOMINATIM_BASE_URL}/reverse",
-                params=params,
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        resp = await _get_client().get(
+            f"{NOMINATIM_BASE_URL}/reverse",
+            params=params,
+            headers=self._headers(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
 
         if "error" in data:
             logger.info("Nominatim reverse returned error: %s", data["error"])

@@ -15,7 +15,6 @@ from services.cooldown import CooldownTimer
 from services.bookmarks import BookmarkManager
 from services.route_store import RouteManager
 from services.coord_format import CoordinateFormatter
-from services.reconnect import ReconnectManager
 
 # Configure logging — console + rotating file in ~/.locwarp/logs/
 _log_fmt = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
@@ -52,7 +51,6 @@ class AppState:
         self.bookmark_manager = BookmarkManager()
         self.route_manager = RouteManager()
         self.coord_formatter = CoordinateFormatter()
-        self.reconnect_manager = None
         self._last_position = None
         # User-chosen initial map center (persisted between launches). When
         # None, the frontend falls back to a hardcoded default.
@@ -180,6 +178,13 @@ class AppState:
             await broadcast(event_type, data)
             if event_type == "position_update" and "lat" in data:
                 self.update_last_position(data["lat"], data["lng"])
+            # Follower feed (VirtualRun) — read-only tap; a broken follower
+            # pipeline must never take down the iOS event pipeline.
+            try:
+                from api import follow
+                await follow.forward(event_type, data)
+            except Exception:
+                logger.debug("follow forward error (ignored)", exc_info=True)
 
         engine = SimulationEngine(loc_service, event_callback)
         self.simulation_engines[udid] = engine
@@ -198,9 +203,6 @@ class AppState:
         # The map UI still shows a default center (Taipei or the user's
         # `initial_map_position` setting) — that's purely a visual default
         # for the Leaflet view, not a virtual GPS coordinate.
-
-        # Setup reconnect manager
-        self.reconnect_manager = ReconnectManager(self.device_manager)
 
         logger.info("Simulation engine created for device %s (no initial location pushed)", udid)
 
@@ -334,6 +336,7 @@ async def _usbmux_presence_watchdog():
     import time
     from pymobiledevice3.usbmux import list_devices
     from api.websocket import broadcast
+    from core.device_manager import usbmux_availability
 
     miss_counts: dict[str, int] = {}
     miss_threshold = 3
@@ -368,11 +371,22 @@ async def _usbmux_presence_watchdog():
                     connected_original[udid.lower()] = udid
             connected = set(connected_original.keys())
 
+            if not usbmux_availability.should_attempt(time.monotonic()):
+                continue
             try:
                 raw = await list_devices()
-            except Exception:
+            except Exception as exc:
+                if usbmux_availability.record_failure(time.monotonic()):
+                    logger.warning(
+                        "usbmuxd unreachable (%s: %s) — USB watchdog paused, "
+                        "retrying every %.0fs. Is Apple Mobile Device Service "
+                        "(iTunes / Apple Devices) installed and running?",
+                        type(exc).__name__, exc, usbmux_availability.cooldown,
+                    )
                 logger.debug("usbmux list_devices failed in watchdog", exc_info=True)
                 continue
+            if usbmux_availability.record_success():
+                logger.info("usbmuxd reachable again — USB watchdog resumed")
             present_usb_original: dict[str, str] = {}  # lowercase → original
             for r in raw:
                 if getattr(r, "connection_type", "USB") == "USB":
@@ -663,6 +677,13 @@ async def lifespan(application: FastAPI):
     watchdog_task = asyncio.create_task(_usbmux_presence_watchdog())
     keepalive_task = asyncio.create_task(_wifi_tunnel_keepalive())
 
+    # Advertise the follower feed on the LAN (best-effort; see follow_discovery).
+    try:
+        from services import follow_discovery
+        await asyncio.to_thread(follow_discovery.start_advertise, API_PORT, application.version)
+    except Exception:
+        logger.warning("follow mDNS startup failed (ignored)", exc_info=True)
+
     yield
 
     # ── Shutdown ──
@@ -673,6 +694,12 @@ async def lifespan(application: FastAPI):
             await _t
         except (asyncio.CancelledError, Exception):
             pass
+
+    try:
+        from services import follow_discovery
+        await asyncio.to_thread(follow_discovery.stop_advertise)
+    except Exception:
+        logger.debug("follow mDNS shutdown failed (ignored)", exc_info=True)
 
     app_state.save_settings()
     await app_state.device_manager.disconnect_all()
@@ -701,6 +728,7 @@ from api.recent import router as recent_router
 from api.websocket import router as ws_router
 from api.system import router as system_router
 from api.phone_control import router as phone_router
+from api.follow import router as follow_router
 
 app.include_router(device_router)
 app.include_router(location_router)
@@ -711,6 +739,7 @@ app.include_router(bookmarks_router)
 app.include_router(recent_router)
 app.include_router(ws_router)
 app.include_router(phone_router)
+app.include_router(follow_router)
 
 
 @app.get("/")

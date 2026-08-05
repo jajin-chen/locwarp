@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import * as api from '../services/api'
 
 export interface Bookmark {
@@ -22,6 +22,10 @@ export function useBookmarks() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [categories, setCategories] = useState<BookmarkCategory[]>([])
   const [loading, setLoading] = useState(false)
+  // Load failure message. Kept in state (instead of only console.error) so
+  // App can surface it as a toast — a silent failure just left the bookmark
+  // list empty with no hint that a refresh would fix it.
+  const [loadError, setLoadError] = useState<string | null>(null)
   const mountedRef = useRef(true)
 
   const refresh = useCallback(async () => {
@@ -36,10 +40,15 @@ export function useBookmarks() {
       setCategories(Array.isArray(cats) ? cats : [])
     } catch (err) {
       console.error('Failed to load bookmarks:', err)
+      if (mountedRef.current) {
+        setLoadError(err instanceof Error ? err.message : String(err))
+      }
     } finally {
       if (mountedRef.current) setLoading(false)
     }
   }, [])
+
+  const clearLoadError = useCallback(() => setLoadError(null), [])
 
   // Load on mount
   useEffect(() => {
@@ -164,10 +173,14 @@ export function useBookmarks() {
     [refresh],
   )
 
-  return {
+  // Memoized so App.tsx callbacks that list `bm` as a dependency only
+  // re-bind when bookmark state actually changes.
+  return useMemo(() => ({
     bookmarks,
     categories,
     loading,
+    loadError,
+    clearLoadError,
     createBookmark,
     updateBookmark,
     deleteBookmark,
@@ -178,5 +191,10 @@ export function useBookmarks() {
     reorderCategories,
     reorderBookmarksInCategory,
     refresh,
-  }
+  }), [
+    bookmarks, categories, loading, loadError, clearLoadError,
+    createBookmark, updateBookmark, deleteBookmark, moveBookmarks,
+    createCategory, deleteCategory, updateCategory,
+    reorderCategories, reorderBookmarksInCategory, refresh,
+  ])
 }

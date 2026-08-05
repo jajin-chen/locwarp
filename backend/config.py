@@ -37,9 +37,13 @@ OSRM_FOSSGIS_BASE_URL = "https://routing.openstreetmap.de"
 VALHALLA_BASE_URL = "https://valhalla1.openstreetmap.de"
 BROUTER_BASE_URL = "https://brouter.de"
 
+# App version — single source of truth for backend User-Agent strings.
+# Keep in sync with frontend/package.json "version".
+APP_VERSION = "0.2.192"
+
 # Nominatim
 NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org"
-NOMINATIM_USER_AGENT = "LocWarp/0.2.155 (+https://github.com/keezxc1223/locwarp)"
+NOMINATIM_USER_AGENT = f"LocWarp/{APP_VERSION} (+https://github.com/keezxc1223/locwarp)"
 
 # Photon (komoot) — OSM-backed, no API key, more forgiving than Nominatim
 # for fuzzy / typo queries and unrestricted on User-Agent.

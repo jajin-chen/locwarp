@@ -277,8 +277,9 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 | [websockets](https://websockets.readthedocs.io/) | 16+ | Real-time position / status push to frontend |
 | [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) | 10.1+ | iOS device protocols (DVT / RemoteServices / lockdown / LegacyLocationService) |
 | [pydantic](https://docs.pydantic.dev/) | 2.13+ | Request / response validation (schemas) |
-| [httpx](https://www.python-httpx.org/) | 0.27+ | OSRM / OSRM FOSSGIS / Valhalla / BRouter / Nominatim / TimezoneDB HTTP calls |
+| [httpx](https://www.python-httpx.org/) | 0.27+ | OSRM / OSRM FOSSGIS / Valhalla / BRouter / Nominatim HTTP calls |
 | [gpxpy](https://github.com/tkrajina/gpxpy) | 1.6+ | GPX route parsing |
+| [tzfpy](https://github.com/ringsaturn/tzfpy) | 1.3+ | Coords → IANA timezone, fully offline (replaces TimezoneDB; no API key, no network) |
 
 ### Wi-Fi Tunnel (integrated into backend, v0.2.3+, iOS 17+ only)
 
@@ -299,7 +300,6 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 | [Photon (komoot)](https://photon.komoot.io/) | backend | Second address-search provider (v0.2.149+), better fuzzy / typo-tolerant matching than Nominatim | No |
 | [Google Geocoding API](https://developers.google.com/maps/documentation/geocoding) | backend | Optional secondary geocoding source (10K req/month free); user supplies their own API key in settings | Yes (user-supplied) |
 | [Open-Meteo](https://open-meteo.com/) | **frontend (direct)** | Current weather at virtual location (temp + WMO weather_code); each user has their own 10,000 req/day per IP | No |
-| [TimezoneDB](https://timezonedb.com/) | backend | Coords → timezone + GMT offset, cross-zone toast | Yes (bundled) |
 | [flagcdn.com](https://flagcdn.com/) | frontend | Country flag PNGs (`w20/{cc}.png`, `w40/{cc}.png`) | No |
 | [CartoDB Voyager](https://carto.com/) | frontend tile | Map tiles (OSM data, redistributable license) | No |
 | [ESRI World Imagery](https://www.esri.com/) | frontend tile | Satellite layer (tile switcher) | No |

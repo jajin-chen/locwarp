@@ -1,11 +1,12 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   listDevices, connectDevice, disconnectDevice,
-  wifiConnect, wifiScan,
-  wifiTunnelStartAndConnect, wifiTunnelStatus, wifiTunnelStop,
+  wifiTunnelStartAndConnect, wifiTunnelStatus, wifiTunnelStop, wifiTunnelDiscover,
   type TunnelInfo,
 } from '../services/api'
 import type { WsMessage } from './useWebSocket'
+import { readSavedIps, removeSavedIpByUdid, upsertSavedIp, writeSavedIps } from '../utils/savedIps'
+import { classifyPinAttempt } from '../utils/autoConnect'
 
 export interface DeviceInfo {
   udid: string
@@ -17,13 +18,6 @@ export interface DeviceInfo {
   // failed, or device not yet connected). Used to decide whether to show
   // the "Reveal Developer Mode option" button.
   developer_mode_enabled?: boolean | null
-}
-
-export interface WifiScanResult {
-  ip: string
-  name: string
-  udid: string
-  ios_version: string
 }
 
 export type WsSubscribe = (fn: (m: WsMessage) => void) => () => void
@@ -94,8 +88,6 @@ export function useDevice(subscribe?: WsSubscribe) {
     })
   }, [subscribe])
   const [scanning, setScanning] = useState(false)
-  const [wifiScanning, setWifiScanning] = useState(false)
-  const [wifiDevices, setWifiDevices] = useState<WifiScanResult[]>([])
 
   const scan = useCallback(async () => {
     setScanning(true)
@@ -172,55 +164,17 @@ export function useDevice(subscribe?: WsSubscribe) {
     [],
   )
 
-  const connectWifi = useCallback(
-    async (ip: string) => {
-      try {
-        const res = await wifiConnect(ip)
-        const info: DeviceInfo = {
-          udid: res.udid,
-          name: res.name,
-          ios_version: res.ios_version,
-          connection_type: 'Network',
-          is_connected: true,
-        }
-        setConnectedDevice(info)
-        setDevices((prev) => {
-          const filtered = prev.filter((d) => d.udid !== info.udid)
-          return [...filtered, info]
-        })
-        return info
-      } catch (err) {
-        console.error('WiFi connect failed:', err)
-        throw err
-      }
-    },
-    [],
-  )
-
-  const scanWifi = useCallback(async () => {
-    setWifiScanning(true)
-    try {
-      const results = await wifiScan()
-      const list: WifiScanResult[] = Array.isArray(results) ? results : []
-      setWifiDevices(list)
-      return list
-    } catch (err) {
-      console.error('WiFi scan failed:', err)
-      return []
-    } finally {
-      setWifiScanning(false)
-    }
-  }, [])
-
   // v0.2.83: WiFi tunnel state went from a singleton to a per-device list.
   // Each connected iOS 17+ WiFi device gets its own runner on the backend;
   // `tunnels` mirrors that list. `tunnelStatus` is kept as a derived
   // singleton (mirrors first tunnel) for any leftover single-tunnel callers
   // until they migrate.
   const [tunnels, setTunnels] = useState<TunnelInfo[]>([])
-  const tunnelStatus = tunnels.length > 0
+  // Memoized so the derived object only changes identity when `tunnels`
+  // does (the hook's return object below depends on it).
+  const tunnelStatus = useMemo(() => tunnels.length > 0
     ? { running: true, rsd_address: tunnels[0].rsd_address, rsd_port: tunnels[0].rsd_port }
-    : { running: false }
+    : { running: false }, [tunnels])
 
   // ── Pin & auto-reconnect (issue #33) ──────────────────────────────
   // A pinned device keeps trying to reconnect on its own after the
@@ -240,45 +194,202 @@ export function useDevice(subscribe?: WsSubscribe) {
   pinnedRef.current = pinnedUdids
   const tunnelsRef = useRef<TunnelInfo[]>(tunnels)
   tunnelsRef.current = tunnels
+  // All three maps below are keyed by lowercased udid (see schedulePinReconnect
+  // for why the key must be normalized).
   const pinRetryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
-  // Set after startWifiTunnel is defined below; the retry loop calls
-  // through the ref so we avoid a definition-order cycle.
+  const pinRetryFailures = useRef<Record<string, number>>({})
+  // Consecutive reschedule count per device, used to back off the retry
+  // interval for devices that stay offline a long time (see schedulePinReconnect).
+  const pinRetryRounds = useRef<Record<string, number>>({})
+  // Set after startWifiTunnel / stopTunnel are defined below; the retry
+  // loop calls through the refs so we avoid a definition-order cycle.
   const startWifiTunnelRef = useRef<((ip: string, port?: number, udidHint?: string) => Promise<any>) | null>(null)
+  const stopTunnelRef = useRef<((udid?: string) => Promise<void>) | null>(null)
 
   const clearPinRetry = useCallback((udid: string) => {
-    const tmr = pinRetryTimers.current[udid]
-    if (tmr) { clearTimeout(tmr); delete pinRetryTimers.current[udid] }
+    const key = udid.toLowerCase()
+    const tmr = pinRetryTimers.current[key]
+    if (tmr) { clearTimeout(tmr); delete pinRetryTimers.current[key] }
+    delete pinRetryFailures.current[key]
+    delete pinRetryRounds.current[key]
   }, [])
 
   const readSavedEntryFor = (udid: string): { ip: string; port: number } | null => {
     try {
       const arr = JSON.parse(localStorage.getItem('locwarp.tunnel.savedips') || '[]')
       if (!Array.isArray(arr)) return null
-      const hit = arr.find((e: any) => e && e.udid === udid && typeof e.ip === 'string')
+      // Case-insensitive: savedips entries can be written under a
+      // different-case udid than the one the retry loop is chasing (see
+      // schedulePinReconnect). A strict match here silently skipped the
+      // direct-reconnect attempt on every round and fell straight through
+      // to the heavy discover fallback, turning the ~45s full-network-scan
+      // cadence into every ~15s.
+      const udidLc = udid.toLowerCase()
+      const hit = arr.find((e: any) => e && typeof e.udid === 'string' && e.udid.toLowerCase() === udidLc && typeof e.ip === 'string')
       if (hit) return { ip: hit.ip, port: Number(hit.port) || 49152 }
     } catch { /* ignore */ }
     return null
   }
 
   const schedulePinReconnect = useCallback((udid: string, delayMs = 5000) => {
-    if (pinRetryTimers.current[udid]) return // already scheduled
+    // Normalize the dedup key to lowercase up front. Callers pass different
+    // casings for the same physical device — App.tsx's cold-start retry uses
+    // the pinned-list casing, while the tunnel_lost WS handler uses whatever
+    // case the backend's RSD peer_info happened to report. If the timer /
+    // failure-count maps were keyed by the raw udid, those two callers could
+    // each arm their own independent 15s loop for the same iPhone, doubling
+    // network load and fighting each other over the connection.
+    const udidLc = udid.toLowerCase()
+    if (pinRetryTimers.current[udidLc]) return // already scheduled
     const attempt = async () => {
-      delete pinRetryTimers.current[udid]
+      delete pinRetryTimers.current[udidLc]
       // Stop if the user unpinned, or the tunnel already came back.
-      if (!pinnedRef.current.includes(udid)) return
-      if (tunnelsRef.current.some((tn) => tn.udid === udid)) return
-      const entry = readSavedEntryFor(udid)
-      if (entry && startWifiTunnelRef.current) {
-        try {
-          await startWifiTunnelRef.current(entry.ip, entry.port, udid)
-          return // success path clears the timer via startWifiTunnel
-        } catch { /* fall through and reschedule */ }
-      }
-      if (pinnedRef.current.includes(udid) && !tunnelsRef.current.some((tn) => tn.udid === udid)) {
-        pinRetryTimers.current[udid] = setTimeout(attempt, 15000)
+      if (!pinnedRef.current.some((u) => u.toLowerCase() === udidLc)) return
+      if (tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)) return
+
+      // Everything below must fall through to the reschedule block in
+      // `finally` unless we've confirmed OUR target device is the one that
+      // just connected. Wrapping the whole body in try/finally means an
+      // unexpected thrown error (not just the handled failure branches)
+      // can never silently kill the retry loop — setTimeout callbacks are
+      // fire-and-forget, so an unhandled rejection here would otherwise
+      // vanish with no reschedule and no visible error.
+      let reconnected = false
+      try {
+        const entry = readSavedEntryFor(udid)
+        const failures = pinRetryFailures.current[udidLc] ?? 0
+        if (entry && failures < 2) {
+          // startWifiTunnel's udidHint is only a HINT for the backend's
+          // candidate search, not a guarantee — start-and-connect can
+          // resolve successfully against a completely different device
+          // than the one we asked for. Treating "the call didn't throw"
+          // as "our device is back" was the root cause of the retry loop
+          // going permanently silent: a stranger (or another pinned
+          // phone) connecting on this endpoint used to hit `return` here,
+          // skipping the reschedule below forever. We check the resolved
+          // identity via classifyPinAttempt instead. A null/undefined
+          // ref (e.g. startWifiTunnel not wired up yet) also resolves to
+          // 'failed' rather than being mistaken for success.
+          let info: { udid: string } | null | undefined
+          try {
+            info = await startWifiTunnelRef.current?.(entry.ip, entry.port, udid)
+          } catch {
+            info = null
+          }
+          const outcome = classifyPinAttempt({
+            targetUdid: udid,
+            resultUdid: info?.udid,
+            pinnedUdids: pinnedRef.current,
+          })
+          if (outcome === 'reconnected') {
+            reconnected = true
+            return // success path clears the timer via startWifiTunnel
+          }
+          if (outcome === 'stranger' && info?.udid) {
+            // Connected, but to a device nobody pinned — undo and scrub
+            // the stale saved IP so future attempts stop chasing it.
+            await stopTunnelRef.current?.(info.udid)
+            writeSavedIps(removeSavedIpByUdid(readSavedIps(), info.udid))
+          }
+          if (outcome === 'stranger' || outcome === 'other-pinned') {
+            // The (ip, port) we just dialed for `udid` resolved to a
+            // DIFFERENT device — proof that udid's own savedips entry is
+            // stale (the endpoint moved on: DHCP lease change, port
+            // rebind, etc). Scrub it too, not just the stranger/other-
+            // pinned entry above. Left in place, readSavedEntryFor(udid)
+            // keeps returning this same dead endpoint every ~15s round,
+            // and connect_wifi_tunnel's backend path calls disconnect()
+            // for any already-connected udid before reconnecting —
+            // disconnect() calls location_service.clear()
+            // (backend/core/device_manager.py:766-767) — so each retry
+            // round kicks whoever now legitimately owns this endpoint and
+            // wipes their running location simulation. Clearing it here
+            // makes the next round's readSavedEntryFor return null and
+            // fall straight to the discover branch below, which re-finds
+            // udid's real, current endpoint instead of repeating this.
+            writeSavedIps(removeSavedIpByUdid(readSavedIps(), udid))
+          }
+          // 'other-pinned' reached a keeper for its own owner — leave its
+          // tunnel up (no stopTunnel call: it's the user's own device and
+          // staying connected is desired). Either way (including
+          // 'failed'), OUR target still isn't back, so this attempt is a
+          // miss; fall through to retry.
+          pinRetryFailures.current[udidLc] = failures + 1
+        } else {
+          // Two direct failures (or nothing saved) — the iPhone likely
+          // rebound its RemotePairing port or moved to a new DHCP lease.
+          // Re-discover once and try the fresh endpoints; identity is
+          // verified after connect (drop anything not pinned).
+          try {
+            const dres = await wifiTunnelDiscover()
+            for (const d of dres?.devices || []) {
+              if (tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)) break
+              let info: { udid: string } | null | undefined
+              try {
+                info = await startWifiTunnelRef.current?.(
+                  String(d.ip), Number(d.port) || 49152, udid,
+                )
+              } catch {
+                info = null // try next candidate
+              }
+              if (!info) continue
+              const outcome = classifyPinAttempt({
+                targetUdid: udid,
+                resultUdid: info.udid,
+                pinnedUdids: pinnedRef.current,
+              })
+              if (outcome === 'reconnected') {
+                reconnected = true
+                return // reconnected our target
+              }
+              if (outcome === 'stranger') {
+                // Reached an unpinned stranger — undo and scrub. Use the
+                // hook's own stopTunnel (not the raw API call) so the
+                // `tunnels` state list drops the entry too; otherwise the
+                // kicked device leaves a zombie chip in the panel until
+                // the next tunnel_lost/device_disconnected broadcast.
+                await stopTunnelRef.current?.(info.udid)
+                writeSavedIps(removeSavedIpByUdid(readSavedIps(), info.udid))
+              }
+              if (outcome === 'stranger' || outcome === 'other-pinned') {
+                // Same reasoning as the direct-reconnect branch above:
+                // this candidate resolved to someone other than `udid`,
+                // so scrub udid's own savedips entry defensively (if any
+                // still points at this or a similarly stale endpoint) —
+                // otherwise a future round could rediscover and redial
+                // the same wrong endpoint, kicking that device's tunnel
+                // and clearing its location simulation.
+                writeSavedIps(removeSavedIpByUdid(readSavedIps(), udid))
+              }
+              // A different pinned device ('other-pinned') is a keeper;
+              // keep looking for ours among the remaining candidates.
+            }
+          } catch { /* discover failed — retry cycle continues below */ }
+          pinRetryFailures.current[udidLc] = 0 // next cycle starts with the saved entry again
+        }
+      } finally {
+        if (
+          !reconnected &&
+          pinnedRef.current.some((u) => u.toLowerCase() === udidLc) &&
+          !tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)
+        ) {
+          // Back off for devices that stay offline a long time. Cold-start
+          // retries (App.tsx) now arm this loop for pinned devices that were
+          // ALREADY offline at launch, not just ones that dropped mid-session
+          // — and a phone left locked in a pocket can stay offline for a
+          // long while. Without backing off, every ~45s cycle (2 direct
+          // attempts + 1 discover round, at 15s each) re-runs the discover
+          // fallback's full mDNS + /24 + full-range scan forever. After 8
+          // rounds (~3 minutes) with no luck, stretch the interval to 60s.
+          // Reset to 0 the moment the device reconnects (see clearPinRetry).
+          const round = (pinRetryRounds.current[udidLc] ?? 0) + 1
+          pinRetryRounds.current[udidLc] = round
+          const interval = round > 8 ? 60000 : 15000
+          pinRetryTimers.current[udidLc] = setTimeout(attempt, interval)
+        }
       }
     }
-    pinRetryTimers.current[udid] = setTimeout(attempt, delayMs)
+    pinRetryTimers.current[udidLc] = setTimeout(attempt, delayMs)
   }, [])
 
   const PIN_IP_MAP_KEY = 'locwarp.tunnel.pin_ip_map'
@@ -319,10 +430,26 @@ export function useDevice(subscribe?: WsSubscribe) {
     return subscribe((msg) => {
       if (msg.type === 'tunnel_lost') {
         const udid = msg.data?.udid
-        if (udid && pinnedRef.current.includes(udid)) schedulePinReconnect(udid)
+        // Case-insensitive: see the comment in schedulePinReconnect for why
+        // (pair-record / RSD peer_info case can differ from the saved pin).
+        if (udid && pinnedRef.current.some((u) => u.toLowerCase() === String(udid).toLowerCase())) {
+          schedulePinReconnect(udid)
+        }
       } else if (msg.type === 'tunnel_recovered' || msg.type === 'device_connected') {
         const udid = msg.data?.udid
         if (udid) clearPinRetry(udid)
+        if (msg.type === 'tunnel_recovered' && udid && msg.data?.ip) {
+          // The watchdog may have recovered on a NEW endpoint (port
+          // rebind / DHCP change). Persist it so the next launch and
+          // future pin retries use the fresh address instead of the
+          // stale one that just failed.
+          writeSavedIps(upsertSavedIp(readSavedIps(), {
+            ip: String(msg.data.ip),
+            port: Number(msg.data.port) || 49152,
+            udid,
+            lastUsed: Date.now(),
+          }))
+        }
       }
     })
   }, [subscribe, schedulePinReconnect, clearPinRetry])
@@ -452,6 +579,9 @@ export function useDevice(subscribe?: WsSubscribe) {
       console.error('Failed to stop tunnel:', err)
     }
   }, [])
+  // Expose the latest stopTunnel to the pin-retry loop without making it
+  // a hook dependency (the callback is stable, deps: []).
+  stopTunnelRef.current = stopTunnel
 
   // Group-mode derived state: every device in `devices` marked is_connected.
   // `primaryDevice` sticks to whichever device we picked first; we only
@@ -465,7 +595,8 @@ export function useDevice(subscribe?: WsSubscribe) {
   // surviving device in charge so the rejoining one's replay stays
   // filtered out and invisible until the user explicitly chooses to
   // switch.
-  const connectedDevices: DeviceInfo[] = devices.filter((d) => d.is_connected)
+  const connectedDevices: DeviceInfo[] = useMemo(
+    () => devices.filter((d) => d.is_connected), [devices])
   const [stickyPrimaryUdid, setStickyPrimaryUdid] = useState<string | null>(null)
   useEffect(() => {
     if (connectedDevices.length === 0) {
@@ -478,14 +609,22 @@ export function useDevice(subscribe?: WsSubscribe) {
     setStickyPrimaryUdid(connectedDevices[0].udid)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devices])
-  const primaryDevice: DeviceInfo | null =
-    devices.find((d) => d.udid === stickyPrimaryUdid && d.is_connected) ?? null
+  const primaryDevice: DeviceInfo | null = useMemo(
+    () => devices.find((d) => d.udid === stickyPrimaryUdid && d.is_connected) ?? null,
+    [devices, stickyPrimaryUdid])
 
-  return {
+  // Memoize the public API object so consumers (App.tsx useCallbacks that
+  // list `device` as a dep) only re-bind when device state actually changes,
+  // not on every render of the host component.
+  return useMemo(() => ({
     devices, connectedDevice, scanning, scan, connect, disconnect,
-    connectWifi, scanWifi, wifiScanning, wifiDevices,
     startWifiTunnel, checkTunnelStatus, stopTunnel, tunnelStatus, tunnels,
     connectedDevices, primaryDevice,
-    pinnedUdids, togglePin,
-  }
+    pinnedUdids, togglePin, schedulePinReconnect,
+  }), [
+    devices, connectedDevice, scanning, scan, connect, disconnect,
+    startWifiTunnel, checkTunnelStatus, stopTunnel, tunnelStatus, tunnels,
+    connectedDevices, primaryDevice,
+    pinnedUdids, togglePin, schedulePinReconnect,
+  ])
 }

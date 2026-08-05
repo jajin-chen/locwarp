@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Optional
@@ -55,6 +56,43 @@ class UnsupportedIosVersionError(RuntimeError):
         super().__init__(f"iOS {version} is not supported (requires {self.MIN_VERSION}+)")
 
 logger = logging.getLogger(__name__)
+
+
+class UsbmuxAvailability:
+    """Debounce usbmuxd connection failures.
+
+    On machines without Apple Mobile Device Service every USB poll fails;
+    without this, discover_devices logs a full ERROR traceback every few
+    seconds forever. State machine: first failure logs once and pauses
+    usbmux attempts for `cooldown` seconds; recovery logs once.
+    """
+
+    def __init__(self, cooldown: float = 60.0) -> None:
+        self.cooldown = cooldown
+        self._down_until: float = 0.0
+        self._was_down = False
+
+    def should_attempt(self, now: float) -> bool:
+        return now >= self._down_until
+
+    def record_failure(self, now: float) -> bool:
+        """Register a failed attempt. Returns True iff this is a fresh
+        outage (caller should log it)."""
+        self._down_until = now + self.cooldown
+        fresh = not self._was_down
+        self._was_down = True
+        return fresh
+
+    def record_success(self) -> bool:
+        """Register a successful attempt. Returns True iff the service
+        just recovered from an outage."""
+        recovered = self._was_down
+        self._was_down = False
+        self._down_until = 0.0
+        return recovered
+
+
+usbmux_availability = UsbmuxAvailability()
 
 
 def _parse_ios_version(version_string: str) -> tuple[int, ...]:
@@ -146,11 +184,21 @@ class DeviceManager:
         devices: list[DeviceInfo] = []
         seen_udids: set[str] = set()
 
-        try:
-            raw_devices = await list_devices()
-        except Exception:
-            logger.exception("Failed to list usbmux devices")
-            return devices
+        now = time.monotonic()
+        raw_devices = []
+        if usbmux_availability.should_attempt(now):
+            try:
+                raw_devices = await list_devices()
+                if usbmux_availability.record_success():
+                    logger.info("usbmuxd reachable again — USB discovery resumed")
+            except Exception as exc:
+                if usbmux_availability.record_failure(time.monotonic()):
+                    logger.warning(
+                        "usbmuxd unreachable (%s: %s) — USB discovery paused, "
+                        "retrying every %.0fs. Is Apple Mobile Device Service "
+                        "(iTunes / Apple Devices) installed and running?",
+                        type(exc).__name__, exc, usbmux_availability.cooldown,
+                    )
 
         for raw in raw_devices:
             try:
@@ -596,6 +644,7 @@ class DeviceManager:
                 dvt,
                 lockdown=conn.lockdown,
                 dvt_factory=_factory,
+                udid=udid,
             )
         except Exception as dvt_exc:
             logger.warning(
@@ -832,7 +881,7 @@ class DeviceManager:
         Used by ``DvtLocationService._reconnect`` after the DVT instrument
         channel drops. Probes connection health, transparently waits for
         any in-flight WiFi tunnel restart driven by ``_per_tunnel_watchdog``
-        (see ``api/device.py``), then opens a new ``DvtProvider`` on the
+        (see ``services/tunnel_manager.py``), then opens a new ``DvtProvider`` on the
         *current* lockdown. The previous provider stored on the active
         connection is closed best-effort.
 
@@ -860,12 +909,8 @@ class DeviceManager:
             # runner appears (success path swaps in a new TunnelRunner and
             # replaces conn.lockdown along the way) or we time out.
             if conn.connection_type == "Network":
-                runner = None
-                try:
-                    from api.device import _tunnels  # local import: avoids cycle at module load
-                    runner = _tunnels.get(udid)
-                except ImportError:
-                    runner = None
+                from services.tunnel_manager import _tunnels
+                runner = _tunnels.get(udid)
                 if runner is not None and not runner.is_running():
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
@@ -925,12 +970,9 @@ class DeviceManager:
             conn = self._connections.get(udid)
         conn_type = conn.connection_type if conn else None
 
-        if conn_type == "Network":
-            try:
-                from api.device import _tunnels, _attempt_tunnel_restart
-            except ImportError:
-                logger.debug("full_reconnect: api.device not importable")
-                return False
+        from services.tunnel_manager import _tunnels, _attempt_tunnel_restart
+
+        if _should_use_wifi_recovery(conn_type, _tunnels, udid):
             runner = _tunnels.get(udid)
             if runner is None or not runner.target_ip or not runner.target_port:
                 logger.debug(
@@ -965,6 +1007,33 @@ class DeviceManager:
         for udid in udids:
             await self.disconnect(udid)
         logger.info("All devices disconnected")
+
+
+def _should_use_wifi_recovery(
+    conn_type: str | None, tunnels_map: dict, udid: str,
+) -> bool:
+    """Decide whether ``full_reconnect`` should take the WiFi tunnel-restart
+    path for *udid* instead of the blunt USB disconnect/reconnect fallback.
+
+    ``conn_type`` is ``None`` whenever the connection record has already
+    been removed — the most common case, since ``full_reconnect`` is
+    invoked as the API-layer safety net after a ``DeviceLostError`` has
+    already triggered cleanup. In that case, fall back to checking whether
+    a WiFi tunnel runner still exists for *udid*: its presence means the
+    device was WiFi-connected, so it should still get the tunnel-restart
+    path rather than the USB fallback, which would first disconnect any
+    recoverable state and then attempt a connection method that cannot
+    succeed on a machine without usbmuxd.
+
+    Note this only decides routing; the WiFi path re-validates the runner
+    (target IP/port) before using it, so an incomplete runner entry still
+    falls back to reporting failure rather than silently using USB.
+    """
+    if conn_type == "Network":
+        return True
+    if conn_type is None:
+        return tunnels_map.get(udid) is not None
+    return False
 
 
 def _load_pair_record(udid: str | None = None) -> dict | None:

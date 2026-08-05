@@ -46,6 +46,13 @@ websockets_hidden = collect_submodules('websockets')
 # for NIC enumeration to work in the frozen exe.
 ps_datas, ps_binaries, ps_hidden = collect_all('psutil')
 
+# Offline timezone lookup (v0.2.193+): tzfpy is a compiled extension with the
+# polygon data embedded in its .pyd; zoneinfo on Windows has no system tz
+# database and reads everything from the tzdata package's data files, so both
+# must be collected or the frozen exe returns None for every timezone.
+tzf_datas, tzf_binaries, tzf_hidden = collect_all('tzfpy')
+tzdata_datas, tzdata_binaries, tzdata_hidden = collect_all('tzdata')
+
 hidden = [
     *pmd_hiddenimports,
     *pytun_hidden,
@@ -55,6 +62,8 @@ hidden = [
     *fastapi_hidden,
     *websockets_hidden,
     *ps_hidden,
+    *tzf_hidden,
+    *tzdata_hidden,
     'uvicorn.logging',
     'uvicorn.loops',
     'uvicorn.loops.auto',
@@ -78,9 +87,9 @@ a = Analysis(
     ['main.py'],
     pathex=['.'],
     binaries=[*pmd_binaries, *pytun_binaries, *ddi_binaries, *pyimg4_binaries,
-              *ps_binaries],
+              *ps_binaries, *tzf_binaries, *tzdata_binaries],
     datas=[*pmd_datas, *pytun_datas, *ddi_datas, *pyimg4_datas, *pyimg4_meta,
-           *ps_datas,
+           *ps_datas, *tzf_datas, *tzdata_datas,
            ('static/phone.html', 'static')],
     hiddenimports=hidden,
     hookspath=[],
