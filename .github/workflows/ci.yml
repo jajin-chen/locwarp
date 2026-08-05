@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -15,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
       - name: Run tests
-        run: pytest
+        run: python -m pytest
         working-directory: backend
 
   frontend:
