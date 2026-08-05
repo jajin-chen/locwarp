@@ -1,6 +1,16 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
+import { useDismissOnOutside } from '../hooks/useDismissOnOutside';
+import { useDragAutoScroll } from '../hooks/useDragAutoScroll';
+import { useMultiSelect } from '../hooks/useMultiSelect';
+import { usePersistedSortMode } from '../hooks/usePersistedSortMode';
+import { useReorderMode, moveInArray } from '../hooks/useReorderMode';
+import { CategoryManagerPanel } from './list/CategoryManagerPanel';
+import { ListSearchBox } from './list/ListSearchBox';
+import { MultiSelectBar } from './list/MultiSelectBar';
+import { SortModeSelect } from './list/SortModeSelect';
+import { ctxItemStyle, ctxHighlight, ctxUnhighlight } from './list/contextMenu';
 
 export interface RouteCategory {
   id: string;
@@ -47,12 +57,6 @@ interface RouteListProps {
   routesExportAllUrl?: string;
   onRoutesImportAll?: (file: File) => Promise<void> | void;
 }
-
-const COLOR_PALETTE = [
-  '#ef4444', '#f97316', '#eab308', '#22c55e',
-  '#14b8a6', '#3b82f6', '#6366f1', '#a855f7',
-  '#ec4899', '#64748b',
-];
 
 const RouteList: React.FC<RouteListProps> = ({
   routes,
@@ -130,24 +134,14 @@ const RouteList: React.FC<RouteListProps> = ({
 
   // ── Category panel state ─────────────────────────────
   const [showCategoryMgr, setShowCategoryMgr] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [editingCategory, setEditingCategory] = useState<string | null>(null);
-  const [editCategoryName, setEditCategoryName] = useState('');
-  const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
 
   // ── Sorting ──────────────────────────────────────────
   type SortMode = 'default' | 'name' | 'date_added' | 'date_updated';
-  const [sortMode, setSortModeRaw] = useState<SortMode>(() => {
-    try {
-      const v = localStorage.getItem('locwarp.route_sort') as SortMode | null;
-      if (v === 'default' || v === 'name' || v === 'date_added' || v === 'date_updated') return v;
-    } catch { /* ignore */ }
-    return 'default';
-  });
-  const setSortMode = (m: SortMode) => {
-    setSortModeRaw(m);
-    try { localStorage.setItem('locwarp.route_sort', m); } catch { /* ignore */ }
-  };
+  const [sortMode, setSortMode] = usePersistedSortMode<SortMode>(
+    'locwarp.route_sort',
+    ['default', 'name', 'date_added', 'date_updated'],
+    'default',
+  );
   const sortRoutes = (list: SavedRoute[]): SavedRoute[] => {
     if (sortMode === 'default') return list;
     const copy = [...list];
@@ -180,87 +174,29 @@ const RouteList: React.FC<RouteListProps> = ({
     });
   };
 
-  // ── Reorder mode ─────────────────────────────────────
-  // Off by default — opt-in via the toolbar button. When on, the category
-  // headers and route rows expose up/down arrows + a drag handle that
-  // persist a new order.
-  const [reorderMode, setReorderMode] = useState(false);
-  const sortBeforeReorderRef = useRef<SortMode | null>(null);
-  // Drag-and-drop state.
-  const [draggedRouteId, setDraggedRouteId] = useState<string | null>(null);
-  const [dragOverRouteId, setDragOverRouteId] = useState<string | null>(null);
-  const [dragRouteCat, setDragRouteCat] = useState<string | null>(null);
-  const [draggedCatId, setDraggedCatId] = useState<string | null>(null);
-  const [dragOverCatId, setDragOverCatId] = useState<string | null>(null);
-
   // ── Multi-select ─────────────────────────────────────
-  const [multiSelect, setMultiSelect] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const toggleSelected = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-  const exitMultiSelect = () => { setMultiSelect(false); setSelectedIds(new Set()); };
-  const handleBulkDelete = async () => {
-    if (selectedIds.size === 0) return;
-    const msg = t('route.bulk_delete_confirm').replace('{n}', String(selectedIds.size));
-    if (!window.confirm(msg)) return;
-    const ids = Array.from(selectedIds);
-    if (onRoutesBulkDelete) {
-      await onRoutesBulkDelete(ids);
-    } else {
-      await Promise.all(ids.map((id) => Promise.resolve(onRouteDelete(id))));
-    }
-    exitMultiSelect();
-  };
+  const {
+    multiSelect, setMultiSelect, selectedIds, setSelectedIds,
+    toggleSelected, exitMultiSelect, handleBulkDelete,
+  } = useMultiSelect({
+    confirmMessage: (n) => t('route.bulk_delete_confirm').replace('{n}', String(n)),
+    deleteIds: async (ids) => {
+      if (onRoutesBulkDelete) {
+        await onRoutesBulkDelete(ids);
+      } else {
+        await Promise.all(ids.map((id) => Promise.resolve(onRouteDelete(id))));
+      }
+    },
+  });
 
   // ── Context menu ─────────────────────────────────────
   const [contextMenu, setContextMenu] = useState<{ route: SavedRoute; x: number; y: number } | null>(null);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [editingRouteName, setEditingRouteName] = useState('');
 
-  useEffect(() => {
-    if (!contextMenu) return;
-    const onOutside = (e: Event) => {
-      const target = e.target as Element | null;
-      if (target && target.closest?.('[data-route-context-menu]')) return;
-      setContextMenu(null);
-    };
-    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setContextMenu(null); };
-    const id = setTimeout(() => {
-      document.addEventListener('pointerdown', onOutside);
-      document.addEventListener('contextmenu', onOutside);
-      document.addEventListener('keydown', onEsc);
-    }, 0);
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener('pointerdown', onOutside);
-      document.removeEventListener('contextmenu', onOutside);
-      document.removeEventListener('keydown', onEsc);
-    };
-  }, [contextMenu]);
-
-  useEffect(() => {
-    if (!colorPickerFor) return;
-    const onOutside = (e: Event) => {
-      const target = e.target as Element | null;
-      if (target && target.closest?.('[data-route-color-picker]')) return;
-      setColorPickerFor(null);
-    };
-    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setColorPickerFor(null); };
-    const id = setTimeout(() => {
-      document.addEventListener('pointerdown', onOutside);
-      document.addEventListener('keydown', onEsc);
-    }, 0);
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener('pointerdown', onOutside);
-      document.removeEventListener('keydown', onEsc);
-    };
-  }, [colorPickerFor]);
+  // Close the context menu on ESC or any outside click / right-click.
+  useDismissOnOutside(contextMenu, '[data-route-context-menu]',
+    () => setContextMenu(null), { closeOnContextMenu: true });
 
   // ── Grouping ────────────────────────────────────────
   const routesByCategory = useMemo(() => {
@@ -274,39 +210,31 @@ const RouteList: React.FC<RouteListProps> = ({
     return buckets;
   }, [routes, categories]);
 
-  // Reorder mode forces sort to 'default' (so the drag / arrow results match
-  // the displayed order). User's previous sort is restored on exit.
-  const enterReorderMode = () => {
-    if (sortMode !== 'default') {
-      sortBeforeReorderRef.current = sortMode;
-      setSortMode('default');
-    } else {
-      sortBeforeReorderRef.current = null;
-    }
-    if (multiSelect) exitMultiSelect();
-    setReorderMode(true);
-  };
-  const exitReorderMode = () => {
-    setReorderMode(false);
-    setDraggedRouteId(null);
-    setDragOverRouteId(null);
-    setDragRouteCat(null);
-    setDraggedCatId(null);
-    setDragOverCatId(null);
-    const prev = sortBeforeReorderRef.current;
-    if (prev && prev !== 'default') setSortMode(prev);
-    sortBeforeReorderRef.current = null;
-  };
+  // ── Reorder mode ─────────────────────────────────────
+  // Off by default — opt-in via the toolbar button. When on, the category
+  // headers and route rows expose a drag handle that persists a new order.
+  // Entering forces sort to 'default' (so the drag results match the
+  // displayed order) and restores the user's previous sort on exit.
+  const {
+    reorderMode, enterReorderMode, exitReorderMode,
+    draggedItemId: draggedRouteId, setDraggedItemId: setDraggedRouteId,
+    dragOverItemId: dragOverRouteId, setDragOverItemId: setDragOverRouteId,
+    dragItemCat: dragRouteCat, setDragItemCat: setDragRouteCat,
+    draggedCatKey: draggedCatId, setDraggedCatKey: setDraggedCatId,
+    dragOverCatKey: dragOverCatId, setDragOverCatKey: setDragOverCatId,
+  } = useReorderMode<SortMode>({
+    sortMode,
+    setSortMode,
+    defaultMode: 'default',
+    onEnter: () => { if (multiSelect) exitMultiSelect(); },
+  });
   const reorderAvailable = reorderMode;
   const dropCategoryOn = (srcId: string, dstId: string) => {
     if (!onCategoryReorder || srcId === dstId) return;
     const srcIdx = categories.findIndex((c) => c.id === srcId);
     const dstIdx = categories.findIndex((c) => c.id === dstId);
     if (srcIdx < 0 || dstIdx < 0) return;
-    const arr = categories.map((c) => c.id);
-    const [moved] = arr.splice(srcIdx, 1);
-    arr.splice(dstIdx, 0, moved);
-    void onCategoryReorder(arr);
+    void onCategoryReorder(moveInArray(categories.map((c) => c.id), srcIdx, dstIdx));
   };
   const dropRouteOn = (catId: string, srcId: string, dstId: string) => {
     if (!onRouteReorder || srcId === dstId) return;
@@ -314,56 +242,12 @@ const RouteList: React.FC<RouteListProps> = ({
     const srcIdx = list.findIndex((r) => r.id === srcId);
     const dstIdx = list.findIndex((r) => r.id === dstId);
     if (srcIdx < 0 || dstIdx < 0) return;
-    const arr = list.map((r) => r.id);
-    const [moved] = arr.splice(srcIdx, 1);
-    arr.splice(dstIdx, 0, moved);
-    void onRouteReorder(catId, arr);
+    void onRouteReorder(catId, moveInArray(list.map((r) => r.id), srcIdx, dstIdx));
   };
 
-  // Auto-scroll the surrounding scrollable container during a drag. Native
-  // edge-scroll is sluggish on long lists, so we drive a rAF loop ourselves.
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const dragCursorYRef = useRef(0);
-  useEffect(() => {
-    const dragging = !!(draggedRouteId || draggedCatId);
-    if (!dragging) return;
-    let scroller: HTMLElement | null = wrapRef.current?.parentElement ?? null;
-    while (scroller) {
-      const cs = getComputedStyle(scroller);
-      const scrollable = (cs.overflowY === 'auto' || cs.overflowY === 'scroll')
-        && scroller.scrollHeight > scroller.clientHeight + 1;
-      if (scrollable) break;
-      scroller = scroller.parentElement;
-    }
-    if (!scroller) return;
-    const onDragOver = (e: DragEvent) => {
-      dragCursorYRef.current = e.clientY;
-    };
-    window.addEventListener('dragover', onDragOver);
-    const EDGE = 80;
-    const MAX_SPEED = 18;
-    let raf = 0;
-    const tick = () => {
-      const el = scroller!;
-      const r = el.getBoundingClientRect();
-      const y = dragCursorYRef.current;
-      if (y > 0) {
-        const fromTop = y - r.top;
-        const fromBottom = r.bottom - y;
-        if (fromTop >= 0 && fromTop < EDGE) {
-          el.scrollTop -= MAX_SPEED * (1 - fromTop / EDGE);
-        } else if (fromBottom >= 0 && fromBottom < EDGE) {
-          el.scrollTop += MAX_SPEED * (1 - fromBottom / EDGE);
-        }
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('dragover', onDragOver);
-    };
-  }, [draggedRouteId, draggedCatId]);
+  // Auto-scroll the surrounding scrollable container during a drag
+  // (rAF-driven edge scroll — see useDragAutoScroll).
+  const wrapRef = useDragAutoScroll(!!(draggedRouteId || draggedCatId));
 
   // ── Render ──────────────────────────────────────────
   return (
@@ -570,230 +454,42 @@ const RouteList: React.FC<RouteListProps> = ({
       </div>
 
       {/* Search */}
-      <div style={{ position: 'relative', marginBottom: 8 }}>
-        <svg
-          width="12" height="12" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="2"
-          style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', opacity: 0.4, pointerEvents: 'none' }}
-        >
-          <circle cx="11" cy="11" r="8" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
-        <input
-          type="text"
-          className="search-input"
-          placeholder={t('route.search_placeholder')}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ width: '100%', paddingLeft: 26, paddingRight: search ? 24 : 8, fontSize: 12 }}
-        />
-        {search && (
-          <button
-            onClick={() => setSearch('')}
-            title={t('bm.search_clear')}
-            style={{
-              position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
-              background: 'none', border: 'none', color: '#bbb',
-              cursor: 'pointer', padding: '2px 6px', fontSize: 14, lineHeight: 1,
-            }}
-          >×</button>
-        )}
-      </div>
+      <ListSearchBox
+        value={search}
+        onChange={setSearch}
+        placeholder={t('route.search_placeholder')}
+        style={{ marginBottom: 8 }}
+      />
 
       {/* Sort */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 11, color: '#bbb' }}>
-        <span style={{ opacity: 0.7 }}>{t('bm.sort_label')}</span>
-        <select
-          value={sortMode}
-          onChange={(e) => setSortMode(e.target.value as SortMode)}
-          style={{
-            flex: 1, background: '#1e1e22', color: '#e0e0e0',
-            border: '1px solid rgba(255,255,255,0.12)', borderRadius: 4,
-            padding: '3px 6px', fontSize: 11,
-          }}
-        >
-          <option value="default" style={{ background: '#1e1e22', color: '#e0e0e0' }}>{t('bm.sort_default')}</option>
-          <option value="name" style={{ background: '#1e1e22', color: '#e0e0e0' }}>{t('bm.sort_name')}</option>
-          <option value="date_added" style={{ background: '#1e1e22', color: '#e0e0e0' }}>{t('bm.sort_date_added')}</option>
-          <option value="date_updated" style={{ background: '#1e1e22', color: '#e0e0e0' }}>{t('route.sort_date_updated')}</option>
-        </select>
-      </div>
+      <SortModeSelect
+        value={sortMode}
+        onChange={setSortMode}
+        style={{ marginBottom: 8 }}
+        options={[
+          { value: 'default', label: t('bm.sort_default') },
+          { value: 'name', label: t('bm.sort_name') },
+          { value: 'date_added', label: t('bm.sort_date_added') },
+          { value: 'date_updated', label: t('route.sort_date_updated') },
+        ]}
+      />
 
       {/* Category manager */}
-      {showCategoryMgr && (
-        <div
-          style={{
-            background: '#2a2a2e',
-            border: '1px solid #444',
-            borderRadius: 6,
-            padding: 12,
-            marginBottom: 8,
-          }}
-        >
-          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6, opacity: 0.7 }}>
-            {t('route.manage_categories')}
-          </div>
-          {categories.map((cat) => (
-            <div
-              key={cat.id}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '4px 0', fontSize: 12, position: 'relative',
-              }}
-            >
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!onCategoryRecolor) return;
-                  setColorPickerFor((prev) => (prev === cat.id ? null : cat.id));
-                }}
-                title={t('bm.recolor_tooltip')}
-                style={{
-                  width: 14, height: 14, borderRadius: '50%',
-                  background: resolveColor(cat),
-                  border: '1.5px solid rgba(255,255,255,0.15)', padding: 0,
-                  cursor: onCategoryRecolor ? 'pointer' : 'default',
-                  flexShrink: 0,
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.3)',
-                }}
-              />
-              {colorPickerFor === cat.id && onCategoryRecolor && (
-                <div
-                  data-route-color-picker
-                  onClick={(e) => e.stopPropagation()}
-                  style={{
-                    position: 'absolute', top: 22, left: 0, zIndex: 50,
-                    background: '#1e1e22',
-                    border: '1px solid rgba(255,255,255,0.15)',
-                    borderRadius: 6, padding: 6,
-                    boxShadow: '0 6px 18px rgba(0,0,0,0.5)',
-                    display: 'grid', gridTemplateColumns: 'repeat(5, 22px)',
-                    gap: 4,
-                  }}
-                >
-                  {COLOR_PALETTE.map((c) => {
-                    const selected = resolveColor(cat).toLowerCase() === c.toLowerCase();
-                    return (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCategoryRecolor(cat.id, c);
-                          setColorPickerFor(null);
-                        }}
-                        style={{
-                          width: 22, height: 22, borderRadius: '50%',
-                          background: c,
-                          border: selected ? '2px solid #fff' : '1.5px solid rgba(255,255,255,0.12)',
-                          cursor: 'pointer', padding: 0,
-                          transition: 'transform 0.1s',
-                        }}
-                        title={c}
-                      />
-                    );
-                  })}
-                  <input
-                    type="color"
-                    value={resolveColor(cat)}
-                    onChange={(e) => onCategoryRecolor(cat.id, e.target.value)}
-                    title={t('bm.recolor_custom')}
-                    style={{
-                      gridColumn: '1 / span 5',
-                      width: '100%', height: 22,
-                      border: '1px solid rgba(255,255,255,0.12)',
-                      borderRadius: 4, padding: 0, marginTop: 2,
-                      background: '#1e1e22', cursor: 'pointer',
-                    }}
-                  />
-                </div>
-              )}
-              {editingCategory === cat.id ? (
-                <input
-                  type="text"
-                  className="search-input"
-                  autoFocus
-                  value={editCategoryName}
-                  onChange={(e) => setEditCategoryName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const next = editCategoryName.trim();
-                      if (next && next !== cat.name && onCategoryRename) onCategoryRename(cat.id, next);
-                      setEditingCategory(null);
-                    }
-                    if (e.key === 'Escape') setEditingCategory(null);
-                  }}
-                  onBlur={() => setEditingCategory(null)}
-                  style={{ flex: 1, padding: '2px 4px', fontSize: 12 }}
-                />
-              ) : (
-                <span style={{ flex: 1 }}>{displayCat(cat.name)}</span>
-              )}
-              {cat.id !== 'default' && onCategoryRename && editingCategory !== cat.id && (
-                <button
-                  onClick={() => { setEditingCategory(cat.id); setEditCategoryName(cat.name); }}
-                  title={t('bm.rename_category')}
-                  style={{
-                    background: 'none', border: 'none',
-                    color: 'var(--fg-muted, #888)',
-                    cursor: 'pointer', padding: '2px 4px', fontSize: 11,
-                  }}
-                >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                    <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </svg>
-                </button>
-              )}
-              {cat.id !== 'default' && onCategoryDelete && (
-                <button
-                  onClick={() => onCategoryDelete(cat.id)}
-                  style={{
-                    background: 'none', border: 'none', color: '#f44336',
-                    cursor: 'pointer', padding: '2px 4px', fontSize: 11,
-                  }}
-                >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          ))}
-          {onCategoryAdd && (
-            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-              <input
-                type="text"
-                className="search-input"
-                placeholder={t('bm.add_category')}
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && newCategoryName.trim()) {
-                    onCategoryAdd(newCategoryName.trim());
-                    setNewCategoryName('');
-                  }
-                }}
-                style={{ flex: 1 }}
-              />
-              <button
-                className="action-btn"
-                onClick={() => {
-                  if (newCategoryName.trim()) {
-                    onCategoryAdd(newCategoryName.trim());
-                    setNewCategoryName('');
-                  }
-                }}
-                style={{ fontSize: 11 }}
-              >
-                {t('bm.new_category')}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      <CategoryManagerPanel
+        open={showCategoryMgr}
+        title={t('route.manage_categories')}
+        categories={categories.map((cat) => ({
+          key: cat.id,
+          name: cat.name,
+          displayName: displayCat(cat.name),
+          color: resolveColor(cat),
+          canEdit: cat.id !== 'default',
+        }))}
+        onAdd={onCategoryAdd}
+        onDelete={onCategoryDelete}
+        onRename={onCategoryRename}
+        onRecolor={onCategoryRecolor}
+      />
 
       {/* Search mode: flat list */}
       {search.trim() !== '' && (() => {
@@ -926,76 +622,43 @@ const RouteList: React.FC<RouteListProps> = ({
 
       {/* Multi-select bottom bar */}
       {multiSelect && (
-        <div
-          style={{
-            position: 'sticky', bottom: -12, zIndex: 10,
-            marginLeft: -12, marginRight: -12, marginTop: 16,
-            padding: '8px 12px',
-            background: 'rgba(26, 29, 39, 0.98)',
-            backdropFilter: 'blur(6px)',
-            borderTop: '1px solid rgba(108,140,255,0.35)',
-            boxShadow: '0 -6px 12px rgba(0,0,0,0.35)',
-          }}
+        <MultiSelectBar
+          allIds={routes.map((r) => r.id)}
+          totalCount={routes.length}
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
+          onBulkDelete={handleBulkDelete}
+          wrap
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, flexWrap: 'wrap' }}>
-            <button
-              className="action-btn"
-              onClick={() => {
-                const allIds = routes.map((r) => r.id);
-                if (selectedIds.size === allIds.length) setSelectedIds(new Set());
-                else setSelectedIds(new Set(allIds));
+          {onRouteMove && categories.length > 1 && (
+            <select
+              value=""
+              onChange={async (e) => {
+                const targetId = e.target.value;
+                if (!targetId) return;
+                const ids = Array.from(selectedIds);
+                if (ids.length === 0) return;
+                await onRouteMove(ids, targetId);
+                exitMultiSelect();
               }}
-              style={{ padding: '3px 8px', fontSize: 11 }}
-            >
-              {selectedIds.size === routes.length && routes.length > 0
-                ? t('bm.deselect_all') : t('bm.select_all')}
-            </button>
-            {onRouteMove && categories.length > 1 && (
-              <select
-                value=""
-                onChange={async (e) => {
-                  const targetId = e.target.value;
-                  if (!targetId) return;
-                  const ids = Array.from(selectedIds);
-                  if (ids.length === 0) return;
-                  await onRouteMove(ids, targetId);
-                  exitMultiSelect();
-                }}
-                disabled={selectedIds.size === 0}
-                style={{
-                  background: '#1e1e22', color: '#e0e0e0',
-                  border: '1px solid #444', borderRadius: 4,
-                  padding: '3px 6px', fontSize: 11,
-                }}
-              >
-                <option value="" style={{ background: '#1e1e22', color: '#e0e0e0' }}>
-                  {t('route.move_to_placeholder')}
-                </option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id} style={{ background: '#1e1e22', color: '#e0e0e0' }}>
-                    {displayCat(c.name)}
-                  </option>
-                ))}
-              </select>
-            )}
-            <span style={{ opacity: 0.7, marginLeft: 'auto' }}>
-              {selectedIds.size} / {routes.length}
-            </span>
-            <button
-              className="action-btn"
-              onClick={handleBulkDelete}
               disabled={selectedIds.size === 0}
               style={{
-                padding: '3px 10px', fontSize: 11, fontWeight: 600,
-                color: selectedIds.size === 0 ? '#888' : '#ff6b6b',
-                borderColor: selectedIds.size === 0 ? undefined : 'rgba(255,107,107,0.4)',
-                cursor: selectedIds.size === 0 ? 'not-allowed' : 'pointer',
+                background: '#1e1e22', color: '#e0e0e0',
+                border: '1px solid #444', borderRadius: 4,
+                padding: '3px 6px', fontSize: 11,
               }}
             >
-              {t('bm.delete_selected').replace('{n}', String(selectedIds.size))}
-            </button>
-          </div>
-        </div>
+              <option value="" style={{ background: '#1e1e22', color: '#e0e0e0' }}>
+                {t('route.move_to_placeholder')}
+              </option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id} style={{ background: '#1e1e22', color: '#e0e0e0' }}>
+                  {displayCat(c.name)}
+                </option>
+              ))}
+            </select>
+          )}
+        </MultiSelectBar>
       )}
 
       {/* Context menu */}
@@ -1317,21 +980,6 @@ const RouteList: React.FC<RouteListProps> = ({
   }
 };
 
-const ctxItemStyle: React.CSSProperties = {
-  padding: '6px 12px',
-  cursor: 'pointer',
-  fontSize: 12,
-  display: 'flex',
-  alignItems: 'center',
-  color: '#e0e0e0',
-  transition: 'background 0.15s',
-};
-
-function ctxHighlight(e: React.MouseEvent<HTMLDivElement>) {
-  (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
-}
-function ctxUnhighlight(e: React.MouseEvent<HTMLDivElement>) {
-  (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-}
-
-export default RouteList;
+// Memoized: the host tree re-renders on every WS position tick; the list
+// only needs to re-render when one of its own props actually changed.
+export default React.memo(RouteList);

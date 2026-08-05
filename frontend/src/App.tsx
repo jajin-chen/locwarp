@@ -6,10 +6,13 @@ import { useDevice } from './hooks/useDevice'
 import { useSimulation } from './hooks/useSimulation'
 import { useJoystick } from './hooks/useJoystick'
 import { useBookmarks } from './hooks/useBookmarks'
+import { useGeoContext } from './hooks/useGeoContext'
+import { useSavedRoutes } from './hooks/useSavedRoutes'
 import UserAvatarPicker from './components/UserAvatarPicker'
-import { UserAvatar, avatarToHtml, loadAvatar, saveAvatar, loadCustomPng, saveCustomPng } from './userAvatars'
+import { useAvatar } from './hooks/useAvatar'
 import * as api from './services/api'
 import { parseCoord } from './utils/coords'
+import { useWaypointEditing, clampLat, normalizeLng } from './hooks/useWaypointEditing'
 import { buildAutoConnectCandidates, pinnedUdidsNeedingRetry } from './utils/autoConnect'
 import { readSavedIps, removeSavedIpByUdid, writeSavedIps } from './utils/savedIps'
 
@@ -20,6 +23,7 @@ import SettingsPage from './components/SettingsPage'
 import JoystickPad from './components/JoystickPad'
 import EtaBar from './components/EtaBar'
 import PauseControl from './components/PauseControl'
+import FlowerSettingsPanel from './components/FlowerSettingsPanel'
 import StatusBar from './components/StatusBar'
 import { DeviceChipRow } from './components/DeviceChipRow'
 import type { FanoutOutcome } from './hooks/useSimulation'
@@ -52,39 +56,6 @@ const SPEED_MAP: Record<MoveMode, number> = {
   driving: 60,
 }
 
-// Number input that lets the user freely clear and retype the field (so a
-// multi-digit value like 15 is easy to enter). The draft string is held
-// locally while editing; the value is parsed and clamped via `set` only on
-// blur / Enter, so per-keystroke clamping never fights the typing.
-const NumberField: React.FC<{
-  value: number
-  set: (n: number) => void
-  min: number
-  max?: number
-  step: number
-}> = ({ value, set, min, max, step }) => {
-  const [draft, setDraft] = useState<string | null>(null)
-  const commit = () => {
-    const n = parseFloat(draft ?? '')
-    if (Number.isFinite(n)) set(n)
-    setDraft(null)
-  }
-  return (
-    <input
-      type="number"
-      className="lw-input"
-      min={min}
-      max={max}
-      step={step}
-      value={draft ?? String(value)}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-      style={{ width: 64 }}
-    />
-  )
-}
-
 const App: React.FC = () => {
   const t = useT()
   const ws = useWebSocket()
@@ -108,14 +79,6 @@ const App: React.FC = () => {
     [bm.bookmarks],
   )
 
-  const [savedRoutes, setSavedRoutes] = useState<any[]>([])
-  const [routeCategories, setRouteCategories] = useState<any[]>([])
-  const refreshRouteCategories = useCallback(async () => {
-    try {
-      const cats = await api.listRouteCategories()
-      setRouteCategories(Array.isArray(cats) ? cats : [])
-    } catch { /* leave empty so RouteList still falls back to default */ }
-  }, [])
   // Bumped every time an external trigger (currently the map topleft
   // library button) wants ControlPanel to open its library panel.
   // ControlPanel reacts on change via useEffect, so we don't have to
@@ -146,48 +109,17 @@ const App: React.FC = () => {
   const [showBookmarkPins, setShowBookmarkPinsRaw] = useState<boolean>(() => {
     try { return localStorage.getItem('locwarp.show_bookmark_pins') === '1' } catch { return false }
   })
-  const setShowBookmarkPins = (v: boolean) => {
+  const setShowBookmarkPins = useCallback((v: boolean) => {
     setShowBookmarkPinsRaw(v)
     try { localStorage.setItem('locwarp.show_bookmark_pins', v ? '1' : '0') } catch { /* ignore */ }
-  }
-  const [toastMsg, setToastMsg] = useState<string | null>(null)
-  // Active avatar selection + persistent custom-PNG slot. Stored in two
-  // separate localStorage keys so picking a preset doesn't drop the user's
-  // uploaded image.
-  const [userAvatar, setUserAvatar] = useState<UserAvatar>(() => loadAvatar())
-  const [customPng, setCustomPng] = useState<string | null>(() => loadCustomPng())
-  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
-  const handleAvatarSave = useCallback((next: UserAvatar, nextCustom: string | null) => {
-    setUserAvatar(next)
-    saveAvatar(next)
-    setCustomPng(nextCustom)
-    saveCustomPng(nextCustom)
   }, [])
-  // Reverse-geo-derived state used by the status bar: country-code flag and
-  // (later) timezone tag. Populated debounced from sim.currentPosition so we
-  // don't hit Nominatim/Photon every position_update tick.
-  const [locMeta, setLocMeta] = useState<{
-    countryCode: string;
-    // Reverse-geocoded city / POI / road name (whatever Photon-or-Nominatim's
-    // short_name returns). Used by the timezone-detail modal in StatusBar
-    // to print "Country City" alongside the IANA zone, and may be empty
-    // if the lookup failed or the spot is mid-ocean.
-    cityName: string;
-    timezoneZone: string | null;
-    gmtOffsetSeconds: number | null;
-    // Weather at the current virtual location. Fetched from Open-Meteo when
-    // the position moves >=100m and the sim is quiescent (same gate as
-    // reverse-geocode + timezone). Null = unknown / not yet fetched.
-    weatherCode: number | null;
-    tempC: number | null;
-  }>({
-    countryCode: '', cityName: '', timezoneZone: null, gmtOffsetSeconds: null,
-    weatherCode: null, tempC: null,
-  })
-  // Last position we successfully looked up reverse-geo/timezone for. Used
-  // to suppress redundant lookups when jitter nudges the coordinate but the
-  // user hasn't actually moved.
-  const lastLookedUpPosRef = useRef<{ lat: number; lng: number } | null>(null)
+  const [toastMsg, setToastMsg] = useState<string | null>(null)
+  // Active avatar selection + persistent custom-PNG slot + picker state.
+  const avatar = useAvatar()
+  // Reverse-geo-derived status-bar context (flag / city / timezone /
+  // weather), debounced + gated inside the hook so it only fires on
+  // discrete user-initiated moves. See useGeoContext for the full rules.
+  const locMeta = useGeoContext(sim.currentPosition, sim.status?.state)
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showToast = useCallback((msg: string, ms = 3000) => {
@@ -205,6 +137,27 @@ const App: React.FC = () => {
       toastTimerRef.current = null
     }, ms)
   }, [])
+
+  // Saved-route library (routes + categories CRUD, import/export). The
+  // load-confirm dialog flow stays below because it fans out teleports.
+  const {
+    savedRoutes,
+    routeCategories,
+    handleRouteSave,
+    handleRoutesBulkDelete,
+    handleRouteMove,
+    handleRouteCategoryAdd,
+    handleRouteCategoryDelete,
+    handleRouteCategoryRename,
+    handleRouteCategoryRecolor,
+    handleRouteCategoryReorder,
+    handleRouteReorder,
+    handleGpxImport,
+    handleGpxExport,
+    handleRoutesImportAll,
+    handleRouteRename,
+    handleRouteDelete,
+  } = useSavedRoutes({ sim, showToast, t })
 
   const handleRestore = useCallback(async () => {
     // The backend stop + DVT clear can take a few seconds, especially if
@@ -236,133 +189,29 @@ const App: React.FC = () => {
       showToast(t('status.restore_failed'))
     }
   }, [showToast, t, sim, device])
-  const [wpGenRadius, setWpGenRadius] = useState(300)
-  const [wpGenCount, setWpGenCount] = useState(5)
-
-  const generateWaypoints = useCallback((radius: number, count: number) => {
-    if (!sim.currentPosition) {
-      alert(t('toast.no_position_random'))
-      return
-    }
-    const { lat, lng } = sim.currentPosition
-    const latScale = 111320
-    const lngScale = 111320 * Math.cos((lat * Math.PI) / 180)
-
-    type Pt = { lat: number; lng: number; theta?: number }
-    const pts: Pt[] = []
-    for (let i = 0; i < count; i++) {
-      const r = radius * Math.sqrt(Math.random())
-      const theta = Math.random() * 2 * Math.PI
-      pts.push({
-        lat: lat + (r * Math.cos(theta)) / latScale,
-        lng: lng + (r * Math.sin(theta)) / lngScale,
-        theta,
-      })
-    }
-
-    // Nearest-neighbor from current position → shorter total path
-    const remaining = [...pts]
-    const ordered: Pt[] = []
-    let cx = lat, cy = lng
-    while (remaining.length) {
-      let bestIdx = 0, bestD = Infinity
-      for (let i = 0; i < remaining.length; i++) {
-        const dx = (remaining[i].lat - cx) * latScale
-        const dy = (remaining[i].lng - cy) * lngScale
-        const d = dx * dx + dy * dy
-        if (d < bestD) { bestD = d; bestIdx = i }
-      }
-      const [next] = remaining.splice(bestIdx, 1)
-      ordered.push(next)
-      cx = next.lat; cy = next.lng
-    }
-
-    // Seed the list with the current position as index 0 so the start button
-    // doesn't need to inject it later (and can't double-inject on re-click).
-    sim.setWaypoints([
-      { lat, lng },
-      ...ordered.map(({ lat, lng }) => ({ lat, lng })),
-    ])
-  }, [sim, t])
-
-  const handleGenerateRandomWaypoints = useCallback(() => {
-    generateWaypoints(wpGenRadius, wpGenCount)
-  }, [generateWaypoints, wpGenRadius, wpGenCount])
-
-  const handleGenerateAllRandom = useCallback(() => {
-    const radius = Math.floor(50 + Math.random() * 950)  // 50–1000 m
-    const count = Math.floor(3 + Math.random() * 8)       // 3–10 點
-    setWpGenRadius(radius)
-    setWpGenCount(count)
-    generateWaypoints(radius, count)
-  }, [generateWaypoints])
 
   const handleToggleCooldown = useCallback((enabled: boolean) => {
     setCooldownEnabled(enabled)
     api.setCooldownEnabled(enabled).catch(() => setCooldownEnabled((v) => !v))
   }, [])
 
-  // Load saved routes + categories on mount
+  // Surface a failed initial bookmark load (useBookmarks only logged it,
+  // leaving the sidebar list silently empty).
   useEffect(() => {
-    api.getSavedRoutes().then(setSavedRoutes).catch(() => {})
-    refreshRouteCategories()
-  }, [refreshRouteCategories])
+    if (!bm.loadError) return
+    showToast(bm.loadError, 5000)
+    bm.clearLoadError()
+  }, [bm.loadError, bm, showToast])
 
-
-  // Reverse-geocode + timezone lookup, tied to the current virtual location
-  // but GATED so it only fires on discrete user-initiated moves (teleport,
-  // bookmark tap, manual coord entry). During active navigate / loop /
-  // multi-stop / random-walk the simulation engine emits a position update
-  // every tick, which used to spam Nominatim + TimezoneDB every second and
-  // contend with the USB DVT channel — contributed to users seeing random
-  // walk 'freeze' (see backend log 2026-04-16 user report).
-  //
-  // Rule: only look up when the sim state is idle / teleporting / disconnected
-  // (i.e. no route animation in flight), AND the position actually moved
-  // >=100m from the last looked-up point.
+  // Backend broadcasts `route_error` (payload: reason) when a running route
+  // aborts mid-way. Toast the reason so the user learns WHY it stopped
+  // instead of the sim just going idle.
   useEffect(() => {
-    const pos = sim.currentPosition
-    if (!pos) return
-    const state = sim.status?.state ?? 'idle'
-    const isQuiescent = state === 'idle' || state === 'teleporting' || state === 'disconnected'
-    if (!isQuiescent) return
-    // Skip redundant lookups when the user stays at the same spot (jitter
-    // within 100m of the last resolved position).
-    const last = lastLookedUpPosRef.current
-    if (last) {
-      const dLat = (pos.lat - last.lat) * 111320
-      const dLng = (pos.lng - last.lng) * 111320 * Math.cos(pos.lat * Math.PI / 180)
-      if (dLat * dLat + dLng * dLng < 100 * 100) return
-    }
-    let cancelled = false
-    const tid = setTimeout(() => {
-      lastLookedUpPosRef.current = { lat: pos.lat, lng: pos.lng }
-      // Three independent services (Nominatim, TimezoneDB, Open-Meteo).
-      // Fire in parallel so one outage doesn't freeze the other two for
-      // a 10s timeout each time the position changes.
-      void api.reverseGeocode(pos.lat, pos.lng).then((geoRes: any) => {
-        if (cancelled) return
-        const cc = String(geoRes?.country_code ?? '').toLowerCase()
-        const city = String(geoRes?.short_name ?? '').trim()
-        setLocMeta((prev) =>
-          (prev.countryCode === cc && prev.cityName === city)
-            ? prev
-            : { ...prev, countryCode: cc, cityName: city }
-        )
-      }).catch(() => { /* offline / rate-limited — keep previous */ })
-      void api.lookupTimezone(pos.lat, pos.lng).then((tz) => {
-        if (cancelled || !tz) return
-        setLocMeta((prev) => ({ ...prev, timezoneZone: tz.zone, gmtOffsetSeconds: tz.gmt_offset_seconds }))
-      }).catch(() => { /* ignore */ })
-      void api.lookupWeather(pos.lat, pos.lng).then((wx) => {
-        if (cancelled || !wx) return
-        setLocMeta((prev) => prev.weatherCode === wx.code && prev.tempC === wx.tempC
-          ? prev
-          : { ...prev, weatherCode: wx.code, tempC: wx.tempC })
-      }).catch(() => { /* ignore */ })
-    }, 600)
-    return () => { cancelled = true; clearTimeout(tid) }
-  }, [sim.currentPosition?.lat, sim.currentPosition?.lng, sim.status?.state])
+    if (!sim.routeError) return
+    showToast(sim.routeError, 6000)
+    sim.clearRouteError()
+  }, [sim.routeError, sim, showToast])
+
 
   // Auto-scan devices when WebSocket (re)connects (e.g. after backend restart)
   useEffect(() => {
@@ -541,97 +390,6 @@ const App: React.FC = () => {
     return () => clearInterval(id)
   }, [ws.connected])
 
-  // Insert-after-waypoint mode: when set, the next map click drops a new
-  // waypoint immediately AFTER the chosen index instead of appending to
-  // the end. Activated from the waypoint left-click menu (map) or the
-  // fly-confirm dialog (left side). Cleared by ESC, by clicking the
-  // banner's cancel, or after one successful insert.
-  const [insertAfterIndex, setInsertAfterIndex] = useState<number | null>(null)
-  const handleInsertAfterWp = useCallback((index: number) => {
-    setInsertAfterIndex(index)
-  }, [])
-  const cancelInsertMode = useCallback(() => setInsertAfterIndex(null), [])
-
-  // ESC cancels insert mode anywhere in the app — same affordance as
-  // every dialog.
-  useEffect(() => {
-    if (insertAfterIndex === null) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setInsertAfterIndex(null)
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [insertAfterIndex])
-
-  // -- Map handlers --
-  const handleMapClick = useCallback((lat: number, lng: number) => {
-    const nlat = clampLat(lat)
-    const nlng = normalizeLng(lng)
-    // Priority 1: insert-after mode. One-shot — clears itself after the
-    // splice so the next plain click goes back to the default behaviour
-    // (no-op or click-to-add-waypoint, depending on the toggle).
-    if (insertAfterIndex !== null) {
-      const idx = insertAfterIndex
-      // Always update the local list immediately so the UI shows the
-      // new waypoint without waiting for the backend round-trip.
-      sim.setWaypoints((prev: any[]) => {
-        const safeIdx = Math.min(Math.max(idx, 0), prev.length - 1)
-        const target = safeIdx + 1
-        const next = [...prev]
-        next.splice(target, 0, { lat: nlat, lng: nlng })
-        return next
-      })
-      // If a multi-stop / loop is currently running, also push the
-      // splice into every connected device's engine so each iPhone
-      // walks the new waypoint as part of the active route (no need
-      // to Stop+Start). When inserted in a future leg the device
-      // continues to that leg and visits the new wp in line; when
-      // inserted in a past / current leg the new wp is recorded for
-      // the route list but the iPhone keeps walking forward without
-      // backtracking. See SimulationEngine.live_insert_waypoint.
-      const isRouteMode = sim.mode === SimMode.Loop
-      if (isRouteMode && sim.status?.running) {
-        const udids = device.connectedDevices.map((d) => d.udid)
-        if (udids.length > 0) {
-          void Promise.allSettled(
-            udids.map((u) => api.insertWaypoint(idx, nlat, nlng, u)),
-          )
-        } else {
-          void api.insertWaypoint(idx, nlat, nlng).catch(() => {})
-        }
-      }
-      setInsertAfterIndex(null)
-      return
-    }
-    // When the "left-click to add waypoint" toggle is on AND we're in a
-    // waypoint-based mode, append to the waypoint list. Otherwise a map
-    // click is a no-op (teleport / navigate live on right-click menu).
-    if (!clickToAddWaypoint) return
-    if (sim.mode !== SimMode.Loop && sim.mode !== SimMode.Flower) return
-    sim.setWaypoints((prev: any[]) => {
-      if (prev.length === 0 && sim.currentPosition) {
-        return [
-          { lat: sim.currentPosition.lat, lng: sim.currentPosition.lng },
-          { lat: nlat, lng: nlng },
-        ]
-      }
-      return [...prev, { lat: nlat, lng: nlng }]
-    })
-  }, [clickToAddWaypoint, insertAfterIndex, sim])
-
-  // Leaflet wraps the world horizontally at very low zoom levels; clicking on
-  // a "second copy" of a country yields lng outside [-180, 180]. Backend's
-  // pydantic TeleportRequest bounds lng to [-180, 180] so the raw click
-  // would 422. Normalize at the handler entry so every downstream call sees
-  // a single canonical coordinate.
-  const normalizeLng = (lng: number): number => {
-    const n = ((lng + 180) % 360 + 360) % 360 - 180
-    // ((180 + 180) % 360 + 360) % 360 - 180 == -180, but 180 is also valid.
-    // Keep +180 if the input was exactly +180.
-    return lng === 180 ? 180 : n
-  }
-  const clampLat = (lat: number): number => Math.max(-90, Math.min(90, lat))
-
   // Recent places list (last 20 destinations the user flew to). Loaded
   // once on mount; refreshed after each push so the map's recent-button
   // popover is always current.
@@ -666,6 +424,37 @@ const App: React.FC = () => {
     try { await api.clearRecent() } catch { /* silent */ }
     setRecentPlaces([])
   }, [])
+
+  // Waypoint-list editing (map-click add, insert-after mode, move / remove /
+  // trim, random generation, fly-confirm dialog, route bulk-paste).
+  const {
+    wpGenRadius,
+    setWpGenRadius,
+    wpGenCount,
+    setWpGenCount,
+    handleGenerateRandomWaypoints,
+    handleGenerateAllRandom,
+    insertAfterIndex,
+    handleInsertAfterWp,
+    cancelInsertMode,
+    handleMapClick,
+    handleAddWaypoint,
+    handleClearWaypoints,
+    handleRemoveWaypoint,
+    handleMoveWaypoint,
+    handleSetWpAsStart,
+    wpFlyConfirm,
+    setWpFlyConfirm,
+    confirmWpFly,
+    wpCollapsed,
+    setWpCollapsed,
+    routePasteOpen,
+    setRoutePasteOpen,
+    routePasteText,
+    setRoutePasteText,
+    parseRoutePaste,
+    submitRoutePaste,
+  } = useWaypointEditing({ sim, device, t, showToast, pushRecent, clickToAddWaypoint })
 
   // `source` lets the caller tag this flight for the recent-places
   // history: 'menu' (map right-click) is the default, 'coord' when the
@@ -823,133 +612,6 @@ const App: React.FC = () => {
     showToast(t('bm.bulk_paste_done').replace('{count}', String(added)))
   }, [bulkPasteText, bulkPasteCategory, bm, parseBulkPaste, t, showToast])
 
-  const handleAddWaypoint = useCallback((lat: number, lng: number) => {
-    // Seed the list with the current device position as the implicit start
-    // point on the first add. This keeps backend route and UI list aligned
-    // so waypoint-progress highlighting indexes correctly, and removes the
-    // "start button injects current pos every click" footgun.
-    const nlat = clampLat(lat)
-    const nlng = normalizeLng(lng)
-    sim.setWaypoints((prev: any[]) => {
-      if (prev.length === 0 && sim.currentPosition) {
-        return [
-          { lat: sim.currentPosition.lat, lng: sim.currentPosition.lng },
-          { lat: nlat, lng: nlng },
-        ]
-      }
-      return [...prev, { lat: nlat, lng: nlng }]
-    })
-  }, [sim])
-
-  const handleClearWaypoints = useCallback(() => {
-    sim.setWaypoints([])
-  }, [sim])
-
-  const handleRemoveWaypoint = useCallback((index: number) => {
-    sim.setWaypoints((prev: any[]) => prev.filter((_: any, i: number) => i !== index))
-  }, [sim])
-
-  // Move a waypoint up / down inside the Loop / MultiStop list. waypoints[0]
-  // is the implicit start (current device position when the first add fired),
-  // so it's pinned — we never let the user shuffle index 0, and other rows
-  // can't be moved into position 0. Same idempotent pattern as the remove
-  // handler: swap two entries inside the immutable list.
-  const handleMoveWaypoint = useCallback((index: number, direction: -1 | 1) => {
-    sim.setWaypoints((prev: any[]) => {
-      const target = index + direction
-      if (index <= 0 || target <= 0) return prev
-      if (index >= prev.length || target >= prev.length) return prev
-      const next = prev.slice()
-      const tmp = next[index]
-      next[index] = next[target]
-      next[target] = tmp
-      return next
-    })
-  }, [sim])
-
-  // Trim the waypoint list so the chosen index becomes the new start.
-  // Everything before `index` is dropped — the iPhone won't walk back
-  // through them on the next Start press. Concretely: setting #9 as
-  // start on a 1..15 route gives 9 → 10 → ... → 15 (and Loop wraps
-  // back to 9, not to 1). User asked for trim (not rotate) so a
-  // pause-and-resume-from-#9 flow doesn't re-walk #1..#8 at the end.
-  const handleSetWpAsStart = useCallback(async (index: number) => {
-    const wps = sim.waypoints
-    if (index <= 0 || index >= wps.length) return
-    const trimmed = wps.slice(index)
-    sim.setWaypoints(trimmed)
-    const start = trimmed[0]
-    sim.setCurrentPosition({ lat: start.lat, lng: start.lng })
-    const udids = device.connectedDevices.map((d) => d.udid)
-    if (udids.length > 0) {
-      try { await sim.teleportAll(udids, start.lat, start.lng) } catch { /* ignore */ }
-    }
-    void pushRecent(start.lat, start.lng, 'coord_teleport')
-  }, [sim, device, pushRecent])
-
-  // Teleport to a waypoint from inside the Loop / MultiStop list. We
-  // go around sim.teleport (which flips sim.mode to Teleport and would
-  // therefore wipe waypoints the next time the user clicks the Loop /
-  // MultiStop mode tab). Talk directly to sim.teleportAll / api.
-  // teleport so the current mode and the entire waypoint list stay
-  // intact while the iPhone jumps to the chosen point.
-  const [wpFlyConfirm, setWpFlyConfirm] = useState<{ lat: number; lng: number; index: number } | null>(null)
-  const confirmWpFly = useCallback(async () => {
-    if (!wpFlyConfirm) return
-    const { lat, lng } = wpFlyConfirm
-    sim.setCurrentPosition({ lat, lng })
-    const udids = device.connectedDevices.map((d) => d.udid)
-    if (udids.length > 0) {
-      try { await sim.teleportAll(udids, lat, lng) } catch { /* ignore */ }
-    }
-    void pushRecent(lat, lng, 'coord_teleport')
-    setWpFlyConfirm(null)
-  }, [wpFlyConfirm, sim, device, pushRecent])
-
-  // Route bulk-paste: parse a textarea of "lat lng [name]" lines into a
-  // waypoint list for Loop / MultiStop. Current device position (if
-  // any) is prepended as waypoint[0] so the backend's seg_idx math
-  // lines up with the UI, matching handleAddWaypoint's contract.
-  // Works identically in single- and dual-device modes because sim.
-  // setWaypoints feeds both the global state and any fanout call site.
-  const [routePasteOpen, setRoutePasteOpen] = useState(false)
-  const [routePasteText, setRoutePasteText] = useState('')
-  const parseRoutePaste = useCallback((raw: string): { valid: Array<{ lat: number; lng: number }>; invalidCount: number; totalLines: number } => {
-    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0)
-    const valid: Array<{ lat: number; lng: number }> = []
-    let invalidCount = 0
-    for (const line of lines) {
-      const c = parseCoord(line)
-      if (!c) { invalidCount++; continue }
-      valid.push({ lat: clampLat(c.lat), lng: normalizeLng(c.lng) })
-    }
-    return { valid, invalidCount, totalLines: lines.length }
-  }, [])
-  const submitRoutePaste = useCallback(async () => {
-    const { valid } = parseRoutePaste(routePasteText)
-    if (valid.length === 0) {
-      showToast(t('panel.route_paste_empty'))
-      return
-    }
-    // First pasted coord = route start. Teleport iPhone there so
-    // waypoints[0] lines up with current GPS, BUT don't go through
-    // handleTeleport / sim.teleport — those flip sim.mode back to
-    // Teleport, which would then clear waypoints the moment the user
-    // clicks Loop / MultiStop in the sidebar. Use the raw API + a
-    // direct setCurrentPosition so the mode the user set (Loop /
-    // MultiStop) stays intact.
-    const first = valid[0]
-    sim.setCurrentPosition({ lat: first.lat, lng: first.lng })
-    const udids = device.connectedDevices.map((d) => d.udid)
-    if (udids.length > 0) {
-      try { await sim.teleportAll(udids, first.lat, first.lng) } catch { /* ignore */ }
-    }
-    sim.setWaypoints(valid)
-    setRoutePasteOpen(false)
-    setRoutePasteText('')
-    showToast(t('panel.route_paste_done').replace('{count}', String(valid.length)))
-  }, [routePasteText, parseRoutePaste, sim, device, t, showToast])
-
   const handleGoldDittoStart = useCallback(async () => {
     const raw = goldDittoA.trim()
     if (!raw) {
@@ -1096,9 +758,6 @@ const App: React.FC = () => {
   // panel so the user knows which route is active. Cleared automatically
   // once the waypoint list is emptied.
   const [loadedRouteName, setLoadedRouteName] = useState<string | null>(null)
-  // Waypoint list starts collapsed so a long route doesn't bury the speed /
-  // action controls; the user expands it when they want to edit points.
-  const [wpCollapsed, setWpCollapsed] = useState(true)
   useEffect(() => {
     if (sim.waypoints.length === 0 && loadedRouteName !== null) setLoadedRouteName(null)
   }, [sim.waypoints.length, loadedRouteName])
@@ -1137,197 +796,6 @@ const App: React.FC = () => {
     }
     setRouteLoadConfirm(null)
   }, [routeLoadConfirm, sim, device, pushRecent])
-
-  const handleRouteSave = useCallback(async (
-    name: string,
-    opts?: { categoryId?: string; overwriteId?: string },
-  ) => {
-    if (sim.waypoints.length === 0) {
-      showToast(t('toast.route_need_waypoint'))
-      return
-    }
-    try {
-      if (opts?.overwriteId) {
-        // Find the existing route so we keep its category_id when the user
-        // doesn't explicitly choose a different one (the "save and overwrite"
-        // flow). Falls back to default if missing.
-        const prev = savedRoutes.find((r) => r.id === opts.overwriteId)
-        await api.replaceRoute(opts.overwriteId, {
-          id: opts.overwriteId,
-          name,
-          waypoints: sim.waypoints,
-          profile: sim.moveMode,
-          category_id: opts.categoryId ?? prev?.category_id ?? 'default',
-        })
-        const routes = await api.getSavedRoutes()
-        setSavedRoutes(routes)
-        showToast(t('toast.route_overwritten', { name }))
-        return
-      }
-      await api.saveRoute({
-        name,
-        waypoints: sim.waypoints,
-        profile: sim.moveMode,
-        category_id: opts?.categoryId ?? 'default',
-      })
-      const routes = await api.getSavedRoutes()
-      setSavedRoutes(routes)
-      showToast(t('toast.route_saved', { name }))
-    } catch (err: any) {
-      showToast(t('toast.route_save_failed', { msg: err.message || '' }))
-    }
-  }, [sim, savedRoutes, showToast, t])
-
-  const handleRoutesBulkDelete = useCallback(async (ids: string[]) => {
-    try {
-      await Promise.all(ids.map((id) => api.deleteRoute(id).catch(() => null)))
-      const routes = await api.getSavedRoutes()
-      setSavedRoutes(routes)
-      showToast(t('toast.route_bulk_deleted', { n: ids.length }))
-    } catch (err: any) {
-      showToast(err.message || t('toast.route_delete_failed'))
-    }
-  }, [showToast, t])
-
-  const handleRouteMove = useCallback(async (ids: string[], targetCategoryId: string) => {
-    try {
-      await api.moveRoutes(ids, targetCategoryId)
-      const routes = await api.getSavedRoutes()
-      setSavedRoutes(routes)
-    } catch (err: any) {
-      showToast(err.message || 'move failed')
-    }
-  }, [showToast])
-
-  const handleRouteCategoryAdd = useCallback(async (name: string, color = '#6c8cff') => {
-    try {
-      await api.createRouteCategory(name, color)
-      await refreshRouteCategories()
-    } catch (err: any) {
-      showToast(err.message || 'category add failed')
-    }
-  }, [refreshRouteCategories, showToast])
-
-  const handleRouteCategoryDelete = useCallback(async (id: string) => {
-    try {
-      await api.deleteRouteCategory(id)
-      // Routes that pointed at this category were moved to default by the
-      // backend; refresh both lists so the UI reflects the regrouped state.
-      await refreshRouteCategories()
-      const routes = await api.getSavedRoutes()
-      setSavedRoutes(routes)
-    } catch (err: any) {
-      showToast(err.message || 'category delete failed')
-    }
-  }, [refreshRouteCategories, showToast])
-
-  const handleRouteCategoryRename = useCallback(async (id: string, name: string) => {
-    try {
-      const cat = routeCategories.find((c) => c.id === id)
-      await api.updateRouteCategory(id, { name, color: cat?.color || '#6c8cff' })
-      await refreshRouteCategories()
-    } catch (err: any) {
-      showToast(err.message || 'category rename failed')
-    }
-  }, [routeCategories, refreshRouteCategories, showToast])
-
-  const handleRouteCategoryRecolor = useCallback(async (id: string, color: string) => {
-    try {
-      const cat = routeCategories.find((c) => c.id === id)
-      await api.updateRouteCategory(id, { name: cat?.name || '', color })
-      await refreshRouteCategories()
-    } catch (err: any) {
-      showToast(err.message || 'category recolor failed')
-    }
-  }, [routeCategories, refreshRouteCategories, showToast])
-
-  const handleRouteCategoryReorder = useCallback(async (orderedIds: string[]) => {
-    // Optimistically reorder locally so the arrow click feels instant; refresh
-    // reconciles with the backend afterwards.
-    setRouteCategories((prev) => {
-      const byId = new Map(prev.map((c) => [c.id, c] as const))
-      const head = orderedIds.map((id) => byId.get(id)).filter((c): c is any => !!c)
-      const headIds = new Set(head.map((c: any) => c.id))
-      const tail = prev.filter((c: any) => !headIds.has(c.id))
-      return [...head, ...tail]
-    })
-    try {
-      await api.reorderRouteCategories(orderedIds)
-      await refreshRouteCategories()
-    } catch (err: any) {
-      showToast(err.message || 'category reorder failed')
-      await refreshRouteCategories()
-    }
-  }, [refreshRouteCategories, showToast])
-
-  const handleRouteReorder = useCallback(async (categoryId: string, orderedIds: string[]) => {
-    // Splice the affected category's routes into the new order while keeping
-    // other categories' relative positions intact, mirroring the backend.
-    setSavedRoutes((prev) => {
-      const order = new Map(orderedIds.map((id, idx) => [id, idx] as const))
-      const inCat = prev.filter((r) => (r.category_id || 'default') === categoryId)
-      inCat.sort((a, b) => {
-        const ai = order.has(a.id) ? (order.get(a.id) as number) : Number.MAX_SAFE_INTEGER
-        const bi = order.has(b.id) ? (order.get(b.id) as number) : Number.MAX_SAFE_INTEGER
-        return ai - bi
-      })
-      const result = [...prev]
-      let ptr = 0
-      for (let i = 0; i < result.length; i++) {
-        if ((result[i].category_id || 'default') === categoryId) {
-          result[i] = inCat[ptr++]
-        }
-      }
-      return result
-    })
-    try {
-      await api.reorderRoutes(categoryId, orderedIds)
-      const routes = await api.getSavedRoutes()
-      setSavedRoutes(routes)
-    } catch (err: any) {
-      showToast(err.message || 'route reorder failed')
-      const routes = await api.getSavedRoutes()
-      setSavedRoutes(routes)
-    }
-  }, [showToast])
-
-  const handleGpxImport = useCallback(async (file: File) => {
-    try {
-      const res = await api.importGpx(file)
-      const routes = await api.getSavedRoutes()
-      setSavedRoutes(routes)
-      showToast(t('toast.gpx_imported', { n: res.points }))
-    } catch (err: any) {
-      showToast(t('toast.gpx_import_failed', { msg: err.message || '' }))
-    }
-  }, [showToast])
-
-  const handleGpxExport = useCallback((id: string) => {
-    const url = api.exportGpxUrl(id)
-    window.open(url, '_blank')
-  }, [])
-
-  const handleRoutesImportAll = useCallback(async (file: File) => {
-    try {
-      const text = await file.text()
-      const data = JSON.parse(text)
-      if (!Array.isArray(data?.routes)) {
-        throw new Error('invalid file: missing routes array')
-      }
-      // Pass categories through too if present (post-v0.2.133 export shape).
-      // Old exports without this field still import fine.
-      const res = await api.importAllRoutes({
-        routes: data.routes,
-        categories: Array.isArray(data?.categories) ? data.categories : [],
-      })
-      const routes = await api.getSavedRoutes()
-      setSavedRoutes(routes)
-      await refreshRouteCategories()
-      showToast(t('toast.routes_imported', { n: res.imported }))
-    } catch (err: any) {
-      showToast(t('toast.routes_import_failed', { msg: err.message || '' }))
-    }
-  }, [showToast, refreshRouteCategories, t])
 
   const handleApplySpeed = useCallback(async () => {
     const udids = device.connectedDevices.map((d) => d.udid)
@@ -1388,35 +856,223 @@ const App: React.FC = () => {
     }
   }, [bm, showToast, t])
 
-  const handleRouteRename = useCallback(async (id: string, name: string) => {
-    try {
-      await api.renameRoute(id, name)
-      const routes = await api.getSavedRoutes()
-      setSavedRoutes(routes)
-    } catch (err: any) {
-      showToast(err.message || t('toast.route_rename_failed'))
-    }
-  }, [showToast])
+  // ── Hoisted props for memoized children ────────────────────────────
+  // Inline object / array / arrow props are re-created on every App render
+  // (up to ~10 Hz during a run) and would defeat the React.memo wrappers
+  // on ControlPanel / DeviceStatus / StatusBar. Hoist them into
+  // useCallback / useMemo so the memo actually holds.
+  const handleSpeedChange = useCallback((s: number) => {
+    if (s <= 10.8) sim.setMoveMode(MoveMode.Walking)
+    else if (s <= 19.8) sim.setMoveMode(MoveMode.Running)
+    else sim.setMoveMode(MoveMode.Driving)
+  }, [sim])
 
-  const handleRouteDelete = useCallback(async (id: string) => {
-    try {
-      await api.deleteRoute(id)
-      const routes = await api.getSavedRoutes()
-      setSavedRoutes(routes)
-      showToast(t('toast.route_deleted'))
-    } catch (err: any) {
-      showToast(err.message || t('toast.route_delete_failed'))
+  const handleAddressSelect = useCallback(async (lat: number, lng: number, name: string) => {
+    const latN = clampLat(lat)
+    const lngN = normalizeLng(lng)
+    const udids = device.connectedDevices.map((d) => d.udid)
+    if (udids.length >= 2) {
+      sim.setCurrentPosition({ lat: latN, lng: lngN })
+      const outcome = await sim.teleportAll(udids, latN, lngN)
+      showToast(toastForFanout(t, t('mode.teleport'), outcome, device.connectedDevices))
+    } else {
+      sim.teleport(latN, lngN)
     }
-  }, [showToast])
+    void pushRecent(latN, lngN, 'search', name)
+  }, [sim, device, t, showToast, pushRecent])
 
-  // Build props for components
+  const panelBookmarks = useMemo(() => bm.bookmarks.map((b: any) => ({
+    id: b.id,
+    name: b.name,
+    lat: b.lat,
+    lng: b.lng,
+    category: bm.categories.find(c => c.id === b.category_id)?.name || t('bm.default'),
+    country_code: b.country_code || '',
+    created_at: b.created_at || '',
+    last_used_at: b.last_used_at || '',
+  })), [bm.bookmarks, bm.categories, t])
+  const panelBookmarkCategories = useMemo(() => bm.categories.map(c => c.name), [bm.categories])
+  const panelBookmarkCategoryColors = useMemo(
+    () => Object.fromEntries(bm.categories.map(c => [c.name, c.color || ''])),
+    [bm.categories],
+  )
+
+  const handleBookmarkClick = useCallback((b: any) => handleTeleport(b.lat, b.lng), [handleTeleport])
+  const handleBookmarkPreview = useCallback((b: any) => handleMapPanOnly(b.lat, b.lng), [handleMapPanOnly])
+  const handleBookmarkAdd = useCallback((b: any) => {
+    const cat = bm.categories.find(c => c.name === b.category)
+    // Reverse-geocode first so custom-coordinate bookmarks also get a
+    // country flag. If lookup fails or takes too long, save without
+    // one so the user isn't blocked.
+    ;(async () => {
+      let cc = ''
+      try {
+        const geo = await Promise.race([
+          api.reverseGeocode(b.lat, b.lng),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+        ])
+        if (geo && (geo as any).country_code) {
+          cc = String((geo as any).country_code).toLowerCase()
+        }
+      } catch { /* ignore */ }
+      bm.createBookmark({
+        name: b.name,
+        lat: b.lat,
+        lng: b.lng,
+        category_id: cat?.id || 'default',
+        country_code: cc,
+      } as any)
+    })()
+  }, [bm])
+  const handleBookmarkDelete = useCallback((id: string) => { void bm.deleteBookmark(id) }, [bm])
+  const handleBookmarkEdit = useCallback((id: string, data: any) => {
+    // BookmarkList emits UI-shape patches ({name}, or {name,lat,lng,category}).
+    // Backend PUT /api/bookmarks requires the full Bookmark schema with
+    // category_id (not category name), so merge the patch onto the
+    // original and translate category name -> id before sending.
+    //
+    // If orig is missing (bm.bookmarks briefly out of sync with a
+    // background refresh), fall back to the patch data — the edit
+    // dialog supplies a full bookmark via spread so we still have the
+    // fields we need. This prevents the silent-noop save the user saw
+    // after running Fix Flags.
+    const orig = bm.bookmarks.find(b => b.id === id)
+    const base: any = orig ? { ...orig } : { ...data, id }
+    const patch: any = base
+    if (data.name != null) patch.name = data.name
+    if (data.lat != null) patch.lat = data.lat
+    if (data.lng != null) patch.lng = data.lng
+    if (data.category != null) {
+      const cat = bm.categories.find(c => c.name === data.category)
+      if (cat) patch.category_id = cat.id
+    }
+    // Flag-backfill-on-save: trigger reverse-geocode whenever we'd
+    // benefit from a fresh country_code — i.e. coords moved (stale),
+    // OR the bookmark never had a flag to begin with (legacy entry
+    // from before the feature shipped). Runs in the background so
+    // the save itself feels instant.
+    const refLat = orig ? orig.lat : base.lat
+    const refLng = orig ? orig.lng : base.lng
+    const coordsChanged =
+      (data.lat != null && data.lat !== refLat) ||
+      (data.lng != null && data.lng !== refLng)
+    const flagMissing = !base.country_code
+    const needsGeocode = coordsChanged || flagMissing
+    if (coordsChanged) {
+      // Coordinates moved — clear the stale flag so UI doesn't show
+      // the wrong country while the async lookup is in flight.
+      patch.country_code = ''
+    }
+    if (needsGeocode) {
+      ;(async () => {
+        try {
+          const geo = await Promise.race([
+            api.reverseGeocode(patch.lat, patch.lng),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+          ])
+          const cc = geo && (geo as any).country_code
+            ? String((geo as any).country_code).toLowerCase()
+            : ''
+          if (cc) {
+            await bm.updateBookmark(id, { ...patch, country_code: cc } as any)
+          }
+        } catch { /* ignore */ }
+      })()
+    }
+    bm.updateBookmark(id, patch)
+  }, [bm])
+  const handleCategoryAdd = useCallback((name: string) => {
+    // Pick a random preset color at creation so different categories
+    // start visually distinct; the color is persisted and stays put
+    // across rename (was previously hashed from name → jumped on rename).
+    const palette = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#6366f1', '#a855f7', '#ec4899', '#64748b']
+    const color = palette[Math.floor(Math.random() * palette.length)]
+    bm.createCategory({ name, color })
+  }, [bm])
+  const handleCategoryDelete = useCallback((name: string) => {
+    const cat = bm.categories.find(c => c.name === name)
+    if (cat) bm.deleteCategory(cat.id)
+  }, [bm])
+  const handleCategoryRename = useCallback((oldName: string, newName: string) => {
+    const cat = bm.categories.find(c => c.name === oldName)
+    if (!cat) return
+    // Default category is immutable (UI also hides the rename button
+    // for it, but guard here too in case a stale UI ref slips past).
+    if (cat.id === 'default') return
+    // Backend PUT requires the full BookmarkCategory shape, keep color.
+    bm.updateCategory(cat.id, { ...cat, name: newName })
+  }, [bm])
+  const handleCategoryRecolor = useCallback((name: string, color: string) => {
+    const cat = bm.categories.find(c => c.name === name)
+    if (!cat) return
+    bm.updateCategory(cat.id, { ...cat, color })
+  }, [bm])
+  const handleCategoryReorder = useCallback((orderedNames: string[]) => {
+    // BookmarkList speaks names; translate to backend ids before
+    // POSTing the new order. Skip any name we can't resolve (e.g.
+    // the synthetic "Uncategorized" bucket isn't a real category).
+    const ids = orderedNames
+      .map((n) => bm.categories.find((c) => c.name === n)?.id)
+      .filter((id): id is string => !!id)
+    if (ids.length > 0) bm.reorderCategories(ids)
+  }, [bm])
+  const handleBookmarkReorder = useCallback((categoryName: string, orderedIds: string[]) => {
+    const cat = bm.categories.find((c) => c.name === categoryName)
+    if (!cat) return
+    bm.reorderBookmarksInCategory(cat.id, orderedIds)
+  }, [bm])
+  const handleCategoryExportGpx = useCallback((name: string) => {
+    const cat = bm.categories.find((c) => c.name === name)
+    if (!cat) return
+    window.open(api.bookmarkCategoryGpxExportUrl(cat.id), '_blank')
+  }, [bm])
+  const handleCategoriesExportGpxZip = useCallback((names: string[]) => {
+    const ids = names
+      .map((n) => bm.categories.find((c) => c.name === n)?.id)
+      .filter((x): x is string => !!x)
+    if (ids.length === 0) return
+    window.open(api.bookmarkCategoriesGpxZipUrl(ids), '_blank')
+  }, [bm])
+  const handleBookmarkBulkPasteOpen = useCallback(() => {
+    setBulkPasteText('')
+    setBulkPasteCategory(bm.categories[0]?.name || '預設')
+    setBulkPasteOpen(true)
+  }, [bm])
+
+  const panelSavedRoutes = useMemo(() => savedRoutes.map(r => ({
+    id: r.id,
+    name: r.name,
+    waypoints: r.waypoints ?? [],
+    profile: r.profile,
+    category_id: r.category_id || 'default',
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  })), [savedRoutes])
+
+  const deviceStatusDevice = useMemo(() => device.connectedDevice ? {
+    id: device.connectedDevice.udid,
+    name: device.connectedDevice.name,
+    iosVersion: device.connectedDevice.ios_version,
+    connectionType: device.connectedDevice.connection_type,
+    developerModeEnabled: device.connectedDevice.developer_mode_enabled,
+  } : null, [device.connectedDevice])
+  const deviceStatusDevices = useMemo(() => device.devices.map(d => ({
+    id: d.udid,
+    name: d.name,
+    iosVersion: d.ios_version,
+    connectionType: d.connection_type,
+    developerModeEnabled: d.developer_mode_enabled,
+  })), [device.devices])
+  const handleDeviceScan = useCallback(() => { device.scan() }, [device])
+  const handleDeviceSelect = useCallback((id: string) => { device.connect(id) }, [device])
+
+  const handleOpenSettings = useCallback(() => setActivePage('settings'), [])
+
+  // Build props for components. sim.currentPosition / sim.destination are
+  // already {lat,lng} state objects — pass them through directly instead of
+  // re-wrapping (which minted a fresh object every render).
   const currentPos = sim.currentPosition
-    ? { lat: sim.currentPosition.lat, lng: sim.currentPosition.lng }
-    : null
-
   const destPos = sim.destination
-    ? { lat: sim.destination.lat, lng: sim.destination.lng }
-    : null
 
   // 種花模式 map preview: one segmented polygon per waypoint, matching the
   // backend's circle geometry (radius + segment count) so the user sees
@@ -1439,445 +1095,10 @@ const App: React.FC = () => {
     })
   }, [sim.mode, sim.waypoints, sim.flowerRadius, sim.flowerSegments])
 
-  // 種花模式 estimated total trip time (seconds): every pre/post wait + the
-  // walked approach between flowers (straight-line approximation; teleport
-  // approaches cost no travel time) + the walked circle length, across all
-  // rounds. Shown live in the panel so the user knows roughly how long the
-  // whole run will take, circling included.
-  const flowerEstimateSec = useMemo(() => {
-    if (sim.mode !== SimMode.Flower) return null
-    const wps = sim.waypoints
-    if (wps.length < 1) return null
-    const N = Math.max(3, Math.round(sim.flowerSegments))
-    const R = sim.flowerRadius
-    const circles = Math.max(0.5, Math.round(sim.flowerCircles * 2) / 2)
-    const rounds = Math.max(1, Math.round(sim.flowerRounds))
-    const preW = Math.max(0, sim.flowerPreWait)
-    const postW = Math.max(0, sim.flowerPostWait)
-    const defKmh = sim.moveMode === MoveMode.Running ? 19.8 : sim.moveMode === MoveMode.Driving ? 60 : 10.8
-    const kmh = (sim.speedMinKmh != null && sim.speedMaxKmh != null)
-      ? (sim.speedMinKmh + sim.speedMaxKmh) / 2
-      : (sim.customSpeedKmh ?? defKmh)
-    const speed = Math.max(kmh / 3.6, 0.1) // m/s
-    // Walked length per flower circle: out to the first vertex (radius) plus
-    // `circles` laps of the N-gon perimeter (matches backend _circle_path).
-    const chord = 2 * R * Math.sin(Math.PI / N)
-    const circleLen = R + circles * N * chord
-    const hav = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
-      const dlat = ((b.lat - a.lat) * Math.PI) / 180
-      const dlng = ((b.lng - a.lng) * Math.PI) / 180 * Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180)
-      return 6371000 * Math.sqrt(dlat * dlat + dlng * dlng)
-    }
-    let total = 0
-    let prev: { lat: number; lng: number } | null = sim.currentPosition
-    for (let r = 0; r < rounds; r++) {
-      for (let i = 0; i < wps.length; i++) {
-        const wp = wps[i]
-        total += preW
-        if (!sim.flowerTeleport && prev) total += hav(prev, wp) / speed
-        total += postW
-        total += circleLen / speed
-        prev = wp
-      }
-    }
-    return total
-  }, [sim.mode, sim.waypoints, sim.flowerSegments, sim.flowerRadius, sim.flowerCircles, sim.flowerRounds, sim.flowerPreWait, sim.flowerPostWait, sim.flowerTeleport, sim.customSpeedKmh, sim.speedMinKmh, sim.speedMaxKmh, sim.moveMode, sim.currentPosition])
-
-  // Compact H:MM:SS / M:SS duration formatter for the flower estimate.
-  const fmtDuration = (sec: number) => {
-    const s = Math.max(0, Math.round(sec))
-    const h = Math.floor(s / 3600)
-    const m = Math.floor((s % 3600) / 60)
-    const ss = s % 60
-    const pad = (n: number) => String(n).padStart(2, '0')
-    return h > 0 ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`
-  }
-
-  // Mode default km/h, used only for ControlPanel's in-panel preset
-  // preview and as a very last fallback in the status bar before any
-  // apply / sim start has happened.
-  const speed = SPEED_MAP[sim.moveMode] || 10.8
-  const fmtSpeedFromInputs = (kmh: number | null, lo: number | null, hi: number | null): number | string => {
-    if (lo != null && hi != null) return `${Math.min(lo, hi)}~${Math.max(lo, hi)}`
-    if (kmh != null) return kmh
-    return SPEED_MAP[sim.moveMode] || 10.8
-  }
-
-  // Determine running/paused state from status
-  const isRunning = sim.status.running
-  const isPaused = sim.status.paused
-
-  // Status-bar speed display:
-  //  - Idle: reflect the speed the user has *selected* (preset mode default
-  //    or custom km/h / range) so picking a speed updates the bar at once.
-  //  - Running: show what's actually applied on the device (effectiveSpeed);
-  //    changing the selector mid-route still needs 套用新速度 to take effect.
-  const selectedSpeedDisplay = fmtSpeedFromInputs(sim.customSpeedKmh, sim.speedMinKmh, sim.speedMaxKmh)
-  const displaySpeed: number | string = isRunning && sim.effectiveSpeed
-    ? fmtSpeedFromInputs(sim.effectiveSpeed.kmh, sim.effectiveSpeed.min, sim.effectiveSpeed.max)
-    : selectedSpeedDisplay
-
-  return (
-    <div className="app-layout">
-      <div className="noise-overlay" aria-hidden />
-      <div className="sidebar">
-        <nav className="nav-rail">
-          {([
-            { id: 'nav', label: t('nav.navigate'), icon: (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="3 11 22 2 13 21 11 13 3 11" /></svg>
-            ) },
-            { id: 'connection', label: t('nav.connection'), icon: (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12.55a11 11 0 0 1 14.08 0" /><path d="M1.42 9a16 16 0 0 1 21.16 0" /><path d="M8.53 16.11a6 6 0 0 1 6.95 0" /><line x1="12" y1="20" x2="12.01" y2="20" /></svg>
-            ) },
-            { id: 'library', label: t('nav.library'), icon: (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" /></svg>
-            ) },
-            { id: 'settings', label: t('nav.settings'), icon: (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
-            ) },
-          ] as const).map((item) => {
-            const active = item.id === 'library'
-              ? false
-              : activePage === item.id
-            return (
-              <button
-                key={item.id}
-                className={`nav-rail-btn${active ? ' active' : ''}`}
-                title={item.label}
-                onClick={() => {
-                  if (item.id === 'library') { setOpenLibraryToken((n) => n + 1); return }
-                  setActivePage(item.id)
-                }}
-              >
-                <span className="nav-rail-icon">{item.icon}</span>
-                <span className="nav-rail-label">{item.label}</span>
-              </button>
-            )
-          })}
-        </nav>
-        <div className="sidebar-content">
-        <DeviceChipRow
-          devices={device.connectedDevices}
-          runtimes={sim.runtimes}
-          onAdd={() => {
-            if (device.connectedDevices.length >= 2) {
-              setToastMsg(t('device.max_reached'))
-              return
-            }
-            device.scan()
-          }}
-          onDisconnect={(udid) => { device.disconnect(udid) }}
-          onRestoreOne={async (udid) => {
-            try {
-              await api.restoreSim(udid)
-              setToastMsg(t('status.restore_success'))
-            } catch (e: any) {
-              setToastMsg(e?.message ?? 'restore failed')
-            }
-          }}
-        />
-        {activePage === 'settings' && (
-          <SettingsPage
-            onOpenLogFolder={handleOpenLog}
-            onEnableDeveloperMode={async () => {
-              const target = device.connectedDevice?.udid
-              if (!target) {
-                showToast(t('dev_mode.need_device'))
-                return
-              }
-              try {
-                await api.amfiRevealDeveloperMode(target)
-                showToast(t('dev_mode.reveal_success'))
-                await device.scan()
-              } catch (err: any) {
-                showToast(t('dev_mode.reveal_failed') + (err?.message ? `: ${err.message}` : ''))
-              }
-            }}
-          />
-        )}
-        <div style={{ display: activePage === 'connection' ? 'block' : 'none' }}>
-        <DeviceStatus
-          device={device.connectedDevice ? {
-            id: device.connectedDevice.udid,
-            name: device.connectedDevice.name,
-            iosVersion: device.connectedDevice.ios_version,
-            connectionType: device.connectedDevice.connection_type,
-            developerModeEnabled: device.connectedDevice.developer_mode_enabled,
-          } : null}
-          devices={device.devices.map(d => ({
-            id: d.udid,
-            name: d.name,
-            iosVersion: d.ios_version,
-            connectionType: d.connection_type,
-            developerModeEnabled: d.developer_mode_enabled,
-          }))}
-          isConnected={device.connectedDevice !== null}
-          onScan={() => { device.scan() }}
-          onSelect={(id: string) => { device.connect(id) }}
-          onStartWifiTunnel={device.startWifiTunnel}
-          onStopTunnel={device.stopTunnel}
-          tunnelStatus={device.tunnelStatus}
-          tunnels={device.tunnels}
-          pinnedUdids={device.pinnedUdids}
-          onTogglePin={device.togglePin}
-        />
-        </div>
-        <div style={{ display: activePage === 'nav' ? 'block' : 'none' }}>
-        <ControlPanel
-          simMode={sim.mode}
-          moveMode={sim.moveMode}
-          speed={speed}
-          isRunning={isRunning}
-          isPaused={isPaused}
-          currentPosition={currentPos}
-          onModeChange={sim.setMode}
-          onSpeedChange={(s: number) => {
-            if (s <= 10.8) sim.setMoveMode(MoveMode.Walking)
-            else if (s <= 19.8) sim.setMoveMode(MoveMode.Running)
-            else sim.setMoveMode(MoveMode.Driving)
-          }}
-          onMoveModeChange={sim.setMoveMode}
-          customSpeedKmh={sim.customSpeedKmh}
-          onCustomSpeedChange={sim.setCustomSpeedKmh}
-          speedMinKmh={sim.speedMinKmh}
-          onSpeedMinChange={sim.setSpeedMinKmh}
-          speedMaxKmh={sim.speedMaxKmh}
-          onSpeedMaxChange={sim.setSpeedMaxKmh}
-          onStart={handleStart}
-          onStop={handleStop}
-          onPause={handlePause}
-          onResume={handleResume}
-          onRestore={handleRestore}
-          onApplySpeed={handleApplySpeed}
-          waypointProgress={sim.waypointProgress}
-          onTeleport={handleTeleport}
-          onNavigate={handleNavigate}
-          onAddressSelect={async (lat, lng, name) => {
-            const latN = clampLat(lat)
-            const lngN = normalizeLng(lng)
-            const udids = device.connectedDevices.map((d) => d.udid)
-            if (udids.length >= 2) {
-              sim.setCurrentPosition({ lat: latN, lng: lngN })
-              const outcome = await sim.teleportAll(udids, latN, lngN)
-              showToast(toastForFanout(t, t('mode.teleport'), outcome, device.connectedDevices))
-            } else {
-              sim.teleport(latN, lngN)
-            }
-            void pushRecent(latN, lngN, 'search', name)
-          }}
-          bookmarks={bm.bookmarks.map((b: any) => ({
-            id: b.id,
-            name: b.name,
-            lat: b.lat,
-            lng: b.lng,
-            category: bm.categories.find(c => c.id === b.category_id)?.name || t('bm.default'),
-            country_code: b.country_code || '',
-            created_at: b.created_at || '',
-            last_used_at: b.last_used_at || '',
-          }))}
-          bookmarkCategories={bm.categories.map(c => c.name)}
-          bookmarkCategoryColors={Object.fromEntries(bm.categories.map(c => [c.name, c.color || '']))}
-          onBookmarkClick={(b: any) => handleTeleport(b.lat, b.lng)}
-          onBookmarkPreview={(b: any) => handleMapPanOnly(b.lat, b.lng)}
-          onBookmarkAdd={(b: any) => {
-            const cat = bm.categories.find(c => c.name === b.category)
-            // Reverse-geocode first so custom-coordinate bookmarks also get a
-            // country flag. If lookup fails or takes too long, save without
-            // one so the user isn't blocked.
-            ;(async () => {
-              let cc = ''
-              try {
-                const geo = await Promise.race([
-                  api.reverseGeocode(b.lat, b.lng),
-                  new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
-                ])
-                if (geo && (geo as any).country_code) {
-                  cc = String((geo as any).country_code).toLowerCase()
-                }
-              } catch { /* ignore */ }
-              bm.createBookmark({
-                name: b.name,
-                lat: b.lat,
-                lng: b.lng,
-                category_id: cat?.id || 'default',
-                country_code: cc,
-              } as any)
-            })()
-          }}
-          onBookmarkDelete={(id: string) => bm.deleteBookmark(id)}
-          onBookmarkEdit={(id: string, data: any) => {
-            // BookmarkList emits UI-shape patches ({name}, or {name,lat,lng,category}).
-            // Backend PUT /api/bookmarks requires the full Bookmark schema with
-            // category_id (not category name), so merge the patch onto the
-            // original and translate category name -> id before sending.
-            //
-            // If orig is missing (bm.bookmarks briefly out of sync with a
-            // background refresh), fall back to the patch data — the edit
-            // dialog supplies a full bookmark via spread so we still have the
-            // fields we need. This prevents the silent-noop save the user saw
-            // after running Fix Flags.
-            const orig = bm.bookmarks.find(b => b.id === id)
-            const base: any = orig ? { ...orig } : { ...data, id }
-            const patch: any = base
-            if (data.name != null) patch.name = data.name
-            if (data.lat != null) patch.lat = data.lat
-            if (data.lng != null) patch.lng = data.lng
-            if (data.category != null) {
-              const cat = bm.categories.find(c => c.name === data.category)
-              if (cat) patch.category_id = cat.id
-            }
-            // Flag-backfill-on-save: trigger reverse-geocode whenever we'd
-            // benefit from a fresh country_code — i.e. coords moved (stale),
-            // OR the bookmark never had a flag to begin with (legacy entry
-            // from before the feature shipped). Runs in the background so
-            // the save itself feels instant.
-            const refLat = orig ? orig.lat : base.lat
-            const refLng = orig ? orig.lng : base.lng
-            const coordsChanged =
-              (data.lat != null && data.lat !== refLat) ||
-              (data.lng != null && data.lng !== refLng)
-            const flagMissing = !base.country_code
-            const needsGeocode = coordsChanged || flagMissing
-            if (coordsChanged) {
-              // Coordinates moved — clear the stale flag so UI doesn't show
-              // the wrong country while the async lookup is in flight.
-              patch.country_code = ''
-            }
-            if (needsGeocode) {
-              ;(async () => {
-                try {
-                  const geo = await Promise.race([
-                    api.reverseGeocode(patch.lat, patch.lng),
-                    new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
-                  ])
-                  const cc = geo && (geo as any).country_code
-                    ? String((geo as any).country_code).toLowerCase()
-                    : ''
-                  if (cc) {
-                    await bm.updateBookmark(id, { ...patch, country_code: cc } as any)
-                  }
-                } catch { /* ignore */ }
-              })()
-            }
-            bm.updateBookmark(id, patch)
-          }}
-          onCategoryAdd={(name: string) => {
-            // Pick a random preset color at creation so different categories
-            // start visually distinct; the color is persisted and stays put
-            // across rename (was previously hashed from name → jumped on rename).
-            const palette = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#6366f1', '#a855f7', '#ec4899', '#64748b']
-            const color = palette[Math.floor(Math.random() * palette.length)]
-            bm.createCategory({ name, color })
-          }}
-          onCategoryDelete={(name: string) => {
-            const cat = bm.categories.find(c => c.name === name)
-            if (cat) bm.deleteCategory(cat.id)
-          }}
-          onCategoryRename={(oldName: string, newName: string) => {
-            const cat = bm.categories.find(c => c.name === oldName)
-            if (!cat) return
-            // Default category is immutable (UI also hides the rename button
-            // for it, but guard here too in case a stale UI ref slips past).
-            if (cat.id === 'default') return
-            // Backend PUT requires the full BookmarkCategory shape, keep color.
-            bm.updateCategory(cat.id, { ...cat, name: newName })
-          }}
-          onCategoryRecolor={(name: string, color: string) => {
-            const cat = bm.categories.find(c => c.name === name)
-            if (!cat) return
-            bm.updateCategory(cat.id, { ...cat, color })
-          }}
-          onCategoryReorder={(orderedNames: string[]) => {
-            // BookmarkList speaks names; translate to backend ids before
-            // POSTing the new order. Skip any name we can't resolve (e.g.
-            // the synthetic "Uncategorized" bucket isn't a real category).
-            const ids = orderedNames
-              .map((n) => bm.categories.find((c) => c.name === n)?.id)
-              .filter((id): id is string => !!id)
-            if (ids.length > 0) bm.reorderCategories(ids)
-          }}
-          onBookmarkReorder={(categoryName: string, orderedIds: string[]) => {
-            const cat = bm.categories.find((c) => c.name === categoryName)
-            if (!cat) return
-            bm.reorderBookmarksInCategory(cat.id, orderedIds)
-          }}
-          onCategoryExportGpx={(name: string) => {
-            const cat = bm.categories.find((c) => c.name === name)
-            if (!cat) return
-            window.open(api.bookmarkCategoryGpxExportUrl(cat.id), '_blank')
-          }}
-          onCategoriesExportGpxZip={(names: string[]) => {
-            const ids = names
-              .map((n) => bm.categories.find((c) => c.name === n)?.id)
-              .filter((x): x is string => !!x)
-            if (ids.length === 0) return
-            window.open(api.bookmarkCategoriesGpxZipUrl(ids), '_blank')
-          }}
-          bookmarkShowOnMap={showBookmarkPins}
-          onBookmarkShowOnMapChange={setShowBookmarkPins}
-          onBookmarkImport={handleBookmarkImport}
-          onBookmarkBulkPaste={() => {
-            setBulkPasteText('')
-            setBulkPasteCategory(bm.categories[0]?.name || '預設')
-            setBulkPasteOpen(true)
-          }}
-          bookmarkExportUrl={api.bookmarksExportUrl()}
-          savedRoutes={savedRoutes.map(r => ({
-            id: r.id,
-            name: r.name,
-            waypoints: r.waypoints ?? [],
-            profile: r.profile,
-            category_id: r.category_id || 'default',
-            created_at: r.created_at,
-            updated_at: r.updated_at,
-          }))}
-          routeCategories={routeCategories}
-          onRouteGpxImport={handleGpxImport}
-          onRouteGpxExport={handleGpxExport}
-          onRoutesImportAll={handleRoutesImportAll}
-          routesExportAllUrl={api.exportAllRoutesUrl()}
-          onRouteRename={handleRouteRename}
-          onRouteDelete={handleRouteDelete}
-          onRoutesBulkDelete={handleRoutesBulkDelete}
-          onRouteMove={handleRouteMove}
-          onRouteLoad={handleRouteLoad}
-          onRouteSave={handleRouteSave}
-          onRouteCategoryAdd={handleRouteCategoryAdd}
-          onRouteCategoryDelete={handleRouteCategoryDelete}
-          onRouteCategoryRename={handleRouteCategoryRename}
-          onRouteCategoryRecolor={handleRouteCategoryRecolor}
-          onRouteCategoryReorder={handleRouteCategoryReorder}
-          onRouteReorder={handleRouteReorder}
-          randomWalkRadius={randomWalkRadius}
-          pauseRandomWalk={sim.pauseRandomWalk}
-          onPauseRandomWalkChange={sim.setPauseRandomWalk}
-          onRandomWalkRadiusChange={setRandomWalkRadius}
-          randomWalkCenterMode={sim.randomWalkCenterMode}
-          onRandomWalkCenterModeChange={sim.setRandomWalkCenterMode}
-          forwardWalk={sim.forwardWalk}
-          onForwardWalkChange={sim.setForwardWalk}
-          goldDittoA={goldDittoA}
-          onGoldDittoAChange={setGoldDittoA}
-          onGoldDittoStart={handleGoldDittoStart}
-          goldDittoBusy={goldDittoBusy}
-          currentWaypointsCount={sim.waypoints.length}
-          loadedRouteName={loadedRouteName}
-          straightLine={sim.straightLine}
-          onStraightLineChange={sim.setStraightLine}
-          keepWaypoints={sim.keepWaypoints}
-          onKeepWaypointsChange={sim.setKeepWaypoints}
-          routeEngine={sim.routeEngine}
-          onRouteEngineChange={sim.setRouteEngine}
-          clickToAddWaypoint={clickToAddWaypoint}
-          onClickToAddWaypointChange={setClickToAddWaypoint}
-          jumpMode={sim.jumpMode}
-          onJumpModeChange={sim.setJumpMode}
-          jumpPreDelay={sim.jumpPreDelay}
-          onJumpPreDelayChange={sim.setJumpPreDelay}
-          jumpPostDelay={sim.jumpPostDelay}
-          onJumpPostDelayChange={sim.setJumpPostDelay}
-          openLibraryToken={openLibraryToken}
-          modeExtraSection={(sim.mode === SimMode.Loop || sim.mode === SimMode.Flower) ? (
+  // Hoisted + memoized: this large waypoint-editor block used to be built
+  // inline in ControlPanel's props on every App render, handing it a fresh
+  // ReactNode each time and defeating its React.memo wrapper.
+  const modeExtraSection = useMemo(() => (sim.mode === SimMode.Loop || sim.mode === SimMode.Flower) ? (
           <div className="section" style={{ margin: '0 0 8px 0' }}>
             <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1897,60 +1118,7 @@ const App: React.FC = () => {
                 />
               )}
               {sim.mode === SimMode.Flower && (
-                <div style={{
-                  marginBottom: 8, padding: '8px 10px',
-                  background: 'rgba(108, 140, 255, 0.06)',
-                  border: '1px solid rgba(108, 140, 255, 0.18)',
-                  borderRadius: 6, fontSize: 11,
-                }}>
-                  <div style={{ opacity: 0.6, marginBottom: 8, lineHeight: 1.4 }}>{t('flower.hint')}</div>
-                  {/* teleport vs walk approach */}
-                  <label className="lw-checkbox" title={t('flower.teleport_hint')} style={{ marginBottom: 8 }}>
-                    <input
-                      type="checkbox"
-                      checked={sim.flowerTeleport}
-                      onChange={(e) => sim.setFlowerTeleport(e.target.checked)}
-                    />
-                    <span className="lw-checkbox-box"></span>
-                    <span className="lw-checkbox-label" style={{ lineHeight: 1.15 }}>{t('flower.teleport')}</span>
-                  </label>
-                  {([
-                    { label: t('flower.radius'), value: sim.flowerRadius, set: sim.setFlowerRadius, unit: 'm', min: 1, step: 5 },
-                    { label: t('flower.segments'), value: sim.flowerSegments, set: sim.setFlowerSegments, unit: t('flower.seg_unit'), min: 3, max: 20, step: 1 },
-                    { label: t('flower.circles'), value: sim.flowerCircles, set: sim.setFlowerCircles, unit: t('flower.circle_unit'), min: 0.5, step: 0.5 },
-                    { label: t('flower.rounds'), value: sim.flowerRounds, set: sim.setFlowerRounds, unit: t('flower.round_unit'), min: 1, step: 1 },
-                    { label: t('flower.pre_wait'), value: sim.flowerPreWait, set: sim.setFlowerPreWait, unit: t('flower.seconds'), min: 0, step: 1 },
-                    { label: t('flower.post_wait'), value: sim.flowerPostWait, set: sim.setFlowerPostWait, unit: t('flower.seconds'), min: 0, step: 1 },
-                  ] as const).map((row, ri) => (
-                    <div key={ri} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-                      <span style={{ opacity: 0.75, flex: 1, whiteSpace: 'nowrap' }}>{row.label}</span>
-                      <NumberField
-                        value={row.value}
-                        set={row.set}
-                        min={row.min}
-                        max={(row as { max?: number }).max}
-                        step={row.step}
-                      />
-                      <span style={{ opacity: 0.5, width: 18, textAlign: 'left' }}>{row.unit}</span>
-                    </div>
-                  ))}
-                  <div style={{ opacity: 0.45, fontSize: 10, marginTop: 2 }}>{t('flower.segments_hint')}</div>
-                  {flowerEstimateSec != null && sim.waypoints.length > 0 && (
-                    <div style={{
-                      marginTop: 8, paddingTop: 8,
-                      borderTop: '1px solid rgba(255,255,255,0.08)',
-                      display: 'flex', alignItems: 'baseline', gap: 8,
-                    }}>
-                      <span style={{ opacity: 0.75 }}>{t('flower.est_total')}</span>
-                      <span style={{ fontWeight: 700, fontSize: 13, color: '#ffd266' }}>
-                        {fmtDuration(flowerEstimateSec)}
-                      </span>
-                      <span style={{ opacity: 0.4, fontSize: 9, marginLeft: 'auto', textAlign: 'right', lineHeight: 1.3 }}>
-                        {t('flower.est_hint')}
-                      </span>
-                    </div>
-                  )}
-                </div>
+                <FlowerSettingsPanel sim={sim} />
               )}
               {sim.mode === SimMode.Loop && (() => {
                 const lap = sim.loopLapCount // null = 無限, 0 = 單程(原多點), N = N 圈
@@ -2213,7 +1381,225 @@ const App: React.FC = () => {
               )}
             </div>
           </div>
-          ) : null}
+  ) : null, [
+    sim, wpGenRadius, wpGenCount, wpCollapsed,
+    handleGenerateRandomWaypoints, handleGenerateAllRandom, handleMoveWaypoint,
+    handleRemoveWaypoint, handleClearWaypoints, showToast, t,
+  ])
+
+  // Mode default km/h, used only for ControlPanel's in-panel preset
+  // preview and as a very last fallback in the status bar before any
+  // apply / sim start has happened.
+  const speed = SPEED_MAP[sim.moveMode] || 10.8
+  const fmtSpeedFromInputs = (kmh: number | null, lo: number | null, hi: number | null): number | string => {
+    if (lo != null && hi != null) return `${Math.min(lo, hi)}~${Math.max(lo, hi)}`
+    if (kmh != null) return kmh
+    return SPEED_MAP[sim.moveMode] || 10.8
+  }
+
+  // Determine running/paused state from status
+  const isRunning = sim.status.running
+  const isPaused = sim.status.paused
+
+  // Status-bar speed display:
+  //  - Idle: reflect the speed the user has *selected* (preset mode default
+  //    or custom km/h / range) so picking a speed updates the bar at once.
+  //  - Running: show what's actually applied on the device (effectiveSpeed);
+  //    changing the selector mid-route still needs 套用新速度 to take effect.
+  const selectedSpeedDisplay = fmtSpeedFromInputs(sim.customSpeedKmh, sim.speedMinKmh, sim.speedMaxKmh)
+  const displaySpeed: number | string = isRunning && sim.effectiveSpeed
+    ? fmtSpeedFromInputs(sim.effectiveSpeed.kmh, sim.effectiveSpeed.min, sim.effectiveSpeed.max)
+    : selectedSpeedDisplay
+
+  return (
+    <div className="app-layout">
+      <div className="noise-overlay" aria-hidden />
+      <div className="sidebar">
+        <nav className="nav-rail">
+          {([
+            { id: 'nav', label: t('nav.navigate'), icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="3 11 22 2 13 21 11 13 3 11" /></svg>
+            ) },
+            { id: 'connection', label: t('nav.connection'), icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12.55a11 11 0 0 1 14.08 0" /><path d="M1.42 9a16 16 0 0 1 21.16 0" /><path d="M8.53 16.11a6 6 0 0 1 6.95 0" /><line x1="12" y1="20" x2="12.01" y2="20" /></svg>
+            ) },
+            { id: 'library', label: t('nav.library'), icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" /></svg>
+            ) },
+            { id: 'settings', label: t('nav.settings'), icon: (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+            ) },
+          ] as const).map((item) => {
+            const active = item.id === 'library'
+              ? false
+              : activePage === item.id
+            return (
+              <button
+                key={item.id}
+                className={`nav-rail-btn${active ? ' active' : ''}`}
+                title={item.label}
+                onClick={() => {
+                  if (item.id === 'library') { setOpenLibraryToken((n) => n + 1); return }
+                  setActivePage(item.id)
+                }}
+              >
+                <span className="nav-rail-icon">{item.icon}</span>
+                <span className="nav-rail-label">{item.label}</span>
+              </button>
+            )
+          })}
+        </nav>
+        <div className="sidebar-content">
+        <DeviceChipRow
+          devices={device.connectedDevices}
+          runtimes={sim.runtimes}
+          onAdd={() => {
+            if (device.connectedDevices.length >= 2) {
+              setToastMsg(t('device.max_reached'))
+              return
+            }
+            device.scan()
+          }}
+          onDisconnect={(udid) => { device.disconnect(udid) }}
+          onRestoreOne={async (udid) => {
+            try {
+              await api.restoreSim(udid)
+              setToastMsg(t('status.restore_success'))
+            } catch (e: any) {
+              setToastMsg(e?.message ?? 'restore failed')
+            }
+          }}
+        />
+        {activePage === 'settings' && (
+          <SettingsPage
+            onOpenLogFolder={handleOpenLog}
+            onEnableDeveloperMode={async () => {
+              const target = device.connectedDevice?.udid
+              if (!target) {
+                showToast(t('dev_mode.need_device'))
+                return
+              }
+              try {
+                await api.amfiRevealDeveloperMode(target)
+                showToast(t('dev_mode.reveal_success'))
+                await device.scan()
+              } catch (err: any) {
+                showToast(t('dev_mode.reveal_failed') + (err?.message ? `: ${err.message}` : ''))
+              }
+            }}
+          />
+        )}
+        <div style={{ display: activePage === 'connection' ? 'block' : 'none' }}>
+        <DeviceStatus
+          device={deviceStatusDevice}
+          devices={deviceStatusDevices}
+          isConnected={device.connectedDevice !== null}
+          onScan={handleDeviceScan}
+          onSelect={handleDeviceSelect}
+          onStartWifiTunnel={device.startWifiTunnel}
+          onStopTunnel={device.stopTunnel}
+          tunnelStatus={device.tunnelStatus}
+          tunnels={device.tunnels}
+          pinnedUdids={device.pinnedUdids}
+          onTogglePin={device.togglePin}
+        />
+        </div>
+        <div style={{ display: activePage === 'nav' ? 'block' : 'none' }}>
+        <ControlPanel
+          simMode={sim.mode}
+          moveMode={sim.moveMode}
+          speed={speed}
+          isRunning={isRunning}
+          isPaused={isPaused}
+          currentPosition={currentPos}
+          onModeChange={sim.setMode}
+          onSpeedChange={handleSpeedChange}
+          onMoveModeChange={sim.setMoveMode}
+          customSpeedKmh={sim.customSpeedKmh}
+          onCustomSpeedChange={sim.setCustomSpeedKmh}
+          speedMinKmh={sim.speedMinKmh}
+          onSpeedMinChange={sim.setSpeedMinKmh}
+          speedMaxKmh={sim.speedMaxKmh}
+          onSpeedMaxChange={sim.setSpeedMaxKmh}
+          onStart={handleStart}
+          onStop={handleStop}
+          onPause={handlePause}
+          onResume={handleResume}
+          onRestore={handleRestore}
+          onApplySpeed={handleApplySpeed}
+          waypointProgress={sim.waypointProgress}
+          onTeleport={handleTeleport}
+          onNavigate={handleNavigate}
+          onAddressSelect={handleAddressSelect}
+          bookmarks={panelBookmarks}
+          bookmarkCategories={panelBookmarkCategories}
+          bookmarkCategoryColors={panelBookmarkCategoryColors}
+          onBookmarkClick={handleBookmarkClick}
+          onBookmarkPreview={handleBookmarkPreview}
+          onBookmarkAdd={handleBookmarkAdd}
+          onBookmarkDelete={handleBookmarkDelete}
+          onBookmarkEdit={handleBookmarkEdit}
+          onCategoryAdd={handleCategoryAdd}
+          onCategoryDelete={handleCategoryDelete}
+          onCategoryRename={handleCategoryRename}
+          onCategoryRecolor={handleCategoryRecolor}
+          onCategoryReorder={handleCategoryReorder}
+          onBookmarkReorder={handleBookmarkReorder}
+          onCategoryExportGpx={handleCategoryExportGpx}
+          onCategoriesExportGpxZip={handleCategoriesExportGpxZip}
+          bookmarkShowOnMap={showBookmarkPins}
+          onBookmarkShowOnMapChange={setShowBookmarkPins}
+          onBookmarkImport={handleBookmarkImport}
+          onBookmarkBulkPaste={handleBookmarkBulkPasteOpen}
+          bookmarkExportUrl={api.bookmarksExportUrl()}
+          savedRoutes={panelSavedRoutes}
+          routeCategories={routeCategories}
+          onRouteGpxImport={handleGpxImport}
+          onRouteGpxExport={handleGpxExport}
+          onRoutesImportAll={handleRoutesImportAll}
+          routesExportAllUrl={api.exportAllRoutesUrl()}
+          onRouteRename={handleRouteRename}
+          onRouteDelete={handleRouteDelete}
+          onRoutesBulkDelete={handleRoutesBulkDelete}
+          onRouteMove={handleRouteMove}
+          onRouteLoad={handleRouteLoad}
+          onRouteSave={handleRouteSave}
+          onRouteCategoryAdd={handleRouteCategoryAdd}
+          onRouteCategoryDelete={handleRouteCategoryDelete}
+          onRouteCategoryRename={handleRouteCategoryRename}
+          onRouteCategoryRecolor={handleRouteCategoryRecolor}
+          onRouteCategoryReorder={handleRouteCategoryReorder}
+          onRouteReorder={handleRouteReorder}
+          randomWalkRadius={randomWalkRadius}
+          pauseRandomWalk={sim.pauseRandomWalk}
+          onPauseRandomWalkChange={sim.setPauseRandomWalk}
+          onRandomWalkRadiusChange={setRandomWalkRadius}
+          randomWalkCenterMode={sim.randomWalkCenterMode}
+          onRandomWalkCenterModeChange={sim.setRandomWalkCenterMode}
+          forwardWalk={sim.forwardWalk}
+          onForwardWalkChange={sim.setForwardWalk}
+          goldDittoA={goldDittoA}
+          onGoldDittoAChange={setGoldDittoA}
+          onGoldDittoStart={handleGoldDittoStart}
+          goldDittoBusy={goldDittoBusy}
+          currentWaypointsCount={sim.waypoints.length}
+          loadedRouteName={loadedRouteName}
+          straightLine={sim.straightLine}
+          onStraightLineChange={sim.setStraightLine}
+          keepWaypoints={sim.keepWaypoints}
+          onKeepWaypointsChange={sim.setKeepWaypoints}
+          routeEngine={sim.routeEngine}
+          onRouteEngineChange={sim.setRouteEngine}
+          clickToAddWaypoint={clickToAddWaypoint}
+          onClickToAddWaypointChange={setClickToAddWaypoint}
+          jumpMode={sim.jumpMode}
+          onJumpModeChange={sim.setJumpMode}
+          jumpPreDelay={sim.jumpPreDelay}
+          onJumpPreDelayChange={sim.setJumpPreDelay}
+          jumpPostDelay={sim.jumpPostDelay}
+          onJumpPostDelayChange={sim.setJumpPostDelay}
+          openLibraryToken={openLibraryToken}
+          modeExtraSection={modeExtraSection}
         />
         </div>
 
@@ -2406,7 +1792,7 @@ const App: React.FC = () => {
           showWaypointOption={sim.mode === SimMode.Loop || sim.mode === SimMode.Flower || sim.mode === SimMode.Navigate}
           deviceConnected={device.connectedDevice !== null}
           onShowToast={showToast}
-          userAvatarHtml={avatarToHtml(userAvatar, customPng)}
+          userAvatarHtml={avatar.avatarHtml}
           bookmarkPins={bookmarkPins}
           showBookmarkPins={showBookmarkPins}
           onMapReady={(api) => { mapApiRef.current = api }}
@@ -2430,12 +1816,12 @@ const App: React.FC = () => {
           showBulkPasteOnMap={sim.mode === SimMode.Loop || sim.mode === SimMode.Flower}
           onBulkPasteOpen={() => { setRoutePasteText(''); setRoutePasteOpen(true); }}
         />
-        {avatarPickerOpen && (
+        {avatar.pickerOpen && (
           <UserAvatarPicker
-            avatar={userAvatar}
-            customPng={customPng}
-            onSave={handleAvatarSave}
-            onClose={() => setAvatarPickerOpen(false)}
+            avatar={avatar.userAvatar}
+            customPng={avatar.customPng}
+            onSave={avatar.save}
+            onClose={avatar.closePicker}
             onShowToast={showToast}
           />
         )}
@@ -2909,7 +2295,7 @@ const App: React.FC = () => {
           onToggleCooldown={handleToggleCooldown}
           onRestore={handleRestore}
           onOpenLog={handleOpenLog}
-          onOpenSettings={() => setActivePage('settings')}
+          onOpenSettings={handleOpenSettings}
           dualDevice={device.connectedDevices.length >= 2}
           countryCode={locMeta.countryCode}
           cityName={locMeta.cityName}
@@ -2917,7 +2303,7 @@ const App: React.FC = () => {
           tempC={locMeta.tempC}
           timezoneZone={locMeta.timezoneZone}
           gmtOffsetSeconds={locMeta.gmtOffsetSeconds}
-          onOpenAvatarPicker={() => setAvatarPickerOpen((v) => !v)}
+          onOpenAvatarPicker={avatar.togglePicker}
           onLocatePcFly={handleTeleport}
           onLocatePcPanOnly={handleMapPanOnly}
         />

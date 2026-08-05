@@ -2,6 +2,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 import { getBookmarkUiState, setBookmarkUiState, bookmarkGpxExportUrl } from '../services/api';
+import { useDismissOnOutside } from '../hooks/useDismissOnOutside';
+import { useDragAutoScroll } from '../hooks/useDragAutoScroll';
+import { useMultiSelect } from '../hooks/useMultiSelect';
+import { usePersistedSortMode } from '../hooks/usePersistedSortMode';
+import { useReorderMode, moveInArray } from '../hooks/useReorderMode';
+import { CategoryManagerPanel } from './list/CategoryManagerPanel';
+import { ListSearchBox } from './list/ListSearchBox';
+import { MultiSelectBar } from './list/MultiSelectBar';
+import { SortModeSelect } from './list/SortModeSelect';
+import { ctxItemStyle, ctxHighlight, ctxUnhighlight } from './list/contextMenu';
 
 const AUTO_COLLAPSE_THRESHOLD = 30;
 
@@ -66,14 +76,6 @@ interface BookmarkListProps {
   exportUrl?: string;
 }
 
-// Preset palette for the color picker. Covers warm + cool + neutral so every
-// category can find a visually distinct slot.
-const COLOR_PALETTE = [
-  '#ef4444', '#f97316', '#eab308', '#22c55e',
-  '#14b8a6', '#3b82f6', '#6366f1', '#a855f7',
-  '#ec4899', '#64748b',
-];
-
 const CATEGORY_COLORS: Record<string, string> = {
   Default: '#4285f4',
   Home: '#4caf50',
@@ -125,8 +127,6 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
     if (stored) return stored;
     return getCategoryColor(name);
   };
-  // Name of the category whose dot is currently being recolored (shows popover).
-  const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
   const t = useT();
   // Backend may store the built-in default category as the Chinese '預設'.
   // Translate at render time so EN users see "Default" without touching storage.
@@ -141,9 +141,6 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   const [newName, setNewName] = useState('');
   const [newCategory, setNewCategory] = useState(categories[0] || 'Default');
   const [showCategoryMgr, setShowCategoryMgr] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [editingCategory, setEditingCategory] = useState<string | null>(null);
-  const [editCategoryName, setEditCategoryName] = useState('');
   // Split "24.14, 120.65" (or tab/whitespace) into [lat, lng] so a user can
   // paste a Google-Maps-style pair into just the lat field instead of
   // splitting it themselves.
@@ -172,48 +169,17 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   const [customLng, setCustomLng] = useState('');
   const [customCategory, setCustomCategory] = useState(categories[0] || 'Default');
   const [search, setSearch] = useState('');
-  // Reorder mode: when on, each category header in the manager panel and each
-  // bookmark row inside its category shows up/down arrows + a drag handle that
-  // persist a new order back to the backend. Off by default — must opt in.
-  const [reorderMode, setReorderMode] = useState(false);
-  // Saved sort mode from before entering reorder mode. Reorder mode forces
-  // 'default' so the arrows / drag results match the displayed order; we
-  // restore the previous sort when the user exits.
-  const sortBeforeReorderRef = useRef<SortMode | null>(null);
-  // Drag-and-drop state for in-list reordering. We track the dragged id so we
-  // can highlight it (lower opacity), and the hover target so we can draw a
-  // drop indicator line. Categories and bookmarks have separate slots so a
-  // category drag doesn't reach into the bookmark list.
-  const [draggedBmId, setDraggedBmId] = useState<string | null>(null);
-  const [dragOverBmId, setDragOverBmId] = useState<string | null>(null);
-  const [dragCatName, setDragCatName] = useState<string | null>(null);
-  const [draggedCatName, setDraggedCatName] = useState<string | null>(null);
-  const [dragOverCatName, setDragOverCatName] = useState<string | null>(null);
   // Multi-select mode: tick rows and batch-delete. When active, row clicks
   // toggle selection instead of teleporting.
-  const [multiSelect, setMultiSelect] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const toggleSelected = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-  const exitMultiSelect = () => {
-    setMultiSelect(false);
-    setSelectedIds(new Set());
-  };
-  const handleBulkDelete = async () => {
-    if (selectedIds.size === 0) return;
-    const msg = t('bm.delete_confirm').replace('{n}', String(selectedIds.size));
-    if (!window.confirm(msg)) return;
-    const ids = Array.from(selectedIds);
-    await Promise.all(ids.map((id) => {
+  const {
+    multiSelect, setMultiSelect, selectedIds, setSelectedIds,
+    toggleSelected, exitMultiSelect, handleBulkDelete,
+  } = useMultiSelect({
+    confirmMessage: (n) => t('bm.delete_confirm').replace('{n}', String(n)),
+    deleteIds: (ids) => Promise.all(ids.map((id) => {
       try { return Promise.resolve(onBookmarkDelete(id)); } catch { return Promise.resolve(); }
-    }));
-    exitMultiSelect();
-  };
+    })),
+  });
   // "Click also flies GPS" toggle persisted in localStorage so the choice
   // survives restart. Default true = legacy behavior (clicking a bookmark
   // teleports iPhone). When false, click only pans the map view (preview).
@@ -231,17 +197,11 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
 
   // Sort mode persisted in localStorage so it survives restart.
   type SortMode = 'default' | 'name' | 'date_added' | 'last_used';
-  const [sortMode, setSortModeRaw] = useState<SortMode>(() => {
-    try {
-      const v = localStorage.getItem('locwarp.bookmark_sort') as SortMode | null;
-      if (v === 'default' || v === 'name' || v === 'date_added' || v === 'last_used') return v;
-    } catch { /* ignore */ }
-    return 'default';
-  });
-  const setSortMode = (m: SortMode) => {
-    setSortModeRaw(m);
-    try { localStorage.setItem('locwarp.bookmark_sort', m); } catch { /* ignore */ }
-  };
+  const [sortMode, setSortMode] = usePersistedSortMode<SortMode>(
+    'locwarp.bookmark_sort',
+    ['default', 'name', 'date_added', 'last_used'],
+    'default',
+  );
 
   const sortBookmarks = (list: Bookmark[]): Bookmark[] => {
     if (sortMode === 'default') return list;
@@ -256,79 +216,12 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
     return copy;
   };
 
-  // Close the context menu on ESC, or on any click / right-click that
-  // isn't on the menu itself. Uses pointerdown so it fires before React
-  // click handlers inside the menu.
-  useEffect(() => {
-    if (!contextMenu) return;
-    const onOutside = (e: Event) => {
-      const target = e.target as Element | null;
-      if (target && target.closest?.('[data-bookmark-context-menu]')) return;
-      setContextMenu(null);
-    };
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setContextMenu(null);
-    };
-    // Register on the next tick so the opening right-click's bubbling
-    // doesn't dismiss the menu the moment we render it.
-    const id = setTimeout(() => {
-      document.addEventListener('pointerdown', onOutside);
-      document.addEventListener('contextmenu', onOutside);
-      document.addEventListener('keydown', onEsc);
-    }, 0);
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener('pointerdown', onOutside);
-      document.removeEventListener('contextmenu', onOutside);
-      document.removeEventListener('keydown', onEsc);
-    };
-  }, [contextMenu]);
-
-  // Close the category right-click menu on ESC or any outside click.
-  useEffect(() => {
-    if (!catContextMenu) return;
-    const onOutside = (e: Event) => {
-      const target = e.target as Element | null;
-      if (target && target.closest?.('[data-bookmark-context-menu]')) return;
-      setCatContextMenu(null);
-    };
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setCatContextMenu(null);
-    };
-    const id = setTimeout(() => {
-      document.addEventListener('pointerdown', onOutside);
-      document.addEventListener('contextmenu', onOutside);
-      document.addEventListener('keydown', onEsc);
-    }, 0);
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener('pointerdown', onOutside);
-      document.removeEventListener('contextmenu', onOutside);
-      document.removeEventListener('keydown', onEsc);
-    };
-  }, [catContextMenu]);
-
-  // Dismiss the category color picker on outside click / ESC.
-  useEffect(() => {
-    if (!colorPickerFor) return;
-    const onOutside = (e: Event) => {
-      const t = e.target as Element | null;
-      if (t && t.closest?.('[data-category-color-picker]')) return;
-      setColorPickerFor(null);
-    };
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setColorPickerFor(null);
-    };
-    const id = setTimeout(() => {
-      document.addEventListener('pointerdown', onOutside);
-      document.addEventListener('keydown', onEsc);
-    }, 0);
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener('pointerdown', onOutside);
-      document.removeEventListener('keydown', onEsc);
-    };
-  }, [colorPickerFor]);
+  // Close the context menus on ESC, or on any click / right-click that
+  // isn't on the menu itself.
+  useDismissOnOutside(contextMenu, '[data-bookmark-context-menu]',
+    () => setContextMenu(null), { closeOnContextMenu: true });
+  useDismissOnOutside(catContextMenu, '[data-bookmark-context-menu]',
+    () => setCatContextMenu(null), { closeOnContextMenu: true });
 
   // Collapse state is persisted in ~/.locwarp/settings.json via the
   // /api/bookmarks/ui-state endpoint. The rule, designed so "paste a lot
@@ -475,33 +368,23 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
     bookmarksByCategory['Uncategorized'] = uncategorized;
   }
 
-  // Reorder mode only makes sense when sorted by the underlying 'default' order
-  // (other sort modes would re-rank items and the arrows / drag would feel
-  // broken). Entering reorder mode therefore forces sort to 'default' and we
-  // restore the user's previous sort on exit.
-  const enterReorderMode = () => {
-    if (sortMode !== 'default') {
-      sortBeforeReorderRef.current = sortMode;
-      setSortMode('default');
-    } else {
-      sortBeforeReorderRef.current = null;
-    }
-    if (multiSelect) exitMultiSelect();
-    setReorderMode(true);
-  };
-  const exitReorderMode = () => {
-    setReorderMode(false);
-    setDraggedBmId(null);
-    setDragOverBmId(null);
-    setDragCatName(null);
-    setDraggedCatName(null);
-    setDragOverCatName(null);
-    const prev = sortBeforeReorderRef.current;
-    if (prev && prev !== 'default') {
-      setSortMode(prev);
-    }
-    sortBeforeReorderRef.current = null;
-  };
+  // Reorder mode: when on, each category header and each bookmark row inside
+  // its category shows a drag handle that persists a new order back to the
+  // backend. Off by default — must opt in. Entering forces sort to 'default'
+  // (restored on exit) and closes multi-select (mutually exclusive panels).
+  const {
+    reorderMode, enterReorderMode, exitReorderMode,
+    draggedItemId: draggedBmId, setDraggedItemId: setDraggedBmId,
+    dragOverItemId: dragOverBmId, setDragOverItemId: setDragOverBmId,
+    dragItemCat: dragCatName, setDragItemCat: setDragCatName,
+    draggedCatKey: draggedCatName, setDraggedCatKey: setDraggedCatName,
+    dragOverCatKey: dragOverCatName, setDragOverCatKey: setDragOverCatName,
+  } = useReorderMode<SortMode>({
+    sortMode,
+    setSortMode,
+    defaultMode: 'default',
+    onEnter: () => { if (multiSelect) exitMultiSelect(); },
+  });
   const reorderAvailable = reorderMode;
   // Reorder via drag-and-drop. Drop ONTO target = the dragged item takes the
   // target's display position; everything between them shifts to fill the gap.
@@ -511,9 +394,7 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
     const srcIdx = list.findIndex((b) => b.id === srcId);
     const dstIdx = list.findIndex((b) => b.id === dstId);
     if (srcIdx < 0 || dstIdx < 0) return;
-    const arr = [...list];
-    const [moved] = arr.splice(srcIdx, 1);
-    arr.splice(dstIdx, 0, moved);
+    const arr = moveInArray(list, srcIdx, dstIdx);
     onBookmarkReorder(cat, arr.map((b) => b.id || '').filter(Boolean));
   };
   const dropCategoryOn = (srcCat: string, dstCat: string) => {
@@ -521,58 +402,12 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
     const srcIdx = categories.indexOf(srcCat);
     const dstIdx = categories.indexOf(dstCat);
     if (srcIdx < 0 || dstIdx < 0) return;
-    const arr = [...categories];
-    const [moved] = arr.splice(srcIdx, 1);
-    arr.splice(dstIdx, 0, moved);
-    onCategoryReorder(arr);
+    onCategoryReorder(moveInArray(categories, srcIdx, dstIdx));
   };
 
   // Auto-scroll the surrounding scrollable container while a drag is in
-  // progress: HTML5 native DnD's built-in edge-scroll is sluggish and barely
-  // triggers on long lists, so we drive it from a rAF loop ourselves. Wheel
-  // events keep working as normal (Chromium delivers them through dragover).
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const dragCursorYRef = useRef(0);
-  useEffect(() => {
-    const dragging = !!(draggedBmId || draggedCatName);
-    if (!dragging) return;
-    let scroller: HTMLElement | null = wrapRef.current?.parentElement ?? null;
-    while (scroller) {
-      const cs = getComputedStyle(scroller);
-      const scrollable = (cs.overflowY === 'auto' || cs.overflowY === 'scroll')
-        && scroller.scrollHeight > scroller.clientHeight + 1;
-      if (scrollable) break;
-      scroller = scroller.parentElement;
-    }
-    if (!scroller) return;
-    const onDragOver = (e: DragEvent) => {
-      dragCursorYRef.current = e.clientY;
-    };
-    window.addEventListener('dragover', onDragOver);
-    const EDGE = 80;
-    const MAX_SPEED = 18;
-    let raf = 0;
-    const tick = () => {
-      const el = scroller!;
-      const r = el.getBoundingClientRect();
-      const y = dragCursorYRef.current;
-      if (y > 0) {
-        const fromTop = y - r.top;
-        const fromBottom = r.bottom - y;
-        if (fromTop >= 0 && fromTop < EDGE) {
-          el.scrollTop -= MAX_SPEED * (1 - fromTop / EDGE);
-        } else if (fromBottom >= 0 && fromBottom < EDGE) {
-          el.scrollTop += MAX_SPEED * (1 - fromBottom / EDGE);
-        }
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('dragover', onDragOver);
-    };
-  }, [draggedBmId, draggedCatName]);
+  // progress (rAF-driven edge scroll — see useDragAutoScroll).
+  const wrapRef = useDragAutoScroll(!!(draggedBmId || draggedCatName));
 
   return (
     <div ref={wrapRef}>
@@ -748,35 +583,11 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
         borderBottom: '1px solid rgba(108, 140, 255, 0.08)',
         marginBottom: 8,
       }}>
-        <div style={{ position: 'relative' }}>
-        <svg
-          width="12" height="12" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="2"
-          style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', opacity: 0.4, pointerEvents: 'none' }}
-        >
-          <circle cx="11" cy="11" r="8" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
-        <input
-          type="text"
-          className="search-input"
-          placeholder={t('bm.search_placeholder')}
+        <ListSearchBox
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ width: '100%', paddingLeft: 26, paddingRight: search ? 24 : 8, fontSize: 12 }}
+          onChange={setSearch}
+          placeholder={t('bm.search_placeholder')}
         />
-        {search && (
-          <button
-            onClick={() => setSearch('')}
-            title={t('bm.search_clear')}
-            style={{
-              position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
-              background: 'none', border: 'none', color: '#bbb',
-              cursor: 'pointer', padding: '2px 6px', fontSize: 14, lineHeight: 1,
-            }}
-          >×</button>
-        )}
-        </div>
       </div>
 
       {/* Show-all-on-map toggle */}
@@ -815,25 +626,17 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
       )}
 
       {/* Sort control — choose how the bookmark list is ordered. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: 11, color: '#bbb' }}>
-        <span style={{ opacity: 0.7 }}>{t('bm.sort_label')}</span>
-        <select
-          value={sortMode}
-          onChange={(e) => setSortMode(e.target.value as SortMode)}
-          style={{
-            flex: 1, background: '#1e1e22', color: '#e0e0e0',
-            border: '1px solid rgba(255,255,255,0.12)', borderRadius: 4,
-            padding: '3px 6px', fontSize: 11,
-          }}
-        >
-          {/* Explicit inline colors so the popup list is readable on
-              Windows native select dropdown (which defaults to white bg). */}
-          <option value="default" style={{ background: '#1e1e22', color: '#e0e0e0' }}>{t('bm.sort_default')}</option>
-          <option value="name" style={{ background: '#1e1e22', color: '#e0e0e0' }}>{t('bm.sort_name')}</option>
-          <option value="date_added" style={{ background: '#1e1e22', color: '#e0e0e0' }}>{t('bm.sort_date_added')}</option>
-          <option value="last_used" style={{ background: '#1e1e22', color: '#e0e0e0' }}>{t('bm.sort_last_used')}</option>
-        </select>
-      </div>
+      <SortModeSelect
+        value={sortMode}
+        onChange={setSortMode}
+        style={{ marginTop: 8 }}
+        options={[
+          { value: 'default', label: t('bm.sort_default') },
+          { value: 'name', label: t('bm.sort_name') },
+          { value: 'date_added', label: t('bm.sort_date_added') },
+          { value: 'last_used', label: t('bm.sort_last_used') },
+        ]}
+      />
 
       {/* Add bookmark dialog */}
       {showAddDialog && (
@@ -893,198 +696,21 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
       )}
 
       {/* Category manager */}
-      {showCategoryMgr && (
-        <div
-          style={{
-            background: '#2a2a2e',
-            border: '1px solid #444',
-            borderRadius: 6,
-            padding: 12,
-            marginBottom: 8,
-          }}
-        >
-          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6, opacity: 0.7 }}>
-            {t('bm.manage_categories')}
-          </div>
-          {categories.map((cat) => (
-            <div
-              key={cat}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '4px 0',
-                fontSize: 12,
-                position: 'relative',
-              }}
-            >
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!onCategoryRecolor) return;
-                  setColorPickerFor((prev) => (prev === cat ? null : cat));
-                }}
-                title={t('bm.recolor_tooltip')}
-                style={{
-                  width: 14,
-                  height: 14,
-                  borderRadius: '50%',
-                  background: resolveColor(cat),
-                  border: '1.5px solid rgba(255,255,255,0.15)',
-                  padding: 0,
-                  cursor: onCategoryRecolor ? 'pointer' : 'default',
-                  flexShrink: 0,
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.3)',
-                }}
-              />
-              {colorPickerFor === cat && onCategoryRecolor && (
-                <div
-                  data-category-color-picker
-                  onClick={(e) => e.stopPropagation()}
-                  style={{
-                    position: 'absolute',
-                    top: 22, left: 0, zIndex: 50,
-                    background: '#1e1e22',
-                    border: '1px solid rgba(255,255,255,0.15)',
-                    borderRadius: 6,
-                    padding: 6,
-                    boxShadow: '0 6px 18px rgba(0,0,0,0.5)',
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(5, 22px)',
-                    gap: 4,
-                  }}
-                >
-                  {COLOR_PALETTE.map((c) => {
-                    const selected = resolveColor(cat).toLowerCase() === c.toLowerCase();
-                    return (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onCategoryRecolor(cat, c);
-                          setColorPickerFor(null);
-                        }}
-                        style={{
-                          width: 22, height: 22, borderRadius: '50%',
-                          background: c,
-                          border: selected
-                            ? '2px solid #fff'
-                            : '1.5px solid rgba(255,255,255,0.12)',
-                          cursor: 'pointer', padding: 0,
-                          transition: 'transform 0.1s',
-                        }}
-                        title={c}
-                      />
-                    );
-                  })}
-                  <input
-                    type="color"
-                    value={resolveColor(cat)}
-                    onChange={(e) => onCategoryRecolor(cat, e.target.value)}
-                    title={t('bm.recolor_custom')}
-                    style={{
-                      gridColumn: '1 / span 5',
-                      width: '100%', height: 22,
-                      border: '1px solid rgba(255,255,255,0.12)',
-                      borderRadius: 4, padding: 0, marginTop: 2,
-                      background: '#1e1e22',
-                      cursor: 'pointer',
-                    }}
-                  />
-                </div>
-              )}
-              {editingCategory === cat ? (
-                <input
-                  type="text"
-                  className="search-input"
-                  autoFocus
-                  value={editCategoryName}
-                  onChange={(e) => setEditCategoryName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const next = editCategoryName.trim();
-                      if (next && next !== cat && onCategoryRename) onCategoryRename(cat, next);
-                      setEditingCategory(null);
-                    }
-                    if (e.key === 'Escape') setEditingCategory(null);
-                  }}
-                  onBlur={() => setEditingCategory(null)}
-                  style={{ flex: 1, padding: '2px 4px', fontSize: 12 }}
-                />
-              ) : (
-                <span style={{ flex: 1 }}>{displayCat(cat)}</span>
-              )}
-              {cat !== 'Default' && cat !== '預設' && onCategoryRename && editingCategory !== cat && (
-                <button
-                  onClick={() => { setEditingCategory(cat); setEditCategoryName(cat); }}
-                  title={t('bm.rename_category')}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--fg-muted, #888)',
-                    cursor: 'pointer',
-                    padding: '2px 4px',
-                    fontSize: 11,
-                  }}
-                >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                    <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </svg>
-                </button>
-              )}
-              {cat !== 'Default' && cat !== '預設' && (
-                <button
-                  onClick={() => onCategoryDelete(cat)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#f44336',
-                    cursor: 'pointer',
-                    padding: '2px 4px',
-                    fontSize: 11,
-                  }}
-                >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          ))}
-          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-            <input
-              type="text"
-              className="search-input"
-              placeholder={t('bm.add_category')}
-              value={newCategoryName}
-              onChange={(e) => setNewCategoryName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && newCategoryName.trim()) {
-                  onCategoryAdd(newCategoryName.trim());
-                  setNewCategoryName('');
-                }
-              }}
-              style={{ flex: 1 }}
-            />
-            <button
-              className="action-btn"
-              onClick={() => {
-                if (newCategoryName.trim()) {
-                  onCategoryAdd(newCategoryName.trim());
-                  setNewCategoryName('');
-                }
-              }}
-              style={{ fontSize: 11 }}
-            >
-              {t('bm.new_category')}
-            </button>
-          </div>
-        </div>
-      )}
+      <CategoryManagerPanel
+        open={showCategoryMgr}
+        title={t('bm.manage_categories')}
+        categories={categories.map((cat) => ({
+          key: cat,
+          name: cat,
+          displayName: displayCat(cat),
+          color: resolveColor(cat),
+          canEdit: cat !== 'Default' && cat !== '預設',
+        }))}
+        onAdd={onCategoryAdd}
+        onDelete={onCategoryDelete}
+        onRename={onCategoryRename}
+        onRecolor={onCategoryRecolor}
+      />
 
       {/* Search mode: flat filtered list, no category grouping */}
       {search.trim() !== '' && (() => {
@@ -1451,54 +1077,13 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
           so the user can scroll through the list unchecking items to
           keep, then hit Delete without scrolling back up. */}
       {multiSelect && (
-        <div
-          style={{
-            position: 'sticky',
-            bottom: -12, zIndex: 10,
-            marginLeft: -12, marginRight: -12,
-            marginTop: 16,
-            padding: '8px 12px',
-            background: 'rgba(26, 29, 39, 0.98)',
-            backdropFilter: 'blur(6px)',
-            borderTop: '1px solid rgba(108,140,255,0.35)',
-            boxShadow: '0 -6px 12px rgba(0,0,0,0.35)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
-            <button
-              className="action-btn"
-              onClick={() => {
-                const allIds = bookmarks.map((b) => b.id).filter((x): x is string => !!x);
-                if (selectedIds.size === allIds.length) {
-                  setSelectedIds(new Set());
-                } else {
-                  setSelectedIds(new Set(allIds));
-                }
-              }}
-              style={{ padding: '3px 8px', fontSize: 11 }}
-            >
-              {selectedIds.size === bookmarks.length && bookmarks.length > 0
-                ? t('bm.deselect_all')
-                : t('bm.select_all')}
-            </button>
-            <span style={{ opacity: 0.7, marginLeft: 'auto' }}>
-              {selectedIds.size} / {bookmarks.length}
-            </span>
-            <button
-              className="action-btn"
-              onClick={handleBulkDelete}
-              disabled={selectedIds.size === 0}
-              style={{
-                padding: '3px 10px', fontSize: 11, fontWeight: 600,
-                color: selectedIds.size === 0 ? '#888' : '#ff6b6b',
-                borderColor: selectedIds.size === 0 ? undefined : 'rgba(255,107,107,0.4)',
-                cursor: selectedIds.size === 0 ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {t('bm.delete_selected').replace('{n}', String(selectedIds.size))}
-            </button>
-          </div>
-        </div>
+        <MultiSelectBar
+          allIds={bookmarks.map((b) => b.id).filter((x): x is string => !!x)}
+          totalCount={bookmarks.length}
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
+          onBulkDelete={handleBulkDelete}
+        />
       )}
 
       {/* Context menu (dismissed via document click listener — see useEffect) */}
@@ -1972,21 +1557,6 @@ const BookmarkList: React.FC<BookmarkListProps> = ({
   );
 };
 
-const ctxItemStyle: React.CSSProperties = {
-  padding: '6px 12px',
-  cursor: 'pointer',
-  fontSize: 12,
-  display: 'flex',
-  alignItems: 'center',
-  color: '#e0e0e0',
-  transition: 'background 0.15s',
-};
-
-function ctxHighlight(e: React.MouseEvent<HTMLDivElement>) {
-  (e.currentTarget as HTMLDivElement).style.background = '#3a3a3e';
-}
-function ctxUnhighlight(e: React.MouseEvent<HTMLDivElement>) {
-  (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-}
-
-export default BookmarkList;
+// Memoized: the host tree re-renders on every WS position tick; the list
+// only needs to re-render when one of its own props actually changed.
+export default React.memo(BookmarkList);
