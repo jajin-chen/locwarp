@@ -87,7 +87,7 @@ async def set_provider_pref(pref: ProviderPref):
 
 @router.get("/timezone", response_model=TimezoneInfo | None)
 async def timezone_lookup(lat: float, lng: float):
-    """Return IANA timezone + UTC offset for a coordinate (TimezoneDB)."""
+    """Return IANA timezone + UTC offset for a coordinate (offline lookup)."""
     return await get_timezone(lat, lng)
 
 

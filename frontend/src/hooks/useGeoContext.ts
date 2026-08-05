@@ -24,7 +24,7 @@ export interface LocMeta {
 // but GATED so it only fires on discrete user-initiated moves (teleport,
 // bookmark tap, manual coord entry). During active navigate / loop /
 // multi-stop / random-walk the simulation engine emits a position update
-// every tick, which used to spam Nominatim + TimezoneDB every second and
+// every tick, which used to spam Nominatim + the timezone lookup every second and
 // contend with the USB DVT channel — contributed to users seeing random
 // walk 'freeze' (see backend log 2026-04-16 user report).
 //
@@ -64,7 +64,7 @@ export function useGeoContext(
     let cancelled = false
     const tid = setTimeout(() => {
       lastLookedUpPosRef.current = { lat: pos.lat, lng: pos.lng }
-      // Three independent services (Nominatim, TimezoneDB, Open-Meteo).
+      // Three independent lookups (Nominatim, backend offline timezone, Open-Meteo).
       // Fire in parallel so one outage doesn't freeze the other two for
       // a 10s timeout each time the position changes.
       void api.reverseGeocode(pos.lat, pos.lng).then((geoRes: any) => {

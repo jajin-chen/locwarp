@@ -1,6 +1,6 @@
 """Extra geo services wired up in v0.2.22+.
 
-- Timezone (TimezoneDB)
+- Timezone (offline: tzfpy + zoneinfo, replaced TimezoneDB)
 - Photon search / reverse (komoot's OSM geocoder, fallback to Nominatim)
 - Overpass 'nearby POI' lookup
 - OSRM table-based multi-stop waypoint optimization
@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import logging
 import math
-import os
+from datetime import datetime
 from itertools import permutations
+from zoneinfo import ZoneInfo
 
 import httpx
+from tzfpy import get_tz as tzfpy_get_tz
 
 from config import APP_VERSION, OSRM_BASE_URL
 from models.schemas import (
@@ -27,30 +29,27 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
-# ── TimezoneDB ────────────────────────────────────────────
-
-TIMEZONEDB_KEY = os.environ.get("LOCWARP_TIMEZONEDB_KEY", "7JDL6A118RWJ")
-TIMEZONEDB_URL = "https://api.timezonedb.com/v2.1/get-time-zone"
+# ── Timezone (offline: tzfpy polygon lookup + zoneinfo) ───
 
 
 async def get_timezone(lat: float, lng: float) -> TimezoneInfo | None:
-    params = {"key": TIMEZONEDB_KEY, "format": "json", "by": "position", "lat": lat, "lng": lng}
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.get(TIMEZONEDB_URL, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-        if data.get("status") != "OK":
-            logger.info("TimezoneDB returned non-OK: %s", data.get("message"))
+        zone = tzfpy_get_tz(lng, lat)  # tzfpy takes (lng, lat) order
+        if not zone:
             return None
+        now = datetime.now(ZoneInfo(zone))
+        offset = now.utcoffset()
+        offset_seconds = int(offset.total_seconds()) if offset is not None else 0
         return TimezoneInfo(
-            zone=data.get("zoneName", ""),
-            gmt_offset_seconds=int(data.get("gmtOffset", 0)),
-            abbreviation=data.get("abbreviation", ""),
-            timestamp=int(data.get("timestamp", 0)),
+            zone=zone,
+            gmt_offset_seconds=offset_seconds,
+            # Matches the old TimezoneDB payload: abbreviation like 'CST'/'EDT',
+            # timestamp shifted to the zone's current wall time.
+            abbreviation=now.tzname() or "",
+            timestamp=int(now.timestamp()) + offset_seconds,
         )
-    except httpx.HTTPError as e:
-        logger.warning("TimezoneDB request failed: %s", e)
+    except Exception:
+        logger.warning("Offline timezone lookup failed for (%s, %s)", lat, lng, exc_info=True)
         return None
 
 

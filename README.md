@@ -277,8 +277,9 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 | [websockets](https://websockets.readthedocs.io/) | 16+ | 即時位置/狀態推播給前端 |
 | [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) | 10.1+ | iOS 裝置協議(DVT / RemoteServices / lockdown / LegacyLocationService) |
 | [pydantic](https://docs.pydantic.dev/) | 2.13+ | 資料驗證(schemas) |
-| [httpx](https://www.python-httpx.org/) | 0.27+ | OSRM / OSRM FOSSGIS / Valhalla / BRouter / Nominatim / TimezoneDB HTTP 呼叫 |
+| [httpx](https://www.python-httpx.org/) | 0.27+ | OSRM / OSRM FOSSGIS / Valhalla / BRouter / Nominatim HTTP 呼叫 |
 | [gpxpy](https://github.com/tkrajina/gpxpy) | 1.6+ | GPX 路線解析 |
+| [tzfpy](https://github.com/ringsaturn/tzfpy) | 1.3+ | 座標 → IANA 時區,純離線查詢(取代 TimezoneDB,不需 API Key 與網路) |
 
 ### WiFi Tunnel(整合於 backend,iOS 17+ only)
 
@@ -299,7 +300,6 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 | [Photon (komoot)](https://photon.komoot.io/) | backend | 地址搜尋第二供應商(v0.2.149+),模糊搜尋 / 容錯字比 Nominatim 強 | 否 |
 | [Google Geocoding API](https://developers.google.com/maps/documentation/geocoding) | backend | 地址搜尋備援來源(可選,免費 10K req/月);使用者於設定輸入自己的 API Key | 是(使用者自備) |
 | [Open-Meteo](https://open-meteo.com/) | **frontend(直連)** | 虛擬位置當地天氣(氣溫 + WMO weather_code);每個用戶自己 IP 各自 10000 req/day | 否 |
-| [TimezoneDB](https://timezonedb.com/) | backend | 座標 → 時區 + GMT 偏移,跨時區 toast 提醒 | 是(內建 Key) |
 | [flagcdn.com](https://flagcdn.com/) | frontend | 國旗 PNG(`w20/{cc}.png`、`w40/{cc}.png`) | 否 |
 | [CartoDB Voyager](https://carto.com/) | frontend tile | 地圖底圖(OSM 資料,免費授權) | 否 |
 | [ESRI World Imagery](https://www.esri.com/) | frontend tile | 衛星圖層(圖層切換) | 否 |
