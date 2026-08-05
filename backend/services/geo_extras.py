@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from itertools import permutations
 
 import httpx
 
-from config import OSRM_BASE_URL
+from config import APP_VERSION, OSRM_BASE_URL
 from models.schemas import (
     Coordinate,
     GeocodingResult,
@@ -28,7 +29,7 @@ _TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
 # ── TimezoneDB ────────────────────────────────────────────
 
-TIMEZONEDB_KEY = "7JDL6A118RWJ"
+TIMEZONEDB_KEY = os.environ.get("LOCWARP_TIMEZONEDB_KEY", "7JDL6A118RWJ")
 TIMEZONEDB_URL = "https://api.timezonedb.com/v2.1/get-time-zone"
 
 
@@ -167,7 +168,7 @@ _OVERPASS_HEADERS = {
     # Overpass enforces User-Agent identification; some mirrors return 406
     # to anonymous clients (the python-httpx default UA gets caught up in
     # bot filters). Mirror what other OSM clients send.
-    "User-Agent": "LocWarp/0.2.77 (https://github.com/keezxc1223/locwarp)",
+    "User-Agent": f"LocWarp/{APP_VERSION} (https://github.com/keezxc1223/locwarp)",
     "Accept": "application/json",
 }
 
