@@ -95,31 +95,78 @@ async def _scan_ports_for_ip(
     return hits
 
 
-async def _browse_mdns() -> list[dict]:
-    """mDNS / Bonjour RemotePairing broadcast → candidate dicts."""
-    from pymobiledevice3.bonjour import browse_remotepairing
+REMOTEPAIRING_SERVICE = "_remotepairing._tcp.local."
+_MDNS_BROWSE_SECONDS = 3.0
+
+
+def _mdns_entries_to_candidates(infos) -> list[dict]:
+    """zeroconf ServiceInfo objects → candidate dicts (IPv4 preferred)."""
+    from zeroconf import IPVersion
 
     results: list[dict] = []
-    instances = await browse_remotepairing(timeout=3.0)
-    for inst in instances:
-        raw_addrs = inst.addresses or []
-        str_addrs: list[str] = []
-        for a in raw_addrs:
-            if hasattr(a, "ip"):
-                str_addrs.append(str(a.ip))
-            else:
-                str_addrs.append(str(a))
-        ipv4s = [s for s in str_addrs if ":" not in s]
-        addrs = ipv4s if ipv4s else str_addrs
+    for info in infos:
+        port = getattr(info, "port", None)
+        if not port:
+            continue
+        addrs = info.parsed_scoped_addresses(version=IPVersion.V4Only)
+        if not addrs:
+            addrs = info.parsed_scoped_addresses(version=IPVersion.V6Only)
+        if not addrs:
+            continue
+        server = getattr(info, "server", None) or ""
+        host = server[:-1] if server.endswith(".") else server
         for addr in addrs:
             results.append({
                 "ip": addr,
-                "port": inst.port,
-                "host": inst.host,
-                "name": inst.instance or inst.host,
+                "port": int(port),
+                "host": host,
+                "name": getattr(info, "name", None) or host,
                 "method": "mdns",
             })
     return results
+
+
+async def _browse_mdns() -> list[dict]:
+    """mDNS / Bonjour RemotePairing broadcast → candidate dicts.
+
+    Uses zeroconf rather than pymobiledevice3's bonjour helper. Since
+    pymobiledevice3 10.2 that helper is a hand-rolled raw-socket
+    implementation whose IPv4 multicast join passes INADDR_ANY; on Windows
+    that binds the group to a single OS-chosen interface, which loses to a
+    virtual adapter (Docker/WSL/Hyper-V) on multi-NIC machines. It then
+    silently returns zero instances forever and every discovery cycle pays
+    the ~11s subnet-scan fallback instead. zeroconf joins the group on every
+    interface explicitly, so it sees the phones. zeroconf is already a
+    dependency (services/follow_discovery.py advertises through it).
+    """
+    from zeroconf import ServiceStateChange
+    from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
+
+    found: dict[str, None] = {}
+
+    def _on_change(zeroconf, service_type, name, state_change) -> None:
+        if state_change is ServiceStateChange.Added:
+            found[name] = None
+
+    azc = AsyncZeroconf()
+    try:
+        browser = AsyncServiceBrowser(
+            azc.zeroconf, REMOTEPAIRING_SERVICE, handlers=[_on_change],
+        )
+        try:
+            await asyncio.sleep(_MDNS_BROWSE_SECONDS)
+        finally:
+            await browser.async_cancel()
+
+        infos = []
+        for name in found:
+            info = AsyncServiceInfo(REMOTEPAIRING_SERVICE, name)
+            if await info.async_request(azc.zeroconf, 2000):
+                infos.append(info)
+    finally:
+        await azc.async_close()
+
+    return _mdns_entries_to_candidates(infos)
 
 
 async def discover_tunnel_candidates(
@@ -169,12 +216,15 @@ async def discover_tunnel_candidates(
 
                 scan_results = await asyncio.gather(*[_scan_one(ip) for ip in candidates])
                 for ip, ports in scan_results:
-                    if not ports:
-                        continue
-                    results.append({
-                        "ip": ip, "port": ports[0], "host": ip,
-                        "name": ip, "method": "tcp_scan",
-                    })
+                    # Keep EVERY open port. RemotePairing binds one port from
+                    # the dynamic range and iOS usually has other high ports
+                    # open, so the lowest hit is often wrong — dropping the
+                    # rest cost a 10s tunnel timeout per miss.
+                    for p in ports:
+                        results.append({
+                            "ip": ip, "port": p, "host": ip,
+                            "name": ip, "method": "tcp_scan",
+                        })
         except Exception as e:
             logger.warning("Smart fallback scan failed: %s", e)
 

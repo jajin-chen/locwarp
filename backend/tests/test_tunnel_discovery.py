@@ -1,6 +1,60 @@
 """Tests for services.tunnel_discovery."""
 
-from services.tunnel_discovery import discover_tunnel_candidates, find_fallback_endpoints
+from services.tunnel_discovery import (
+    _mdns_entries_to_candidates,
+    discover_tunnel_candidates,
+    find_fallback_endpoints,
+)
+
+
+class _FakeServiceInfo:
+    """Stand-in for zeroconf.ServiceInfo (only the bits we consume)."""
+
+    def __init__(self, name, server, port, v4, v6=()):
+        self.name = name
+        self.server = server
+        self.port = port
+        self._v4 = list(v4)
+        self._v6 = list(v6)
+
+    def parsed_scoped_addresses(self, version=None):
+        from zeroconf import IPVersion
+        if version is IPVersion.V4Only:
+            return self._v4
+        if version is IPVersion.V6Only:
+            return self._v6
+        return self._v4 + self._v6
+
+
+def test_mdns_entries_prefer_ipv4_and_carry_port() -> None:
+    infos = [
+        _FakeServiceInfo(
+            "AAA._remotepairing._tcp.local.", "iPhone-A.local.", 60637,
+            v4=["192.168.1.109"], v6=["fe80::1"],
+        ),
+    ]
+    assert _mdns_entries_to_candidates(infos) == [
+        {"ip": "192.168.1.109", "port": 60637, "host": "iPhone-A.local",
+         "name": "AAA._remotepairing._tcp.local.", "method": "mdns"},
+    ]
+
+
+def test_mdns_entries_fall_back_to_ipv6_when_no_ipv4() -> None:
+    infos = [
+        _FakeServiceInfo(
+            "BBB._remotepairing._tcp.local.", "iPhone-B.local.", 50877,
+            v4=[], v6=["fd92:378c:9b00::1"],
+        ),
+    ]
+    assert [c["ip"] for c in _mdns_entries_to_candidates(infos)] == ["fd92:378c:9b00::1"]
+
+
+def test_mdns_entries_skip_entries_without_port_or_address() -> None:
+    infos = [
+        _FakeServiceInfo("C._remotepairing._tcp.local.", "c.local.", None, v4=["192.168.1.5"]),
+        _FakeServiceInfo("D._remotepairing._tcp.local.", "d.local.", 50000, v4=[]),
+    ]
+    assert _mdns_entries_to_candidates(infos) == []
 
 
 async def test_mdns_results_returned_and_deduped() -> None:
@@ -32,8 +86,15 @@ async def test_mdns_empty_falls_back_to_subnet_scan() -> None:
     result = await discover_tunnel_candidates(
         browse=fake_browse, subnet_scan=fake_subnet_scan, port_scan=fake_port_scan,
     )
+    # EVERY open port must survive as its own candidate. Keeping only the
+    # lowest one (ports[0]) was a real bug: RemotePairing binds a single
+    # port from the dynamic range, and iOS usually has other high ports
+    # open too, so the lowest hit is frequently the wrong one — each miss
+    # cost a 10s tunnel timeout before the next discovery cycle retried.
     assert result == [
         {"ip": "192.168.1.20", "port": 51234, "host": "192.168.1.20",
+         "name": "192.168.1.20", "method": "tcp_scan"},
+        {"ip": "192.168.1.20", "port": 62078, "host": "192.168.1.20",
          "name": "192.168.1.20", "method": "tcp_scan"},
     ]
 

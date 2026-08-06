@@ -1,4 +1,8 @@
-pymobiledevice3>=10.1.0
+# Upper bound is deliberate: 10.2 replaced the zeroconf-based bonjour
+# helper with raw sockets that break mDNS on multi-NIC Windows. We browse
+# via zeroconf ourselves now (services/tunnel_discovery.py), but keep the
+# ceiling so the device-protocol layer can't shift under us unreviewed.
+pymobiledevice3>=10.1.0,<10.3
 pytun_pmd3>=3.0.3
 developer_disk_image>=0.2.0
 pyimg4>=0.8.8
