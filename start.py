@@ -64,10 +64,29 @@ def kill_port(port):
                                shell=True, capture_output=True)
 
 
-def wait_for_port(port, label, timeout=60):
+def wait_for_port(
+    port,
+    label,
+    timeout=60,
+    process=None,
+    watched_processes=(),
+):
     print(f"      等待{label}啟動中", end="", flush=True)
     start = time.time()
     while time.time() - start < timeout:
+        if process is not None:
+            return_code = process.poll()
+            if return_code is not None:
+                print(f" 失敗（程序已退出，exit code {return_code}）")
+                return False
+        for watched_label, watched_process in watched_processes:
+            return_code = watched_process.poll()
+            if return_code is not None:
+                print(
+                    f" 失敗（{watched_label}程序已退出，"
+                    f"exit code {return_code}）"
+                )
+                return False
         if is_port_open(port):
             print(" OK ✓")
             return True
@@ -123,10 +142,12 @@ def start_backend():
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
     )
     procs.append(p)
-    return wait_for_port(BACKEND_PORT, "後端")
+    if not wait_for_port(BACKEND_PORT, "後端", process=p):
+        return None
+    return p
 
 
-def start_frontend():
+def start_frontend(backend_process=None):
     print(f"  [4/4] 啟動前端服務 (port {FRONTEND_PORT})...")
 
     # 清理殘留
@@ -143,7 +164,49 @@ def start_frontend():
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
     )
     procs.append(p)
-    return wait_for_port(FRONTEND_PORT, "前端")
+    watched_processes = (
+        (("後端", backend_process),) if backend_process is not None else ()
+    )
+    if not wait_for_port(
+        FRONTEND_PORT,
+        "前端",
+        process=p,
+        watched_processes=watched_processes,
+    ):
+        return None
+    return p
+
+
+def _enter_pressed():
+    """Consume one console key and report whether it was Enter."""
+    if os.name == "nt":
+        import msvcrt
+
+        if not msvcrt.kbhit():
+            return False
+        return msvcrt.getwch() in ("\r", "\n")
+
+    import select
+
+    ready, _, _ = select.select([sys.stdin], [], [], 0)
+    if not ready:
+        return False
+    return sys.stdin.readline() in ("\n", "\r\n", "")
+
+
+def wait_for_shutdown(backend_process, poll_interval=0.25):
+    """Wait for Enter while ensuring the owned backend process stays alive."""
+    while True:
+        return_code = backend_process.poll()
+        if return_code is not None:
+            print(
+                f"\n  [錯誤] 後端服務意外停止（exit code {return_code}）；"
+                "LocWarp 將關閉前端。"
+            )
+            return False
+        if _enter_pressed():
+            return True
+        time.sleep(poll_interval)
 
 
 def cleanup():
@@ -192,7 +255,7 @@ def main():
 
     if not ok:
         input("  缺少必要工具，請安裝後重試。按 Enter 離開...")
-        return
+        return 1
 
     # 安裝依賴
     install_backend()
@@ -201,18 +264,19 @@ def main():
     print()
 
     # 啟動服務
-    if not start_backend():
+    backend_process = start_backend()
+    if backend_process is None:
         print("  [錯誤] 後端啟動失敗，請查看上方錯誤訊息")
         cleanup()
         input("  按 Enter 離開...")
-        return
+        return 1
     print()
 
-    if not start_frontend():
+    if start_frontend(backend_process) is None:
         print("  [錯誤] 前端啟動失敗")
         cleanup()
         input("  按 Enter 離開...")
-        return
+        return 1
     print()
 
     # 等待 Vite 完成首次編譯後再開瀏覽器
@@ -231,16 +295,13 @@ def main():
     print("  ╚══════════════════════════════════════════╝")
     print()
 
-    try:
-        input()
-    except (KeyboardInterrupt, EOFError):
-        pass
-
+    clean_exit = wait_for_shutdown(backend_process)
     cleanup()
+    return 0 if clean_exit else 1
 
 
 if __name__ == "__main__":
     try:
-        main()
+        raise SystemExit(main())
     except KeyboardInterrupt:
         cleanup()

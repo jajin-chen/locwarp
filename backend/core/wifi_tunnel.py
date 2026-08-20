@@ -33,6 +33,20 @@ class TunnelRunner:
     def is_running(self) -> bool:
         return self.task is not None and not self.task.done()
 
+    async def _finish_task(
+        self,
+        task: asyncio.Task,
+        *,
+        cancel: bool = False,
+    ) -> BaseException | None:
+        """Finish and retrieve one owned task before dropping its reference."""
+        if cancel and not task.done():
+            task.cancel()
+        result = (await asyncio.gather(task, return_exceptions=True))[0]
+        if self.task is task:
+            self.task = None
+        return result if isinstance(result, BaseException) else None
+
     async def _run(self, udid: str, ip: str, port: int) -> None:
         from pymobiledevice3.remote.tunnel_service import (
             create_core_device_tunnel_service_using_remotepairing,
@@ -101,45 +115,63 @@ class TunnelRunner:
         Raises asyncio.TimeoutError on timeout or the underlying exception
         if the tunnel setup failed before becoming ready.
         """
-        self._stop = asyncio.Event()
-        self._ready = asyncio.Event()
-        self._error = None
-        self.info = None
-        self.target_ip = ip
-        self.target_port = port
-        self.task = asyncio.create_task(self._run(udid, ip, port))
-        try:
-            await asyncio.wait_for(self._ready.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
-            self._stop.set()
+        async with self.lock:
+            if self.is_running():
+                raise RuntimeError("TunnelRunner is already running")
+            if self.task is not None:
+                await self._finish_task(self.task)
+
+            self._stop = asyncio.Event()
+            self._ready = asyncio.Event()
+            self._error = None
+            self.info = None
+            self.target_ip = ip
+            self.target_port = port
+            task = asyncio.create_task(self._run(udid, ip, port))
+            self.task = task
             try:
-                await asyncio.wait_for(self.task, timeout=2.0)
-            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-                pass
-            self.task = None
-            raise
-        if self._error is not None:
-            exc = self._error
-            self.task = None
-            raise exc
-        return dict(self.info or {})
+                await asyncio.wait_for(self._ready.wait(), timeout=timeout)
+            except BaseException:
+                self._stop.set()
+                await self._finish_task(task, cancel=True)
+                raise
+            if self._error is not None:
+                exc = self._error
+                await self._finish_task(task)
+                raise exc
+            return dict(self.info or {})
 
     async def stop(self) -> None:
-        if not self.is_running():
-            self.task = None
+        async with self.lock:
+            task = self.task
+            if task is None:
+                self.info = None
+                return
+
+            caller_cancelled: asyncio.CancelledError | None = None
+            if not task.done():
+                self._stop.set()
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Tunnel task did not exit in 5s; cancelling")
+                except asyncio.CancelledError as exc:
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling():
+                        caller_cancelled = exc
+                except Exception:
+                    pass
+
+            task_error = await self._finish_task(task, cancel=not task.done())
             self.info = None
-            return
-        self._stop.set()
-        try:
-            await asyncio.wait_for(self.task, timeout=5.0)
-        except asyncio.TimeoutError:
-            logger.warning("Tunnel task did not exit in 5s; cancelling")
-            self.task.cancel()
-            try:
-                await self.task
-            except (asyncio.CancelledError, Exception):
-                pass
-        except (asyncio.CancelledError, Exception):
-            pass
-        self.task = None
-        self.info = None
+            if task_error is not None and not isinstance(
+                task_error,
+                asyncio.CancelledError,
+            ):
+                logger.warning(
+                    "Tunnel task ended with error during stop: %s: %s",
+                    type(task_error).__name__,
+                    task_error,
+                )
+            if caller_cancelled is not None:
+                raise caller_cancelled

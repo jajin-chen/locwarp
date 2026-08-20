@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import sys
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -753,7 +754,15 @@ async def root():
 
 
 
-if __name__ == "__main__":
+def _server_loop(platform: str | None = None) -> str:
+    """Use the event loop required by pymobiledevice3's Windows DTX path."""
+    platform = sys.platform if platform is None else platform
+    if platform == "win32":
+        return "asyncio:SelectorEventLoop"
+    return "auto"
+
+
+def _run_server() -> None:
     # v0.2.59: enable uvicorn access logging so we can see which HTTP
     # endpoints the frontend is hitting (needed to debug the "WiFi tunnel
     # drops on USB unplug" report — we need to confirm whether the UI is
@@ -762,4 +771,15 @@ if __name__ == "__main__":
     uvicorn_access = logging.getLogger("uvicorn.access")
     uvicorn_access.setLevel(logging.INFO)
     uvicorn_access.propagate = True  # route through our basicConfig handlers
-    uvicorn.run("main:app", host=API_HOST, port=API_PORT, reload=False, access_log=True)
+    uvicorn.run(
+        "main:app",
+        host=API_HOST,
+        port=API_PORT,
+        reload=False,
+        access_log=True,
+        loop=_server_loop(),
+    )
+
+
+if __name__ == "__main__":
+    _run_server()
