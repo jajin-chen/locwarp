@@ -6,6 +6,7 @@
 export interface TunnelCandidate {
   ip: string
   port: number
+  ports?: number[]
   udid?: string
 }
 
@@ -13,7 +14,7 @@ const DEFAULT_MAX = 3
 
 export function buildAutoConnectCandidates(opts: {
   saved: TunnelCandidate[]
-  discovered: Array<{ ip: string; port: number }>
+  discovered: Array<{ ip: string; port: number; ports?: number[] }>
   pinnedUdids: string[]
   alreadyTunneled: ReadonlySet<string>
   max?: number
@@ -31,18 +32,78 @@ export function buildAutoConnectCandidates(opts: {
     ? saved.filter((e) => e.udid && pinnedUdidsLc.includes(e.udid.toLowerCase()))
     : saved
 
-  const seen = new Set<string>()
-  const out: TunnelCandidate[] = []
-  const add = (ip: string, port: number, udid?: string) => {
-    const key = `${ip}:${port}`
-    if (seen.has(key) || alreadyTunneled.has(key)) return
-    seen.add(key)
-    out.push({ ip, port, udid })
+  // Group by IP before applying the device cap. A saved endpoint can be
+  // stale while discovery reports several fresh ports for that same phone;
+  // treating each port as a separate candidate would spend the max-3 slots
+  // on one device and starve other phones. Keep the saved UDID as the
+  // identity hint, but let current discovery evidence lead the port order.
+  type GroupedCandidate = TunnelCandidate & {
+    _savedPorts: number[]
+    _discoveredPorts: number[]
+    _portsExplicit?: boolean
+  }
+  const byIp = new Map<string, GroupedCandidate>()
+  const discoveredIps = new Set(discovered.map((entry) => entry.ip))
+  const normalizePorts = (entry: TunnelCandidate): number[] => {
+    const sourcePorts = [entry.port, ...(entry.ports || [])]
+      .map((p) => Number(p))
+      .filter((p) => Number.isInteger(p) && p > 0 && p <= 65535)
+    return sourcePorts.filter((port, index) => sourcePorts.indexOf(port) === index)
+  }
+  const add = (entry: TunnelCandidate, source: 'saved' | 'discovered', udid?: string) => {
+    const ports = normalizePorts(entry)
+    if (ports.length === 0) return
+    const existing = byIp.get(entry.ip)
+    if (!existing) {
+      byIp.set(entry.ip, {
+        ip: entry.ip,
+        port: ports[0],
+        udid,
+        _savedPorts: source === 'saved' ? ports : [],
+        _discoveredPorts: source === 'discovered' ? ports : [],
+        _portsExplicit: Boolean(entry.ports?.length),
+      })
+      return
+    }
+
+    const target = source === 'saved' ? existing._savedPorts : existing._discoveredPorts
+    for (const port of ports) {
+      if (!target.includes(port)) target.push(port)
+    }
+    // Saved entries are the only source of an identity hint. Keep the first
+    // one when several stale records share an IP.
+    if (!existing.udid && udid) existing.udid = udid
+    existing._portsExplicit = existing._portsExplicit || Boolean(entry.ports?.length)
   }
 
-  for (const e of savedFiltered) add(e.ip, e.port, e.udid)
-  for (const d of discovered) add(d.ip, d.port, undefined)
-  return out.slice(0, max)
+  for (const entry of savedFiltered) add(entry, 'saved', entry.udid)
+  for (const entry of discovered) add(entry, 'discovered')
+
+  return [...byIp.values()]
+    .map(({ _savedPorts, _discoveredPorts, _portsExplicit, ...candidate }) => {
+      // A current discovery record is fresher than a saved endpoint. Make
+      // its primary/hints the backend's first choices, then append saved
+      // ports as fallback without dropping the saved UDID.
+      const merged = [..._discoveredPorts, ..._savedPorts]
+        .filter((port, index, ports) => ports.indexOf(port) === index)
+      if (merged.length > 0) {
+        candidate.port = merged[0]
+        if (_portsExplicit || merged.length > 1) candidate.ports = merged
+        else delete candidate.ports
+      }
+      return candidate
+    })
+    .filter((candidate) => {
+      const ports = candidate.ports || [candidate.port]
+      // A stop/status snapshot identifies a whole device by any active
+      // endpoint. Once the merged group contains one active endpoint, do
+      // not retry another port for that same IP in this pass.
+      return !ports.some((port) => alreadyTunneled.has(`${candidate.ip}:${port}`))
+    })
+    // Fresh discovery evidence wins the device cap over saved-only stale
+    // addresses.
+    .sort((a, b) => Number(discoveredIps.has(b.ip)) - Number(discoveredIps.has(a.ip)))
+    .slice(0, max)
 }
 
 // Which pinned UDIDs still need a reconnect retry armed after a launch

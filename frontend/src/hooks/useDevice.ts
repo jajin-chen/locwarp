@@ -18,6 +18,8 @@ export interface DeviceInfo {
   // failed, or device not yet connected). Used to decide whether to show
   // the "Reveal Developer Mode option" button.
   developer_mode_enabled?: boolean | null
+  // WiFi only: the RemotePairing port that actually completed the handshake.
+  port?: number
 }
 
 export type WsSubscribe = (fn: (m: WsMessage) => void) => () => void
@@ -203,7 +205,7 @@ export function useDevice(subscribe?: WsSubscribe) {
   const pinRetryRounds = useRef<Record<string, number>>({})
   // Set after startWifiTunnel / stopTunnel are defined below; the retry
   // loop calls through the refs so we avoid a definition-order cycle.
-  const startWifiTunnelRef = useRef<((ip: string, port?: number, udidHint?: string) => Promise<any>) | null>(null)
+  const startWifiTunnelRef = useRef<((ip: string, port?: number, udidHint?: string, portHints?: number[]) => Promise<any>) | null>(null)
   const stopTunnelRef = useRef<((udid?: string) => Promise<void>) | null>(null)
 
   const clearPinRetry = useCallback((udid: string) => {
@@ -214,7 +216,7 @@ export function useDevice(subscribe?: WsSubscribe) {
     delete pinRetryRounds.current[key]
   }, [])
 
-  const readSavedEntryFor = (udid: string): { ip: string; port: number } | null => {
+  const readSavedEntryFor = (udid: string): { ip: string; port: number; ports?: number[] } | null => {
     try {
       const arr = JSON.parse(localStorage.getItem('locwarp.tunnel.savedips') || '[]')
       if (!Array.isArray(arr)) return null
@@ -226,7 +228,12 @@ export function useDevice(subscribe?: WsSubscribe) {
       // cadence into every ~15s.
       const udidLc = udid.toLowerCase()
       const hit = arr.find((e: any) => e && typeof e.udid === 'string' && e.udid.toLowerCase() === udidLc && typeof e.ip === 'string')
-      if (hit) return { ip: hit.ip, port: Number(hit.port) || 49152 }
+      if (hit) {
+        const ports = Array.isArray(hit.ports)
+          ? hit.ports.map(Number).filter((p: number) => Number.isInteger(p) && p > 0 && p <= 65535)
+          : undefined
+        return { ip: hit.ip, port: Number(hit.port) || 49152, ...(ports?.length ? { ports } : {}) }
+      }
     } catch { /* ignore */ }
     return null
   }
@@ -272,7 +279,9 @@ export function useDevice(subscribe?: WsSubscribe) {
           // 'failed' rather than being mistaken for success.
           let info: { udid: string } | null | undefined
           try {
-            info = await startWifiTunnelRef.current?.(entry.ip, entry.port, udid)
+            info = entry.ports?.length
+              ? await startWifiTunnelRef.current?.(entry.ip, entry.port, udid, entry.ports)
+              : await startWifiTunnelRef.current?.(entry.ip, entry.port, udid)
           } catch {
             info = null
           }
@@ -326,9 +335,16 @@ export function useDevice(subscribe?: WsSubscribe) {
               if (tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)) break
               let info: { udid: string } | null | undefined
               try {
-                info = await startWifiTunnelRef.current?.(
-                  String(d.ip), Number(d.port) || 49152, udid,
-                )
+                const ports = Array.isArray(d.ports)
+                  ? d.ports.map(Number).filter((p: number) => Number.isInteger(p) && p > 0 && p <= 65535)
+                  : []
+                info = ports.length > 0
+                  ? await startWifiTunnelRef.current?.(
+                    String(d.ip), Number(d.port) || 49152, udid, ports,
+                  )
+                  : await startWifiTunnelRef.current?.(
+                    String(d.ip), Number(d.port) || 49152, udid,
+                  )
               } catch {
                 info = null // try next candidate
               }
@@ -492,15 +508,24 @@ export function useDevice(subscribe?: WsSubscribe) {
   }, [subscribe])
 
   const startWifiTunnel = useCallback(
-    async (ip: string, port = 49152, udidHint?: string) => {
+    async (ip: string, port = 49152, udidHint?: string, portHints?: number[]) => {
       try {
-        const res = await wifiTunnelStartAndConnect(ip, port, udidHint)
+        // Keep the legacy three-argument call shape when no hints are
+        // supplied; callers and existing integrations treat the fourth
+        // argument as optional.
+        const res = portHints && portHints.length > 0
+          ? await wifiTunnelStartAndConnect(ip, port, udidHint, portHints)
+          : await wifiTunnelStartAndConnect(ip, port, udidHint)
+        // The backend can re-scan and succeed on a different port than the
+        // remembered one. Persist the actual handshake port for next launch.
+        const usedPort = Number(res.port) > 0 ? Number(res.port) : port
         const info: DeviceInfo = {
           udid: res.udid,
           name: res.name,
           ios_version: res.ios_version,
           connection_type: 'Network',
           is_connected: true,
+          port: usedPort,
         }
         setConnectedDevice(info)
         setDevices((prev) => {
@@ -533,12 +558,13 @@ export function useDevice(subscribe?: WsSubscribe) {
           // an iPhone reconnects on a NEW DHCP-assigned IP. Without the
           // udid dedup we'd accumulate stale IPs for the same device.
           const filtered = baseList.filter((e) =>
-            e && !(e.ip === ip && e.port === port) && !(res.udid && e.udid === res.udid)
+            e && !(e.ip === ip && (e.port === port || e.port === usedPort))
+            && !(res.udid && e.udid === res.udid)
           )
           // Persist the device name too so the panel can keep showing the
           // real phone name after a WiFi drop instead of a raw UDID
           // (issue #33).
-          const next = [{ ip, port, udid: res.udid, name: res.name, lastUsed: Date.now() }, ...filtered].slice(0, 5)
+          const next = [{ ip, port: usedPort, udid: res.udid, name: res.name, lastUsed: Date.now() }, ...filtered].slice(0, 5)
           localStorage.setItem('locwarp.tunnel.savedips', JSON.stringify(next))
         } catch { /* storage disabled */ }
         // A successful connect clears any pending pin-retry for this device.

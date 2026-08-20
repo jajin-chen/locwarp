@@ -283,7 +283,9 @@ const App: React.FC = () => {
           const status = await api.wifiTunnelStatus()
           const alreadyTunneled = new Set(
             (status?.tunnels || [])
-              .map((tn) => `${tn.rsd_address || ''}:${tn.rsd_port || 0}`),
+              .map((tn) => tn.ip && tn.port
+                ? `${tn.ip}:${tn.port}`
+                : `${tn.rsd_address || ''}:${tn.rsd_port || 0}`),
           )
           // Two sources for auto-connect candidates:
           //   1. savedips: previously-connected iPhones (UDID known)
@@ -313,12 +315,15 @@ const App: React.FC = () => {
           // pinned phone isn't mistaken for an unpinned stranger and kicked.
           const pinnedUdidsLc = pinnedUdids.map((u) => u.toLowerCase())
 
-          let discovered: Array<{ ip: string; port: number }> = []
+          let discovered: Array<{ ip: string; port: number; ports?: number[] }> = []
           try {
             const dres = await api.wifiTunnelDiscover()
             discovered = (dres?.devices || []).map((d: any) => ({
               ip: String(d.ip),
               port: Number(d.port) || 49152,
+              ...(Array.isArray(d.ports)
+                ? { ports: d.ports.map(Number).filter((p: number) => Number.isInteger(p) && p > 0 && p <= 65535) }
+                : {}),
             }))
           } catch { /* discover failed — saved entries still try */ }
 
@@ -336,7 +341,9 @@ const App: React.FC = () => {
           // tries the right pair record FIRST.
           await Promise.allSettled(
             candidates.map(async (entry) => {
-              const info = await device.startWifiTunnel(entry.ip, entry.port, entry.udid).catch(() => null)
+              const info = await device.startWifiTunnel(
+                entry.ip, entry.port, entry.udid, entry.ports,
+              ).catch(() => null)
               if (!info) return
               if (pinnedUdidsLc.length > 0 && !pinnedUdidsLc.includes(info.udid.toLowerCase())) {
                 // Discovery reached a device the user never pinned —

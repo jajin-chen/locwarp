@@ -8,8 +8,34 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Iterable
 
 logger = logging.getLogger("wifi_tunnel")
+
+
+# TCP scanning can see lockdownd in the same dynamic range as RemotePairing.
+# Keep this in the shared discovery module so API discovery, manual scans, and
+# watchdog fallback all apply the same safety filter.
+NON_REMOTEPAIRING_PORTS = frozenset({62078})
+
+
+def filter_remotepairing_ports(ports: Iterable[int]) -> list[int]:
+    """Return valid port values in input order, excluding known wrong ports."""
+    filtered: list[int] = []
+    for raw in ports:
+        try:
+            port = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if port in NON_REMOTEPAIRING_PORTS or port in filtered:
+            continue
+        filtered.append(port)
+    return filtered
+
+
+# Keep a private spelling available to existing internal callers/tests while
+# exposing the public helper for API and watchdog consumers.
+_filter_remotepairing_ports = filter_remotepairing_ports
 
 
 def _get_primary_local_ip() -> str | None:
@@ -84,15 +110,23 @@ async def _scan_ports_for_ip(
 
     tasks = [asyncio.create_task(_probe_one(p)) for p in range(start, end + 1)]
     hits: list[int] = []
-    for fut in asyncio.as_completed(tasks):
-        try:
-            res = await fut
-        except (OSError, ConnectionError, asyncio.TimeoutError):
-            res = None
-        if res is not None:
-            hits.append(res)
-    hits.sort()
-    return hits
+    try:
+        for fut in asyncio.as_completed(tasks):
+            try:
+                res = await fut
+            except (OSError, ConnectionError, asyncio.TimeoutError):
+                res = None
+            if res is not None:
+                hits.append(res)
+    finally:
+        # A start budget timeout cancels this scanner while thousands of
+        # probes may still be pending. Always drain them so cancelled scans
+        # cannot keep sockets/tasks alive in the backend event loop.
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    return filter_remotepairing_ports(sorted(hits))
 
 
 REMOTEPAIRING_SERVICE = "_remotepairing._tcp.local."
@@ -107,6 +141,8 @@ def _mdns_entries_to_candidates(infos) -> list[dict]:
     for info in infos:
         port = getattr(info, "port", None)
         if not port:
+            continue
+        if int(port) in NON_REMOTEPAIRING_PORTS:
             continue
         addrs = info.parsed_scoped_addresses(version=IPVersion.V4Only)
         if not addrs:
@@ -220,7 +256,7 @@ async def discover_tunnel_candidates(
                     # the dynamic range and iOS usually has other high ports
                     # open, so the lowest hit is often wrong — dropping the
                     # rest cost a 10s tunnel timeout per miss.
-                    for p in ports:
+                    for p in filter_remotepairing_ports(ports):
                         results.append({
                             "ip": ip, "port": p, "host": ip,
                             "name": ip, "method": "tcp_scan",
@@ -261,7 +297,7 @@ async def find_fallback_endpoints(
 
     if ip:
         try:
-            for p in await port_scan(ip):
+            for p in filter_remotepairing_ports(await port_scan(ip)):
                 key = (ip, int(p))
                 if key not in seen:
                     seen.add(key)
@@ -271,10 +307,13 @@ async def find_fallback_endpoints(
 
     try:
         for cand in await discover():
-            key = (str(cand["ip"]), int(cand["port"]))
-            if key not in seen:
-                seen.add(key)
-                out.append(key)
+            ip_value = str(cand["ip"])
+            hinted = [cand.get("port"), *(cand.get("ports") or [])]
+            for p in filter_remotepairing_ports(hinted):
+                key = (ip_value, int(p))
+                if key not in seen:
+                    seen.add(key)
+                    out.append(key)
     except Exception:
         logger.warning("Fallback discover failed", exc_info=True)
 

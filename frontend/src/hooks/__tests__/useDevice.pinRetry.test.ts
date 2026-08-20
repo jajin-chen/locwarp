@@ -159,3 +159,31 @@ describe('schedulePinReconnect', () => {
     expect(api.wifiTunnelDiscover).not.toHaveBeenCalled()
   })
 })
+
+describe('startWifiTunnel', () => {
+  test('persists the backend actual handshake port in savedips', async () => {
+    api.wifiTunnelStartAndConnect.mockResolvedValue({
+      ...tunnelResult(TARGET),
+      port: 61234,
+    })
+
+    const { result } = renderHook(() => useDevice())
+    await act(async () => {
+      await result.current.startWifiTunnel(
+        '192.168.1.10',
+        49152,
+        TARGET,
+        [49152, 61234],
+      )
+    })
+
+    expect(api.wifiTunnelStartAndConnect).toHaveBeenCalledWith(
+      '192.168.1.10', 49152, TARGET, [49152, 61234],
+    )
+    expect(readSavedIps()[0]).toMatchObject({
+      ip: '192.168.1.10',
+      port: 61234,
+      udid: TARGET,
+    })
+  })
+})

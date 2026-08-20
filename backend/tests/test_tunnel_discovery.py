@@ -86,15 +86,11 @@ async def test_mdns_empty_falls_back_to_subnet_scan() -> None:
     result = await discover_tunnel_candidates(
         browse=fake_browse, subnet_scan=fake_subnet_scan, port_scan=fake_port_scan,
     )
-    # EVERY open port must survive as its own candidate. Keeping only the
-    # lowest one (ports[0]) was a real bug: RemotePairing binds a single
-    # port from the dynamic range, and iOS usually has other high ports
-    # open too, so the lowest hit is frequently the wrong one — each miss
-    # cost a 10s tunnel timeout before the next discovery cycle retried.
+    # Every valid RemotePairing port must survive as its own candidate.
+    # lockdownd's well-known 62078 listener is also visible during scans but
+    # is not a RemotePairing endpoint and must be filtered centrally.
     assert result == [
         {"ip": "192.168.1.20", "port": 51234, "host": "192.168.1.20",
-         "name": "192.168.1.20", "method": "tcp_scan"},
-        {"ip": "192.168.1.20", "port": 62078, "host": "192.168.1.20",
          "name": "192.168.1.20", "method": "tcp_scan"},
     ]
 

@@ -4,7 +4,7 @@ import { buildAutoConnectCandidates, classifyPinAttempt, pinnedUdidsNeedingRetry
 const noTunnels = new Set<string>()
 
 describe('buildAutoConnectCandidates', () => {
-  test('with pins: pinned saved entries first, then discovered endpoints', () => {
+  test('with pins: merges saved and discovered endpoints by IP', () => {
     const result = buildAutoConnectCandidates({
       saved: [
         { ip: '192.168.1.10', port: 50000, udid: 'PINNED' },
@@ -15,32 +15,65 @@ describe('buildAutoConnectCandidates', () => {
       alreadyTunneled: noTunnels,
     })
     expect(result).toEqual([
-      { ip: '192.168.1.10', port: 50000, udid: 'PINNED' },
-      { ip: '192.168.1.10', port: 61234, udid: undefined },
+      {
+        ip: '192.168.1.10',
+        port: 61234,
+        ports: [61234, 50000],
+        udid: 'PINNED',
+      },
     ])
   })
 
-  test('without pins: keeps all saved entries plus discovered', () => {
+  test('without pins: discovery-backed groups outrank saved-only groups', () => {
     const result = buildAutoConnectCandidates({
       saved: [{ ip: '192.168.1.11', port: 50001, udid: 'ANY' }],
       discovered: [{ ip: '192.168.1.12', port: 50002 }],
       pinnedUdids: [],
       alreadyTunneled: noTunnels,
     })
-    expect(result.map((c) => c.ip)).toEqual(['192.168.1.11', '192.168.1.12'])
+    expect(result.map((c) => c.ip)).toEqual(['192.168.1.12', '192.168.1.11'])
   })
 
-  test('excludes endpoints already tunneled and dedups ip:port', () => {
+  test('excludes an IP when any merged endpoint is already tunneled', () => {
     const result = buildAutoConnectCandidates({
       saved: [{ ip: '192.168.1.10', port: 50000, udid: 'PINNED' }],
       discovered: [
-        { ip: '192.168.1.10', port: 50000 },   // dup of saved
-        { ip: '192.168.1.13', port: 50003 },   // already tunneled
+        { ip: '192.168.1.10', port: 61234 },   // merged with saved IP
+        { ip: '192.168.1.13', port: 50003 },
       ],
       pinnedUdids: ['PINNED'],
-      alreadyTunneled: new Set(['192.168.1.13:50003']),
+      alreadyTunneled: new Set(['192.168.1.10:61234']),
     })
-    expect(result).toEqual([{ ip: '192.168.1.10', port: 50000, udid: 'PINNED' }])
+    expect(result).toEqual([{ ip: '192.168.1.13', port: 50003, udid: undefined }])
+  })
+
+  test('stale saved A plus fresh discovered A/B/C still fills max with live IPs', () => {
+    const result = buildAutoConnectCandidates({
+      saved: [
+        { ip: '192.168.1.10', port: 41000, udid: 'PHONE-A' },
+        { ip: '192.168.1.99', port: 41999, udid: 'STALE-SAVED' },
+      ],
+      discovered: [
+        { ip: '192.168.1.10', port: 51000, ports: [51000, 51001] },
+        { ip: '192.168.1.11', port: 52000 },
+        { ip: '192.168.1.12', port: 53000 },
+      ],
+      pinnedUdids: [],
+      alreadyTunneled: noTunnels,
+      max: 3,
+    })
+
+    expect(result.map((candidate) => candidate.ip)).toEqual([
+      '192.168.1.10',
+      '192.168.1.11',
+      '192.168.1.12',
+    ])
+    expect(result[0]).toEqual({
+      ip: '192.168.1.10',
+      port: 51000,
+      ports: [51000, 51001, 41000],
+      udid: 'PHONE-A',
+    })
   })
 
   test('with pins: matches saved entry udid case-insensitively', () => {

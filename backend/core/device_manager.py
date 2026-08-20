@@ -22,7 +22,7 @@ import socket
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Awaitable, Callable, Dict, Optional
 
 from pymobiledevice3.lockdown import create_using_usbmux, create_using_tcp
 from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscoveryService
@@ -399,15 +399,30 @@ class DeviceManager:
     # Disconnection
     # ------------------------------------------------------------------
 
-    async def disconnect(self, udid: str) -> None:
-        """Tear down the connection and clean up resources for *udid*."""
+    async def _detach_connection(
+        self,
+        udid: str,
+        *,
+        expected: _ActiveConnection | None = None,
+    ) -> _ActiveConnection | None:
+        """Atomically remove *udid* and return its owned connection.
+
+        ``expected`` is an identity lease, not a value comparison.  A stale
+        cleanup therefore has no side effects when a newer connection has
+        already replaced the old one.
+        """
         async with self._lock:
-            conn = self._connections.pop(udid, None)
+            current = self._connections.get(udid)
+            if expected is not None and current is not expected:
+                return None
+            return self._connections.pop(udid, None)
 
-        if conn is None:
-            logger.warning("Disconnect requested for unknown device %s", udid)
-            return
-
+    async def _close_detached_connection(
+        self,
+        udid: str,
+        conn: _ActiveConnection,
+    ) -> None:
+        """Close resources from a previously detached connection."""
         # Clear any active location simulation first.
         if conn.location_service is not None:
             try:
@@ -444,6 +459,150 @@ class DeviceManager:
                 logger.exception("Error closing tunnel proxy for %s", udid)
 
         logger.info("Disconnected device %s", udid)
+
+    async def _drain_cleanup(self, awaitable, *, label: str) -> bool:
+        """Drain one cleanup task despite caller cancellation."""
+        cleanup = asyncio.create_task(awaitable)
+        caller_cancelled = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                caller_cancelled = True
+
+        try:
+            cleanup.result()
+        except BaseException as exc:
+            if not caller_cancelled:
+                raise
+            logger.debug(
+                "Cleanup failed while caller was cancelling %s: %s",
+                label,
+                exc,
+                exc_info=True,
+            )
+        return caller_cancelled
+
+    async def _drain_detached_close(
+        self,
+        udid: str,
+        conn: _ActiveConnection,
+    ) -> bool:
+        """Finish a detached close even when the caller is cancelled."""
+        return await self._drain_cleanup(
+            self._close_detached_connection(udid, conn),
+            label=f"detached connection {udid}",
+        )
+
+    async def _abort_previous_connection(
+        self,
+        udid: str,
+        previous: _ActiveConnection | None,
+    ) -> None:
+        """Detach and drain a predecessor after pre-close adoption aborts.
+
+        The pre-close callback may have already stopped the predecessor's
+        engine.  Leaving that exact lease in ``_connections`` would therefore
+        expose a current connection whose engine is gone.  Keep the cleanup
+        conditional on the predecessor's identity so a concurrent replacement
+        remains untouched, and shield the whole detach/close transaction from
+        any cancellation that triggered the abort.
+        """
+        if previous is None:
+            return
+
+        async def _detach_and_close() -> None:
+            detached = await self._detach_connection(udid, expected=previous)
+            if detached is None:
+                return
+            await self._close_detached_connection(udid, detached)
+
+            # A newer lease may have won while the old resources were being
+            # drained.  Re-check after close so an adoption-abort event can
+            # never make a healthy replacement appear disconnected.  Keep
+            # the manager lock through the event: this rare abort path is
+            # deliberately serialized against a USB C2 install so the
+            # no-replacement decision and its notification stay one event.
+            async with self._lock:
+                if self._connections.get(udid) is not None:
+                    return
+                remaining_count = len(self._connections)
+                try:
+                    from api.websocket import broadcast
+
+                    await broadcast("device_disconnected", {
+                        "udid": udid,
+                        "udids": [udid],
+                        "reason": "wifi_tunnel_adoption_aborted",
+                        "remaining_count": remaining_count,
+                    })
+                except Exception:
+                    logger.exception(
+                        "Failed to broadcast WiFi adoption abort for %s",
+                        udid,
+                    )
+
+        try:
+            await self._drain_cleanup(
+                _detach_and_close(),
+                label=f"aborted previous WiFi connection {udid}",
+            )
+        except BaseException:
+            # Preserve the callback's cancellation/error as the primary
+            # failure while still recording an unusual cleanup failure.
+            logger.exception(
+                "Failed to abort previous WiFi connection %s after "
+                "pre-close callback failure",
+                udid,
+            )
+
+    async def _drain_rsd_close(
+        self,
+        rsd: RemoteServiceDiscoveryService,
+    ) -> bool:
+        """Close an RSD created before a Network lease was installed."""
+        try:
+            return await self._drain_cleanup(
+                rsd.close(),
+                label="uninstalled WiFi RSD",
+            )
+        except (OSError, ConnectionError):
+            # Preserve the existing retry behavior for a close that is
+            # already disconnected; cancellation has still been drained by
+            # ``_drain_cleanup`` before this handler runs.
+            return False
+
+    async def disconnect(
+        self,
+        udid: str,
+        *,
+        expected: _ActiveConnection | None = None,
+    ) -> None:
+        """Detach and close *udid*; optionally require an exact lease."""
+        conn = await self._detach_connection(udid, expected=expected)
+        if conn is None:
+            if expected is None:
+                logger.warning("Disconnect requested for unknown device %s", udid)
+            else:
+                logger.warning("Disconnect requested for unknown or replaced device %s", udid)
+            return
+        cancelled = await self._drain_detached_close(udid, conn)
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def disconnect_if_current(
+        self,
+        udid: str,
+        expected: _ActiveConnection,
+    ) -> bool:
+        """Close only when *expected* is still the active lease."""
+        conn = await self._detach_connection(udid, expected=expected)
+        if conn is None:
+            return False
+        cancelled = await self._drain_detached_close(udid, conn)
+        if cancelled:
+            raise asyncio.CancelledError
+        return True
 
     # ------------------------------------------------------------------
     # Location service
@@ -690,16 +849,24 @@ class DeviceManager:
     # WiFi connection (iOS 17+ tunnel only)
     # ------------------------------------------------------------------
 
-    async def connect_wifi_tunnel(
-        self, rsd_address: str, rsd_port: int
-    ) -> DeviceInfo:
+    async def connect_wifi_tunnel_owned(
+        self,
+        rsd_address: str,
+        rsd_port: int,
+        *,
+        before_close_previous: Callable[
+            [str, _ActiveConnection | None], Awaitable[None]
+        ] | None = None,
+    ) -> tuple[DeviceInfo, _ActiveConnection]:
         """Connect to a device via an existing WiFi tunnel.
 
         Use this when a WiFi tunnel has already been established (by the
         in-process ``TunnelRunner`` or ``pymobiledevice3 remote start-tunnel``).
         The caller provides the RSD address and port.
 
-        Returns a ``DeviceInfo`` describing the connected device.
+        Returns a ``DeviceInfo`` and the exact connection lease installed for
+        it.  The lease can later be passed to ``disconnect(expected=...)`` so
+        stale rollback cannot remove a newer connection for the same UDID.
         """
         logger.info("Connecting via WiFi tunnel RSD at %s:%d", rsd_address, rsd_port)
 
@@ -714,17 +881,32 @@ class DeviceManager:
                 await rsd.connect()
                 last_exc = None
                 break
+            except asyncio.CancelledError:
+                # ``CancelledError`` is a BaseException and bypasses the
+                # retry handler below.  The RSD may nevertheless have
+                # partially opened its transport, so drain it before the
+                # cancellation escapes this method.
+                await self._drain_rsd_close(rsd)
+                rsd = None
+                raise
             except Exception as exc:
                 last_exc = exc
                 logger.warning(
                     "RSD connect attempt %d/10 failed (%s): %s",
                     attempt, exc.__class__.__name__, exc,
                 )
-                try:
-                    await rsd.close()
-                except (OSError, ConnectionError):
-                    pass
+                close_cancelled = await self._drain_rsd_close(rsd)
+                rsd = None
+                if close_cancelled:
+                    raise asyncio.CancelledError
                 await _asyncio.sleep(min(0.5 * attempt, 2.0))
+            except BaseException:
+                # System-level BaseExceptions have the same ownership rule as
+                # cancellation: close the partially connected RSD, then
+                # re-raise without retrying.
+                await self._drain_rsd_close(rsd)
+                rsd = None
+                raise
 
         if last_exc is not None:
             logger.error("Failed to connect to RSD at %s:%d after retries", rsd_address, rsd_port)
@@ -733,60 +915,127 @@ class DeviceManager:
                 "請確認 WiFi tunnel 仍然活躍。"
             ) from last_exc
 
-        peer = rsd.peer_info or {}
-        props = peer.get("Properties", {})
-        udid = props.get("UniqueDeviceID", "")
-        ios_version_str = props.get("OSVersion", "0.0")
-        # peer_info["Properties"] only carries DeviceClass ("iPhone"), not
-        # the user-set DeviceName (e.g. "My iPhone"). RSD.connect() already
-        # opens a lockdown service over the tunnel internally and exposes
-        # the result as rsd.all_values, so the live DeviceName is right
-        # there for free. We still keep two fallbacks for the edge case
-        # where the lockdown sub-service failed (e.g. RemoteXPC variants
-        # that don't advertise it): a still-active USB conn's cached name,
-        # then the persisted ~/.locwarp/device_names.json populated
-        # whenever USB or discovery saw a real DeviceName.
-        all_values = getattr(rsd, "all_values", None) or {}
-        device_name = all_values.get("DeviceName") or ""
-        if not device_name:
-            existing = self._connections.get(udid)
-            if existing is not None and existing.name and existing.name != "iPhone":
-                device_name = existing.name
-        if not device_name:
-            cached = _load_device_name_cache().get(udid)
-            if cached:
-                device_name = cached
-        if not device_name:
-            device_name = props.get("DeviceClass", "iPhone")
-        # Live DeviceName from the WiFi tunnel is just as authoritative as
-        # USB, so feed it back into the persistent cache too — covers the
-        # "user renamed the device since last USB plug" case.
-        _remember_device_name(udid, device_name)
+        installed = False
+        try:
+            peer = rsd.peer_info or {}
+            props = peer.get("Properties", {})
+            udid = props.get("UniqueDeviceID", "")
+            ios_version_str = props.get("OSVersion", "0.0")
+            # peer_info["Properties"] only carries DeviceClass ("iPhone"), not
+            # the user-set DeviceName (e.g. "My iPhone"). RSD.connect() already
+            # opens a lockdown service over the tunnel internally and exposes
+            # the result as rsd.all_values, so the live DeviceName is right
+            # there for free. We still keep two fallbacks for the edge case
+            # where the lockdown sub-service failed (e.g. RemoteXPC variants
+            # that don't advertise it): a still-active USB conn's cached name,
+            # then the persisted ~/.locwarp/device_names.json populated
+            # whenever USB or discovery saw a real DeviceName.
+            all_values = getattr(rsd, "all_values", None) or {}
+            device_name = all_values.get("DeviceName") or ""
+            if not device_name:
+                existing = self._connections.get(udid)
+                if existing is not None and existing.name and existing.name != "iPhone":
+                    device_name = existing.name
+            if not device_name:
+                cached = _load_device_name_cache().get(udid)
+                if cached:
+                    device_name = cached
+            if not device_name:
+                device_name = props.get("DeviceClass", "iPhone")
+            # Live DeviceName from the WiFi tunnel is just as authoritative as
+            # USB, so feed it back into the persistent cache too — covers the
+            # "user renamed the device since last USB plug" case.
+            _remember_device_name(udid, device_name)
 
-        if udid in self._connections:
-            await self.disconnect(udid)
+            conn = _ActiveConnection(
+                udid=udid,
+                lockdown=rsd,
+                ios_version=ios_version_str,
+                connection_type="Network",
+                name=device_name,
+                rsd=rsd,
+            )
 
-        conn = _ActiveConnection(
-            udid=udid,
-            lockdown=rsd,
-            ios_version=ios_version_str,
-            connection_type="Network",
-            name=device_name,
-            rsd=rsd,
-        )
+            # Snapshot the predecessor without installing C1.  Production
+            # adopters use the callback to quiesce the exact old engine while
+            # C0 remains current/open; the callback is deliberately outside
+            # the manager lock so its drain cannot block connection lookups.
+            async with self._lock:
+                previous = self._connections.get(udid)
+            if before_close_previous is not None:
+                try:
+                    callback_cancelled = await self._drain_cleanup(
+                        before_close_previous(udid, previous),
+                        label=f"before-close WiFi connection {udid}",
+                    )
+                except BaseException:
+                    await self._abort_previous_connection(udid, previous)
+                    raise
+                if callback_cancelled:
+                    await self._abort_previous_connection(udid, previous)
+                    raise asyncio.CancelledError
+                # A concurrent reconnect may have replaced C0 while the
+                # pre-close callback was draining its exact E0.  Never install
+                # C1 over that newer lease or close it as our predecessor.
+                try:
+                    await self._lock.acquire()
+                except BaseException:
+                    # The callback has already quiesced E0 while C0 remains
+                    # current.  If lock acquisition is cancelled or fails,
+                    # abort that exact predecessor before propagating.
+                    await self._abort_previous_connection(udid, previous)
+                    raise
+                try:
+                    if self._connections.get(udid) is not previous:
+                        raise RuntimeError(
+                            f"WiFi connection adoption conflict for {udid}"
+                        )
+                    self._connections[udid] = conn
+                    installed = True
+                finally:
+                    self._lock.release()
+            else:
+                # Compatibility path for legacy callers: preserve the
+                # original atomic swap semantics when no pre-close callback is
+                # supplied.
+                async with self._lock:
+                    previous = self._connections.get(udid)
+                    self._connections[udid] = conn
+                installed = True
+            if previous is not None and previous is not conn:
+                cancelled = await self._drain_detached_close(udid, previous)
+                if cancelled:
+                    # The lease was installed but never delivered to the caller.
+                    # Roll back only our exact object; a concurrent reconnect C2
+                    # must remain the active owner and must not be closed here.
+                    own = await self._detach_connection(udid, expected=conn)
+                    if own is not None:
+                        await self._drain_detached_close(udid, own)
+                    raise asyncio.CancelledError
 
-        async with self._lock:
-            self._connections[udid] = conn
+            logger.info("WiFi tunnel connected to %s (iOS %s)", udid, ios_version_str)
 
-        logger.info("WiFi tunnel connected to %s (iOS %s)", udid, ios_version_str)
+            return DeviceInfo(
+                udid=udid,
+                name=device_name,
+                ios_version=ios_version_str,
+                connection_type="Network",
+                is_connected=True,
+            ), conn
+        except BaseException:
+            if not installed and rsd is not None:
+                try:
+                    await self._drain_rsd_close(rsd)
+                except BaseException:
+                    logger.exception("Failed to close uninstalled WiFi RSD")
+            raise
 
-        return DeviceInfo(
-            udid=udid,
-            name=device_name,
-            ios_version=ios_version_str,
-            connection_type="Network",
-            is_connected=True,
-        )
+    async def connect_wifi_tunnel(
+        self, rsd_address: str, rsd_port: int
+    ) -> DeviceInfo:
+        """Compatibility wrapper returning only ``DeviceInfo``."""
+        info, _lease = await self.connect_wifi_tunnel_owned(rsd_address, rsd_port)
+        return info
 
     async def scan_wifi_devices(
         self,

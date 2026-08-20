@@ -5,6 +5,18 @@ import { useT } from '../i18n';
 
 const MAX_TUNNEL_DEVICES = 3;
 
+// Keep the user-entered primary first while retaining current discovery
+// evidence as stable, de-duplicated fallback hints for the backend.
+const stablePortOrder = (primary: number, hints: readonly number[]): number[] => {
+  const ordered: number[] = [];
+  for (const raw of [primary, ...hints]) {
+    const port = Number(raw);
+    if (!Number.isInteger(port) || port <= 0 || port > 65535 || ordered.includes(port)) continue;
+    ordered.push(port);
+  }
+  return ordered;
+};
+
 interface Device {
   id: string;
   name: string;
@@ -25,7 +37,7 @@ interface DeviceStatusProps {
   isConnected: boolean;
   onScan: () => void | Promise<void>;
   onSelect: (id: string) => void;
-  onStartWifiTunnel?: (ip: string, port?: number) => Promise<any>;
+  onStartWifiTunnel?: (ip: string, port?: number, udid?: string, ports?: number[]) => Promise<any>;
   onStopTunnel?: (udid?: string) => Promise<void>;
   tunnelStatus?: TunnelStatus;
   tunnels?: TunnelInfo[];
@@ -50,6 +62,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   const [showDropdown, setShowDropdown] = useState(false);
   const [tunnelIp, setTunnelIp] = useState(() => localStorage.getItem('locwarp.tunnel.ip') || '');
   const [tunnelPort, setTunnelPort] = useState(() => localStorage.getItem('locwarp.tunnel.port') || '');
+  const [tunnelPortHints, setTunnelPortHints] = useState<number[]>([]);
   const [portScanning, setPortScanning] = useState(false);
   // Saved IPs are written by useDevice.startWifiTunnel into
   // locwarp.tunnel.savedips as a max-5 ring buffer. Surface them here so
@@ -114,6 +127,17 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
   const [repairState, setRepairState] = useState<'idle' | 'running' | 'success' | 'failed'>('idle');
   const [repairMessage, setRepairMessage] = useState<string>('');
 
+  const handleTunnelIpChange = (nextIp: string) => {
+    if (tunnelIp.trim() !== nextIp.trim()) setTunnelPortHints([]);
+    setTunnelIp(nextIp);
+  };
+  const selectRecentIp = (ip: string, port: number) => {
+    if (tunnelIp.trim() !== ip.trim()) setTunnelPortHints([]);
+    setTunnelIp(ip);
+    setTunnelPort(String(port));
+    setShowSavedIps(false);
+  };
+
   const handleRepair = async () => {
     setRepairState('running');
     setRepairMessage('');
@@ -154,7 +178,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
 
   // Multi-result detect: keep the full list and let the user pick one when
   // mDNS / subnet scan returns 2+ iPhones. Single result auto-fills as before.
-  const [discoverResults, setDiscoverResults] = useState<Array<{ ip: string; port: number; name: string }>>([]);
+  const [discoverResults, setDiscoverResults] = useState<Array<{ ip: string; port: number; ports?: number[]; name: string }>>([]);
   const handleDiscover = async () => {
     setDiscovering(true);
     setTunnelError(null);
@@ -176,8 +200,14 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
       } else if (list.length === 1) {
         setTunnelIp(list[0].ip);
         setTunnelPort(String(list[0].port));
+        setTunnelPortHints(stablePortOrder(list[0].port, Array.isArray(list[0].ports) ? list[0].ports : []));
       } else {
-        setDiscoverResults(list.map((d: any) => ({ ip: d.ip, port: d.port, name: d.name || d.ip })));
+        setDiscoverResults(list.map((d: any) => ({
+          ip: d.ip,
+          port: d.port,
+          ...(Array.isArray(d.ports) ? { ports: d.ports } : {}),
+          name: d.name || d.ip,
+        })));
       }
     } catch (err: any) {
       setTunnelError(err.message || t('wifi.detect_failed'));
@@ -185,9 +215,10 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
       setDiscovering(false);
     }
   };
-  const pickDiscoverResult = (r: { ip: string; port: number }) => {
+  const pickDiscoverResult = (r: { ip: string; port: number; ports?: number[] }) => {
     setTunnelIp(r.ip);
     setTunnelPort(String(r.port));
+    setTunnelPortHints(stablePortOrder(r.port, r.ports || []));
     setDiscoverResults([]);
   };
 
@@ -702,7 +733,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                         <input
                           type="text" className="search-input"
                           placeholder={t('wifi.ip_placeholder')}
-                          value={tunnelIp} onChange={(e) => setTunnelIp(e.target.value)}
+                          value={tunnelIp} onChange={(e) => handleTunnelIpChange(e.target.value)}
                           style={{ flex: 1, fontSize: 12, paddingLeft: 10 }} disabled={tunnelConnecting}
                         />
                         {savedIps.length > 0 && (
@@ -746,11 +777,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                               return (
                                 <div
                                   key={`${entry.ip}:${entry.port}:${idx}`}
-                                  onClick={() => {
-                                    setTunnelIp(entry.ip);
-                                    setTunnelPort(String(entry.port));
-                                    setShowSavedIps(false);
-                                  }}
+                                  onClick={() => selectRecentIp(entry.ip, entry.port)}
                                   style={{
                                     padding: '6px 10px', cursor: 'pointer', fontSize: 11,
                                     borderBottom: '1px solid #333',
@@ -820,6 +847,7 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                                 setTunnelError(t('wifi.port_scan_no_hit'));
                               } else {
                                 setTunnelPort(String(res.ports[0]));
+                                setTunnelPortHints(stablePortOrder(res.ports[0], res.ports));
                               }
                             } catch (err: any) {
                               setTunnelError(err.message || t('wifi.port_scan_failed'));
@@ -843,56 +871,27 @@ const DeviceStatus: React.FC<DeviceStatusProps> = ({
                           setTunnelConnecting(true);
                           // iOS rebinds its RemotePairing port across reboots /
                           // network changes, so a single guessed (or stale
-                          // recent-list) port often times out while a different
-                          // open port is the live one (issue #33). Instead of
-                          // firing once at ports[0], try the entered port first
-                          // (fast path when it's still valid), then scan the
-                          // IANA dynamic range and try every open port until a
-                          // handshake actually succeeds.
-                          const tried = new Set<number>();
+                          // recent-list) port can fail while a different open
+                          // port is live (issue #33). The backend now owns the
+                          // fallback scan and handshake loop, so one call is
+                          // enough and it can report the port that worked.
                           let connectedPort: number | null = null;
                           let lastErr: any = null;
-                          const tryPort = async (p: number): Promise<boolean> => {
-                            if (!Number.isFinite(p) || p <= 0 || tried.has(p)) return false;
-                            tried.add(p);
-                            try {
-                              await onStartWifiTunnel(ip, p);
-                              connectedPort = p;
-                              return true;
-                            } catch (err: any) {
-                              lastErr = err;
-                              return false;
-                            }
-                          };
                           try {
                             const entered = parseInt(tunnelPort);
-                            if (Number.isFinite(entered) && entered > 0) {
-                              await tryPort(entered);
-                            }
-                            if (connectedPort === null) {
-                              // Scan and walk every open port. Each wrong port
-                              // costs one backend handshake timeout (~8s), but
-                              // the scan usually returns only a handful.
-                              setPortScanning(true);
-                              let ports: number[] = [];
-                              try {
-                                const res = await wifiTunnelFindPort(ip);
-                                ports = res.ports || [];
-                              } catch (err: any) {
-                                lastErr = err;
-                              }
-                              setPortScanning(false);
-                              if (ports.length === 0 && tried.size === 0) {
-                                setTunnelError(t('wifi.port_scan_no_hit'));
-                                setTunnelConnecting(false);
-                                return;
-                              }
-                              for (const p of ports) {
-                                if (await tryPort(p)) break;
-                              }
+                            const primary = Number.isFinite(entered) && entered > 0 ? entered : 49152;
+                            const orderedHints = stablePortOrder(primary, tunnelPortHints);
+                            try {
+                              const res = tunnelPortHints.length > 0
+                                ? await onStartWifiTunnel(ip, primary, undefined, orderedHints)
+                                : await onStartWifiTunnel(ip, primary);
+                              connectedPort = Number(res?.port) > 0 ? Number(res.port) : primary;
+                            } catch (err: any) {
+                              lastErr = err;
                             }
                             if (connectedPort !== null) {
                               setTunnelPort(String(connectedPort));
+                              setTunnelPortHints([]);
                               // Legacy single-entry keys — kept so the IP / Port
                               // input fields pre-fill correctly next launch. The
                               // savedips multi-entry list is written by

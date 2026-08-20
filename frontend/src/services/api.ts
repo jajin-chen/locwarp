@@ -121,14 +121,23 @@ export const connectDevice = (udid: string) => request<any>('POST', `/api/device
 export const disconnectDevice = (udid: string) => request<any>('DELETE', `/api/device/${udid}/connect`)
 export const wifiConnect = (ip: string) => request<any>('POST', '/api/device/wifi/connect', { ip })
 export const wifiScan = () => request<any[]>('GET', '/api/device/wifi/scan')
-export const wifiTunnelStartAndConnect = (ip: string, port = 49152, udid?: string) =>
-  request<any>('POST', '/api/device/wifi/tunnel/start-and-connect', { ip, port, ...(udid ? { udid } : {}) })
-export interface TunnelInfo { udid: string; rsd_address?: string; rsd_port?: number; interface?: string; protocol?: string }
+// ports: extra RemotePairing candidates the backend tries after `port` if the
+// remembered endpoint is stale (iOS can re-pick it after reboot/rebind).
+export const wifiTunnelStartAndConnect = (
+  ip: string, port = 49152, udid?: string, ports?: number[],
+) => request<any>('POST', '/api/device/wifi/tunnel/start-and-connect', {
+  ip, port,
+  ...(udid ? { udid } : {}),
+  ...(ports && ports.length ? { ports } : {}),
+})
+export interface TunnelInfo { udid: string; ip?: string; port?: number; rsd_address?: string; rsd_port?: number; interface?: string; protocol?: string }
 export const wifiTunnelStatus = () =>
   request<{ tunnels: TunnelInfo[]; running: boolean; rsd_address?: string; rsd_port?: number }>(
     'GET', '/api/device/wifi/tunnel/status',
   )
-export const wifiTunnelDiscover = () => request<{ devices: { ip: string; port: number; host: string; name: string }[] }>('GET', '/api/device/wifi/tunnel/discover')
+export const wifiTunnelDiscover = () => request<{
+  devices: { ip: string; port: number; ports?: number[]; host: string; name: string }[]
+}>('GET', '/api/device/wifi/tunnel/discover')
 export const wifiTunnelFindPort = (ip: string) =>
   request<{ ip: string; ports: number[] }>('POST', '/api/device/wifi/tunnel/find_port', { ip })
 // udid: stop one specific tunnel; omit to stop all (legacy stop-all)

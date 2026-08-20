@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron')
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog } = require('electron')
 const path = require('path')
 const { spawn } = require('child_process')
 const http = require('http')
@@ -180,6 +180,8 @@ ipcMain.handle('set-render-mode', (_e, mode) => {
 
 ipcMain.handle('relaunch-app', () => {
   app.relaunch()
+  appQuitting = true
+  stopBackend()
   app.exit(0)
 })
 
@@ -208,6 +210,8 @@ Menu.setApplicationMenu(null)
 
 let mainWindow
 let backendProc = null
+let appQuitting = false
+let backendFailureShown = false
 
 function resolveBackendExe() {
   // In a packaged build, extraResources places files under process.resourcesPath
@@ -219,27 +223,133 @@ function resolveBackendExe() {
   return null
 }
 
+function resolveBackendInstallDir(exe) {
+  const exeDir = path.dirname(exe)
+  const exeRoot = path.dirname(path.dirname(exe))
+  const resourcesRoot = process.resourcesPath
+    ? path.dirname(process.resourcesPath)
+    : null
+  const candidates = [resourcesRoot, exeRoot, process.resourcesPath, exeDir]
+    .filter((dir) => typeof dir === 'string' && dir.length > 0)
+  return candidates.find((dir) => fs.existsSync(dir)) || exeRoot || exeDir
+}
+
+// The backend exe is an unsigned PyInstaller bundle, which antivirus engines
+// (Defender included) sometimes quarantine hours after a successful install.
+// Without this, the missing file surfaces as a raw "spawn ... ENOENT" uncaught
+// exception that says nothing about what to do. Show an actionable message and
+// offer to open the folder so the user can see for themselves it is gone.
+function showBackendMissingDialog(exe, detail) {
+  if (appQuitting || backendFailureShown) return
+  backendFailureShown = true
+
+  const zh = (app.getLocale() || '').toLowerCase().startsWith('zh')
+  const installDir = resolveBackendInstallDir(exe)
+  const msg = zh
+    ? {
+        title: 'LocWarp 無法啟動',
+        message: '找不到背景服務 (locwarp-backend.exe)',
+        detail:
+          '這個檔案通常是被防毒軟體 (Windows Defender 或第三方防毒) 判定為可疑並隔離刪除。\n\n' +
+          '解決步驟：\n' +
+          '1. 開啟「Windows 安全性」→「病毒與威脅防護」→「防護歷程記錄」，若有 LocWarp 相關項目請按「還原」。\n' +
+          '2. 在「排除項目」中新增資料夾：\n' +
+          `   ${installDir}\n` +
+          '3. 移除 LocWarp 後重新安裝 (安裝檔請以系統管理員身分執行)。\n\n' +
+          '若使用第三方防毒，請先將 LocWarp 加入白名單再重裝。\n\n' +
+          `預期路徑：\n${exe}` +
+          (detail ? `\n\n${detail}` : ''),
+        buttons: ['開啟安裝資料夾', '關閉'],
+      }
+    : {
+        title: 'LocWarp cannot start',
+        message: 'Backend service not found (locwarp-backend.exe)',
+        detail:
+          'This file is usually removed by antivirus software (Windows Defender or a third-party product) that flagged it as suspicious.\n\n' +
+          'How to fix:\n' +
+          '1. Open Windows Security > Virus & threat protection > Protection history, and restore any LocWarp entry.\n' +
+          '2. Add an exclusion for the folder:\n' +
+          `   ${installDir}\n` +
+          '3. Uninstall LocWarp, then reinstall (run the installer as administrator).\n\n' +
+          'With third-party antivirus, allowlist LocWarp before reinstalling.\n\n' +
+          `Expected path:\n${exe}` +
+          (detail ? `\n\n${detail}` : ''),
+        buttons: ['Open install folder', 'Close'],
+      }
+
+  const choice = dialog.showMessageBoxSync({
+    type: 'error',
+    title: msg.title,
+    message: msg.message,
+    detail: msg.detail,
+    buttons: msg.buttons,
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  })
+  if (choice === 0) {
+    // Wait for the shell handoff to finish before quitting. openPath resolves
+    // with an error string on some platforms and can also reject/throw.
+    Promise.resolve()
+      .then(() => shell.openPath(installDir))
+      .then((error) => {
+        if (error) console.error('[electron] failed to open install folder:', error)
+      })
+      .catch((error) => console.error('[electron] failed to open install folder:', error))
+      .finally(() => {
+        appQuitting = true
+        app.quit()
+      })
+    return
+  }
+  appQuitting = true
+  app.quit()
+}
+
 function startBackend() {
   const exe = resolveBackendExe()
   if (!exe) return
+  if (!fs.existsSync(exe)) {
+    console.error('[electron] backend exe missing:', exe)
+    showBackendMissingDialog(exe, null)
+    return
+  }
   console.log('[electron] spawning backend:', exe)
-  backendProc = spawn(exe, [], {
-    cwd: path.dirname(exe),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  })
-  backendProc.stdout.on('data', (d) => process.stdout.write(`[backend] ${d}`))
-  backendProc.stderr.on('data', (d) => process.stderr.write(`[backend] ${d}`))
-  backendProc.on('exit', (code) => {
-    console.log('[electron] backend exited with code', code)
+  let child
+  try {
+    child = spawn(exe, [], {
+      cwd: path.dirname(exe),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+  } catch (e) {
+    console.error('[electron] backend spawn threw:', e)
+    showBackendMissingDialog(exe, String(e && e.message ? e.message : e))
+    return
+  }
+  backendProc = child
+  // spawn() reports ENOENT/EACCES asynchronously; without this handler the
+  // error becomes an uncaught exception in the main process.
+  child.once('error', (e) => {
+    console.error('[electron] backend spawn error:', e)
+    if (backendProc !== child) return
     backendProc = null
+    if (appQuitting || backendFailureShown) return
+    showBackendMissingDialog(exe, String(e && e.message ? e.message : e))
+  })
+  child.stdout.on('data', (d) => process.stdout.write(`[backend] ${d}`))
+  child.stderr.on('data', (d) => process.stderr.write(`[backend] ${d}`))
+  child.on('exit', (code) => {
+    console.log('[electron] backend exited with code', code)
+    if (backendProc === child) backendProc = null
   })
 }
 
 function stopBackend() {
-  if (!backendProc) return
-  try { backendProc.kill() } catch {}
+  const child = backendProc
   backendProc = null
+  if (!child) return
+  try { child.kill() } catch {}
 }
 
 function waitForBackend(timeoutMs = 30000) {
@@ -281,7 +391,7 @@ async function createWindow() {
         const u = new URL(details.url)
         if (OSM_HOSTS.includes(u.hostname)) {
           details.requestHeaders['User-Agent'] =
-            'LocWarp/0.1.49 (+https://github.com/keezxc1223/locwarp)'
+            `LocWarp/${app.getVersion()} (+https://github.com/keezxc1223/locwarp)`
           details.requestHeaders['Referer'] = 'https://github.com/keezxc1223/locwarp'
         }
       } catch {}
@@ -339,8 +449,15 @@ async function createWindow() {
 
 app.whenReady().then(createWindow)
 app.on('window-all-closed', () => {
-  stopBackend()
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin') {
+    appQuitting = true
+    app.quit()
+  } else {
+    stopBackend()
+  }
 })
-app.on('before-quit', stopBackend)
+app.on('before-quit', () => {
+  appQuitting = true
+  stopBackend()
+})
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
