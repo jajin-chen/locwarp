@@ -74,7 +74,7 @@
   #topbar .pill.no-device { color: var(--muted); }
   #topbar .pill.is-primary { border-color: rgba(108,140,255,0.45); }
 
-  /* PIN gate */
+  /* Capability-link gate */
   #gate {
     position: fixed; inset: 0; z-index: 2000;
     background: rgba(8,10,14,0.96); display: flex; align-items: center; justify-content: center;
@@ -87,19 +87,6 @@
   }
   #gate h1 { font-size: 18px; margin: 0 0 6px; font-weight: 600; }
   #gate p { font-size: 13px; color: var(--muted); margin: 0 0 16px; line-height: 1.5; }
-  #gate input {
-    width: 100%; font-size: 28px; letter-spacing: 8px; text-align: center;
-    background: #0f1218; color: var(--text); border: 1px solid var(--border);
-    border-radius: 12px; padding: 14px 12px; outline: none;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  #gate input:focus { border-color: var(--accent); }
-  #gate button {
-    width: 100%; margin-top: 12px; padding: 12px; border-radius: 12px;
-    border: none; background: var(--accent); color: #fff; font-size: 15px;
-    font-weight: 600; cursor: pointer;
-  }
-  #gate button:disabled { opacity: 0.5; }
   #gate .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 18px; }
 
   /* FAB + compact menu */
@@ -353,11 +340,9 @@
 
 <div id="gate" style="display:none">
   <div class="card">
-    <h1>輸入 PIN</h1>
-    <p>在桌面 LocWarp 上點「手機操控」按鈕,把畫面顯示的 6 位數 PIN 輸入這裡。</p>
-    <input id="pin-input" inputmode="numeric" maxlength="6" pattern="[0-9]*" placeholder="------" autocomplete="off" />
-    <button id="pin-submit" disabled>連線</button>
-    <div class="err" id="pin-err"></div>
+    <h1>手機操控網址無效</h1>
+    <p>請使用桌面 LocWarp 顯示的完整手機操控網址開啟，網址必須包含授權資訊。</p>
+    <div class="err" id="invalid-link" role="alert">缺少或無效的手機操控網址授權資訊。</div>
   </div>
 </div>
 
@@ -438,15 +423,41 @@
     }
   }, 800);
 
-  // ── Token ─────────────────────────────────────────────────
-  // Token is obtained ONLY via PIN entry; stored in localStorage so a
-  // page refresh doesn't force the user to re-type the PIN.
+  // ── Capability token ──────────────────────────────────────
+  // The complete capability URL carries the token in its fragment:
+  // /phone#t=<32-hex-token>.  Fragments are not sent to the server, so
+  // the page reads it locally and uses the header for every API call.
+  // Keep a copy in localStorage so a refresh from the same browser still
+  // works after the address bar no longer includes the fragment.
   let token = null;
   function loadStoredToken() {
     try { return localStorage.getItem('locwarp.phone.token'); } catch (e) { return null; }
   }
   function storeToken(t) { try { localStorage.setItem('locwarp.phone.token', t); } catch (e) {} }
   function clearStoredToken() { try { localStorage.removeItem('locwarp.phone.token'); } catch (e) {} }
+
+  function tokenFromHash() {
+    const rawHash = window.location.hash || '';
+    if (!rawHash) return null;
+    const params = new URLSearchParams(rawHash.slice(1));
+    const candidate = params.get('t') || '';
+    return /^[0-9a-f]{32}$/i.test(candidate) ? candidate : null;
+  }
+
+  function removeCapabilityFragment() {
+    if (!window.location.hash) return;
+    try {
+      // replaceState removes the capability from the address bar and the
+      // current history entry without triggering another page load.
+      window.history.replaceState(null, document.title,
+                                  window.location.pathname + window.location.search);
+    } catch (e) {
+      // A restricted browser context may not permit history updates. Clear
+      // the visible fragment as a last-resort fallback so a 401 or a page
+      // reload does not leave the capability in the address bar.
+      try { window.location.hash = ''; } catch (ignored) {}
+    }
+  }
 
   // ── Toast ─────────────────────────────────────────────────
   let toastTimer = null;
@@ -461,14 +472,23 @@
 
   // ── API ───────────────────────────────────────────────────
   async function api(path, opts) {
+    // Keep the credential associated with this request. A concurrent
+    // hashchange may install a newer token before this response arrives;
+    // an old request's 401 must not revoke that newer capability.
+    const requestToken = token;
     opts = opts || {};
     opts.headers = Object.assign({ 'Content-Type': 'application/json' },
                                  opts.headers || {},
-                                 token ? { 'X-LocWarp-Token': token } : {});
+                                 requestToken ? { 'X-LocWarp-Token': requestToken } : {});
     if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
     const res = await fetch(path, opts);
     if (res.status === 401) {
-      token = null; clearStoredToken(); showGate();
+      if (token === requestToken) {
+        token = null;
+        clearStoredToken();
+        removeCapabilityFragment();
+        showGate();
+      }
       throw new Error('unauthorized');
     }
     if (!res.ok) {
@@ -865,63 +885,59 @@
   document.getElementById('coord-go').addEventListener('click', submitCoord);
   coordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitCoord(); });
 
-  // ── PIN gate ─────────────────────────────────────────────
+  // ── Invalid capability-link gate ──────────────────────────
   const gate = document.getElementById('gate');
-  const pinInput = document.getElementById('pin-input');
-  const pinSubmit = document.getElementById('pin-submit');
-  const pinErr = document.getElementById('pin-err');
+  const invalidLink = document.getElementById('invalid-link');
 
-  function showGate() {
+  function showGate(message) {
     gate.style.display = '';
-    pinInput.value = '';
-    pinErr.textContent = '';
-    setTimeout(() => pinInput.focus(), 100);
+    invalidLink.textContent = message || '缺少或無效的手機操控網址授權資訊。';
   }
   function hideGate() { gate.style.display = 'none'; }
 
   // Tell the desktop UI "this phone reached the LAN URL" so it can
-  // confirm pairing actually works end-to-end (separates "wrong IP"
-  // from "PIN typo"). Fire-and-forget — we don't need the response.
+  // confirm the phone reached the LAN URL end-to-end. Fire-and-forget —
+  // we don't need the response.
   fetch('/api/phone/_reach').catch(() => {});
 
-  pinInput.addEventListener('input', () => {
-    pinInput.value = pinInput.value.replace(/\D/g, '').slice(0, 6);
-    pinSubmit.disabled = pinInput.value.length !== 6;
-    pinErr.textContent = '';
-  });
-  pinInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !pinSubmit.disabled) pinSubmit.click();
-  });
-  pinSubmit.addEventListener('click', async () => {
-    pinSubmit.disabled = true;
-    pinErr.textContent = '';
-    try {
-      const r = await fetch('/api/phone/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: pinInput.value }),
-      });
-      if (!r.ok) {
-        pinErr.textContent = 'PIN 不正確';
-        pinSubmit.disabled = false;
-        return;
-      }
-      const j = await r.json();
-      token = j.token;
-      storeToken(token);
-      hideGate();
-      pollStatus();
-    } catch (e) {
-      pinErr.textContent = '連線失敗,請重試';
-      pinSubmit.disabled = false;
+  // ── Boot ──────────────────────────────────────────────────
+  async function activateHashToken() {
+    if (!window.location.hash) return false;
+
+    const hashToken = tokenFromHash();
+    if (!hashToken) {
+      // A malformed hash must not fall back to a previously cached
+      // capability. Clear it and require a fresh complete URL.
+      token = null;
+      clearStoredToken();
+      removeCapabilityFragment();
+      showGate();
+      return true;
     }
+
+    // A newly supplied fragment always wins over localStorage. Consume it
+    // before making the first authenticated request so it cannot remain in
+    // the address bar/history or be copied into a referrer.
+    token = hashToken;
+    storeToken(hashToken);
+    removeCapabilityFragment();
+    hideGate();
+    await pollStatus();
+    return true;
+  }
+
+  window.addEventListener('hashchange', () => {
+    void activateHashToken();
   });
 
-  // ── Boot ──────────────────────────────────────────────────
   async function boot() {
+    if (await activateHashToken()) return;
     token = loadStoredToken();
-    if (!token) { showGate(); return; }
-    try { await pollStatus(); } catch (e) {}
+    if (!token) {
+      showGate();
+      return;
+    }
+    await pollStatus();
   }
   boot();
   setInterval(() => { if (token) pollStatus(); }, 2000);

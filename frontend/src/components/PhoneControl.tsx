@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 import { API_BASE as API } from '../services/api';
@@ -10,12 +10,24 @@ interface PhoneNic {
   primary: boolean;
 }
 
-interface PhoneInfo {
+export interface PhoneInfo {
   port: number;
   lan_ips: string[];
   nics?: PhoneNic[];
-  pin: string;
+  token: string;
   last_phone_hit_ago_s?: number | null;
+}
+
+/** Build the capability URL that the phone opens to control LocWarp. */
+export function buildPhoneControlUrl(
+  info: Pick<PhoneInfo, 'port' | 'token'> | null | undefined,
+  ip: string | null | undefined,
+): string {
+  const token = typeof info?.token === 'string' ? info.token.trim() : '';
+  const host = typeof ip === 'string' ? ip.trim() : '';
+  const port = info?.port;
+  if (!token || !host || typeof port !== 'number' || !Number.isFinite(port) || port <= 0) return '';
+  return `http://${host}:${port}/phone#t=${token}`;
 }
 
 interface PhoneControlButtonProps {
@@ -29,39 +41,66 @@ const PhoneControlButton: React.FC<PhoneControlButtonProps> = ({ showToast }) =>
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [selectedIp, setSelectedIp] = useState<string | null>(null);
+  const infoRequestSeq = useRef(0);
+  const rotateInFlight = useRef(false);
 
-  const fetchInfo = useCallback(async () => {
+  const fetchInfo = useCallback(async (options: { allowDuringRotate?: boolean } = {}): Promise<PhoneInfo | null> => {
+    // Polling and selection changes must not start another read while rotate
+    // is replacing the capability. The explicit post-rotate refresh opts in
+    // below so the new token is fetched before rotate reports success.
+    if (rotateInFlight.current && !options.allowDuringRotate) return null;
+    const requestSeq = ++infoRequestSeq.current;
     setLoading(true);
     setErr(null);
     try {
       const r = await fetch(`${API}/api/phone/info`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j: PhoneInfo = await r.json();
+      // A response that started before a rotate (or a newer refresh) no
+      // longer owns the displayed info. This also protects against fetch
+      // implementations that ignore AbortSignal in tests or older browsers.
+      if (requestSeq !== infoRequestSeq.current) return null;
       setInfo(j);
       if (!selectedIp || !j.lan_ips.includes(selectedIp)) {
         setSelectedIp(j.lan_ips[0] ?? null);
       }
+      return j;
     } catch (e: any) {
-      setErr(e?.message ?? 'failed');
+      if (requestSeq === infoRequestSeq.current) setErr(e?.message ?? 'failed');
+      throw e;
     } finally {
-      setLoading(false);
+      if (requestSeq === infoRequestSeq.current) setLoading(false);
     }
   }, [selectedIp]);
 
   useEffect(() => {
-    if (open) fetchInfo();
+    if (open) void fetchInfo().catch(() => undefined);
   }, [open, fetchInfo]);
 
   const rotate = useCallback(async () => {
+    if (rotateInFlight.current) return;
+    rotateInFlight.current = true;
+    // Transfer ownership away from every info request already in flight.
+    // Their late responses can finish normally, but cannot overwrite the
+    // freshly rotated URL or its selected NIC.
+    infoRequestSeq.current += 1;
     setLoading(true);
+    setErr(null);
     try {
       const r = await fetch(`${API}/api/phone/rotate`, { method: 'POST' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      await fetchInfo();
+      // The POST invalidates the old capability immediately. Remove it from
+      // the UI before waiting for the replacement info request, so a failed
+      // refresh can never leave an expired URL visible or copyable.
+      setInfo(null);
+      // Do not claim success until the desktop has observed the new token.
+      // Keeping rotateInFlight set gates the background poll during this read.
+      await fetchInfo({ allowDuringRotate: true });
       showToast?.(t('phone.rotated'));
     } catch (e: any) {
       setErr(e?.message ?? 'failed');
     } finally {
+      rotateInFlight.current = false;
       setLoading(false);
     }
   }, [fetchInfo, showToast, t]);
@@ -73,7 +112,7 @@ const PhoneControlButton: React.FC<PhoneControlButtonProps> = ({ showToast }) =>
     } catch { /* ignore */ }
   }, [showToast, t]);
 
-  const url = info && selectedIp ? `http://${selectedIp}:${info.port}/phone` : '';
+  const url = buildPhoneControlUrl(info, selectedIp);
 
   const [fwState, setFwState] = useState<'idle' | 'busy' | 'ok' | 'fail'>('idle');
   const [fwMsg, setFwMsg] = useState<string>('');
@@ -102,7 +141,7 @@ const PhoneControlButton: React.FC<PhoneControlButtonProps> = ({ showToast }) =>
   // up live when the user actually opens the link on their phone.
   useEffect(() => {
     if (!open) return;
-    const id = setInterval(fetchInfo, 2000);
+    const id = setInterval(() => { void fetchInfo().catch(() => undefined); }, 2000);
     return () => clearInterval(id);
   }, [open, fetchInfo]);
 
@@ -225,7 +264,15 @@ const PhoneControlButton: React.FC<PhoneControlButtonProps> = ({ showToast }) =>
                       }}
                       title={t('phone.copy_url')}
                     >
-                      {url || t('phone.no_lan')}
+                      {url || t('phone.no_url')}
+                    </div>
+                    <div style={{
+                      marginTop: 8, padding: '7px 10px', borderRadius: 6,
+                      background: 'rgba(255, 180, 60, 0.10)',
+                      border: '1px solid rgba(255, 180, 60, 0.32)',
+                      color: '#ffc870', fontSize: 11, lineHeight: 1.45,
+                    }}>
+                      {t('phone.url_warning')}
                     </div>
                   </div>
 
@@ -240,22 +287,6 @@ const PhoneControlButton: React.FC<PhoneControlButtonProps> = ({ showToast }) =>
                       : t('phone.reach_unknown')}
                   </div>
 
-                  <div>
-                    <div style={{ fontSize: 11, color: '#97a0b3', marginBottom: 4 }}>PIN</div>
-                    <div
-                      onClick={() => copy(info.pin)}
-                      style={{
-                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                        fontSize: 30, letterSpacing: 8, fontWeight: 600,
-                        background: '#0f1218', padding: '14px 12px', borderRadius: 8,
-                        textAlign: 'center', cursor: 'pointer',
-                        border: '1px solid rgba(255,255,255,0.08)',
-                      }}
-                      title={t('phone.copy_pin')}
-                    >
-                      {info.pin}
-                    </div>
-                  </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -319,6 +350,7 @@ const PhoneControlButton: React.FC<PhoneControlButtonProps> = ({ showToast }) =>
                   <button
                     onClick={rotate}
                     disabled={loading}
+                    title={t('phone.rotate_tooltip')}
                     style={{
                       padding: '6px 12px', fontSize: 12,
                       background: 'rgba(239, 93, 93, 0.12)',

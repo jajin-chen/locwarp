@@ -482,7 +482,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
               {t('status.locate_pc')}
             </button>
           )}
-          {/* 手機操控 — opens the phone-control pairing modal */}
+          {/* 手機操控 — opens the complete phone-control access URL modal */}
           <PhoneControlButton />
           {/* 地圖釘 / 使用者頭像 — opens the avatar picker panel */}
           {onOpenAvatarPicker && (

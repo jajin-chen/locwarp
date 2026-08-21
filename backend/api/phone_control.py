@@ -2,20 +2,17 @@
 mobile-friendly page hosted by LocWarp and operate the primary device.
 
 Auth model:
-  * Backend generates a 32-hex `token` and a 6-digit `pin` at startup
-    (and on every `/rotate` call).
-  * Phone opens `http://<lan-ip>:<port>/phone`, types the PIN, and the
-    page POSTs the PIN to `/api/phone/auth` to receive the token in
-    JSON. The token is stored in localStorage for subsequent reloads.
-  * Every action endpoint requires the token via `X-LocWarp-Token`
-    header or `?t=` query param.
+  * Backend generates a 32-hex capability `token` at startup (and on
+    every `/rotate` call).
+  * The desktop UI publishes a complete capability URL,
+    `http://<lan-ip>:<port>/phone#t=<token>`. The fragment stays in the
+    browser and is never sent to the backend as part of the page request.
+  * The mobile page reads the fragment and sends the token through the
+    `X-LocWarp-Token` header for every action endpoint. It also accepts
+    `?t=` for API clients that cannot set a header.
   * `/api/phone/info` and `/api/phone/rotate` are localhost-only so the
-    desktop UI can fetch the URL / PIN without exposing them to LAN.
-
-Earlier revisions also offered a QR-based pairing path that embedded the
-token in the URL fragment, but that was removed because anyone with a
-camera who glimpsed the screen could pair without typing the PIN. PIN
-entry is now the only pairing path.
+    desktop UI can fetch or rotate the capability without exposing it to
+    LAN clients.
 """
 
 from __future__ import annotations
@@ -41,12 +38,10 @@ router = APIRouter(tags=["phone"])
 class _PhoneAuth:
     def __init__(self) -> None:
         self.token: str = secrets.token_hex(16)  # 32 hex chars
-        self.pin: str = f"{secrets.randbelow(1_000_000):06d}"
         self.created_at: float = time.monotonic()
 
     def rotate(self) -> None:
         self.token = secrets.token_hex(16)
-        self.pin = f"{secrets.randbelow(1_000_000):06d}"
         self.created_at = time.monotonic()
 
 
@@ -54,7 +49,18 @@ _auth = _PhoneAuth()
 
 
 def _check_token(token: str | None) -> None:
-    if not token or not secrets.compare_digest(token, _auth.token):
+    # Validate shape before calling compare_digest. Besides keeping the
+    # comparison type-safe, this rejects malformed, non-ASCII, and
+    # non-hex values uniformly instead of relying on the token comparison
+    # to handle them.
+    if (
+        not isinstance(token, str)
+        or len(token) != 32
+        or any(ch not in "0123456789abcdefABCDEF" for ch in token)
+    ):
+        raise HTTPException(status_code=401, detail={"code": "phone_auth_required",
+                                                     "message": "Invalid or missing token"})
+    if not secrets.compare_digest(token, _auth.token):
         raise HTTPException(status_code=401, detail={"code": "phone_auth_required",
                                                      "message": "Invalid or missing token"})
 
@@ -80,7 +86,7 @@ def _record_phone_hit() -> None:
     """Called from /phone and /api/phone/_reach when the request comes
     from a non-loopback client. Used by the desktop UI to confirm a
     phone successfully reached the LAN URL — distinguishes 'wrong IP /
-    firewall blocked' from 'phone arrived but PIN typo'."""
+    firewall blocked' from an invalid or stale capability URL."""
     global _last_phone_hit_ts
     _last_phone_hit_ts = time.monotonic()
 
@@ -349,10 +355,6 @@ def _lan_ipv4_candidates() -> list[str]:
 # ── Models ───────────────────────────────────────────────────
 
 
-class _AuthRequest(BaseModel):
-    pin: str = Field(min_length=6, max_length=6)
-
-
 class _TeleportBody(BaseModel):
     lat: float = Field(ge=-90.0, le=90.0)
     lng: float = Field(ge=-180.0, le=180.0)
@@ -366,15 +368,15 @@ class _NavigateBody(BaseModel):
     speed_kmh: float | None = Field(default=None, ge=0.1, le=300.0)
 
 
-# ── Pairing endpoints (localhost-only or PIN-gated) ──────────
+# ── Capability endpoints (localhost-only) ────────────────────
 
 
 @router.get("/api/phone/info")
 async def phone_info(request: Request):
-    """Desktop-only: returns LAN IPs, port, PIN, and last-seen phone-
+    """Desktop-only: returns LAN IPs, port, capability token, and last-seen phone-
     page hit timestamp so the UI can show "phone reached the URL N
     seconds ago" and diagnose why a phone can't connect (wrong IP vs.
-    firewall blocked vs. PIN typo) without the user having to check
+    firewall blocked vs. invalid URL) without the user having to check
     anything themselves."""
     if not _is_localhost(request):
         raise HTTPException(status_code=403, detail="Localhost only")
@@ -384,7 +386,7 @@ async def phone_info(request: Request):
         "port": API_PORT,
         "lan_ips": [n["ip"] for n in nics if n["kind"] != "virtual"],
         "nics": nics,
-        "pin": _auth.pin,
+        "token": _auth.token,
         "last_phone_hit_ago_s": _last_phone_hit_seconds_ago(),
     }
 
@@ -404,22 +406,14 @@ async def phone_firewall_repair(request: Request):
 
 @router.post("/api/phone/rotate")
 async def phone_rotate(request: Request):
-    """Desktop-only: regenerates PIN + token, invalidating any previously
-    paired phone. Use after suspecting compromise or just to refresh."""
+    """Desktop-only: regenerates the capability token, invalidating any
+    previously published phone URL. Use after suspecting compromise or
+    just to refresh."""
     if not _is_localhost(request):
         raise HTTPException(status_code=403, detail="Localhost only")
     _auth.rotate()
     logger.info("Phone-control auth rotated")
     return {"status": "ok"}
-
-
-@router.post("/api/phone/auth")
-async def phone_auth(req: _AuthRequest):
-    """PIN-only flow: phone POSTs the PIN it sees on the desktop screen
-    and gets the token back. PIN comparison is constant-time."""
-    if not secrets.compare_digest(req.pin, _auth.pin):
-        raise HTTPException(status_code=401, detail={"code": "bad_pin", "message": "Invalid PIN"})
-    return {"token": _auth.token}
 
 
 # ── Phone-side action endpoints (token required) ─────────────

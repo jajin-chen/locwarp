@@ -140,7 +140,7 @@ The choice is persisted in localStorage. When any engine fails (502 / timeout / 
 
 ### Phone Web Control (v0.2.96+)
 
-Operate LocWarp from your phone without walking back to the computer. The "**Phone control**" button in the bottom status bar opens a modal showing a LAN URL and a 6-digit PIN. Open the URL in any phone browser, enter the PIN, and the phone gets a mobile-friendly map with seven actions:
+Operate LocWarp from your phone without walking back to the computer. The "**Phone control**" button in the bottom status bar shows the complete LAN control URL. Open that URL in any phone browser to use the mobile-friendly map and actions immediately, without entering a PIN or pairing first:
 
 > **Prerequisite**: the phone must be connected to the **same Wi-Fi network as the desktop** (cellular alone can't reach the desktop's LAN IP), and the Windows firewall must allow inbound connections to port 8777. How the desktop talks to the iPhone (USB or Wi-Fi Tunnel) doesn't matter, as long as one of them is up.
 
@@ -153,8 +153,8 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 | **Stop / Restore** | Same semantics as the desktop buttons |
 
 - The phone map mirrors the desktop's live blue route polyline (HTTP polling).
-- Token is a random 32-hex string that's only shown in the desktop modal; PIN is 6 digits, wrong attempts get 401.
-- "Regenerate" rotates the PIN + token immediately, invalidating any previously paired phone.
+- The complete URL contains a random 32-hex access token and grants phone-control access, so do not share it. Missing or incorrect tokens get 401.
+- "Regenerate access URL" rotates the token immediately, invalidating the old URL.
 
 ### Connection (iOS 16+)
 

@@ -63,11 +63,13 @@ export const STRINGS = {
 
   // Phone control: lets a phone on the same WiFi operate LocWarp via a small mobile web page.
   'phone.button': { zh: '手機操控', en: 'Phone control' },
-  'phone.tooltip': { zh: '在同 WiFi 下用手機操控 LocWarp (網址 + PIN)', en: 'Operate LocWarp from your phone on the same WiFi (URL + PIN)' },
-  'phone.modal_title': { zh: '手機操控配對', en: 'Phone control pairing' },
-  'phone.help': { zh: '手機與電腦連到同一個 WiFi,在手機瀏覽器輸入下方網址,再輸入 PIN 即可開始操控。', en: 'Connect your phone to the same WiFi, open the URL below in the phone browser, then enter the PIN to start controlling.' },
-  'phone.lan_url': { zh: '網址', en: 'URL' },
+  'phone.tooltip': { zh: '在同 WiFi 下用手機操控 LocWarp (開啟完整網址即可)', en: 'Operate LocWarp from your phone on the same WiFi using the full URL' },
+  'phone.modal_title': { zh: '手機操控', en: 'Phone control' },
+  'phone.help': { zh: '手機與電腦連到同一個 WiFi,將下方完整網址貼到手機瀏覽器即可開始操控。', en: 'Connect your phone to the same WiFi, then open the complete URL below in the phone browser to start controlling.' },
+  'phone.lan_url': { zh: '完整操控網址', en: 'Complete control URL' },
   'phone.no_lan': { zh: '偵測不到內網 IP', en: 'No LAN IP detected' },
+  'phone.no_url': { zh: '目前無法產生完整操控網址', en: 'Unable to build the complete control URL' },
+  'phone.url_warning': { zh: '此完整網址等同於手機操控權限,請勿分享。', en: 'This complete URL is the phone-control authority. Do not share it.' },
   'phone.firewall_repair_button': { zh: '手機連不上?修復防火牆', en: "Phone can't connect? Add firewall rule" },
   'phone.firewall_repair_tooltip': {
     zh: '一鍵新增 Windows 防火牆入站規則,手機輸入網址連不到時按這個。需以系統管理員身分執行 LocWarp。',
@@ -78,11 +80,11 @@ export const STRINGS = {
   'phone.firewall_repair_failed': { zh: '修復失敗', en: 'Repair failed' },
   'phone.reach_ok': { zh: '✓ 手機 {sec} 秒前成功連到網址', en: '✓ Phone reached the URL {sec}s ago' },
   'phone.reach_unknown': { zh: '尚未偵測到手機開啟過此網址 (嘗試後此處會更新)', en: 'No phone has opened this URL yet (status updates after a try)' },
-  'phone.copy_pin': { zh: '點一下複製 PIN', en: 'Click to copy PIN' },
-  'phone.copy_url': { zh: '點一下複製網址', en: 'Click to copy URL' },
+  'phone.copy_url': { zh: '點一下複製完整操控網址', en: 'Click to copy the complete control URL' },
   'phone.copied': { zh: '已複製', en: 'Copied' },
-  'phone.rotate': { zh: '重新產生', en: 'Regenerate' },
-  'phone.rotated': { zh: '已重新產生 PIN / QR', en: 'PIN / QR regenerated' },
+  'phone.rotate': { zh: '重新產生操控網址', en: 'Regenerate access URL' },
+  'phone.rotate_tooltip': { zh: '產生新的操控網址,舊網址會立即失效', en: 'Generate a new access URL; the old URL stops working immediately' },
+  'phone.rotated': { zh: '手機操控網址已重新產生,舊網址已失效', en: 'Phone control URL regenerated; the old URL is no longer valid' },
 
   // Avatar picker panel
   'avatar.title': { zh: '地圖釘 / 使用者頭像', en: 'Map pin / User avatar' },
