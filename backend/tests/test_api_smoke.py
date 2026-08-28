@@ -125,6 +125,26 @@ async def test_teleport_pushes_position_and_updates_status(client, fake_engine):
     assert status["current_position"] == {"lat": 25.033, "lng": 121.5654}
 
 
+async def test_random_walk_initializes_missing_position_from_center(client, fake_engine):
+    resp = await client.post(
+        "/api/location/randomwalk",
+        json={
+            "center": {"lat": 24.829046, "lng": 121.011213},
+            "radius_m": 1000,
+            "mode": "walking",
+            "speed_kmh": 10.8,
+            "pause_enabled": False,
+            "straight_line": True,
+        },
+    )
+
+    assert resp.status_code == 200
+    assert fake_engine.location_service.positions
+    assert fake_engine.location_service.positions[0] == (24.829046, 121.011213)
+
+    await client.post("/api/location/stop")
+
+
 async def test_teleport_rejects_out_of_range_lat(client, fake_engine):
     resp = await client.post(
         "/api/location/teleport", json={"lat": 999, "lng": 121.5654},

@@ -33,7 +33,16 @@ export function DeviceChip({ letter, device, runtime, onDisconnect, onRestoreOne
   const t = useT()
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const ref = useRef<HTMLDivElement | null>(null)
-  const kind = stateKind(runtime?.state)
+  // `device.is_connected` is the authoritative connection state from the
+  // backend.  A reconnect event can arrive after the old runtime has already
+  // been marked disconnected, so never let that stale simulation state make
+  // an actually-connected device look offline in the chip row.
+  const runtimeKind = stateKind(runtime?.state)
+  const kind = !device.is_connected
+    ? 'disconnected'
+    : runtimeKind === 'disconnected'
+      ? 'idle'
+      : runtimeKind
 
   useEffect(() => {
     if (!menu) return

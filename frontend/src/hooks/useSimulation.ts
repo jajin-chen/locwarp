@@ -457,8 +457,20 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         case 'state_change':
           if (d.state) updateRuntime(udid, { state: d.state, ...(d.state === 'idle' || d.state === 'disconnected' ? { routePath: [] } : {}) })
           break
+        case 'tunnel_recovered':
         case 'device_connected':
-          setRuntimes((prev) => prev[udid] ? prev : { ...prev, [udid]: emptyRuntime(udid) })
+          // A WiFi tunnel can drop and recover while the backend keeps the
+          // same device in its connection table.  The disconnect event marks
+          // this runtime as disconnected; clear that stale simulation state
+          // when the backend confirms the connection is usable again.  Keep
+          // non-disconnected state intact so an in-flight simulation can be
+          // restored by the following state/position events.
+          setRuntimes((prev) => {
+            const cur = prev[udid]
+            if (!cur) return { ...prev, [udid]: emptyRuntime(udid) }
+            if (cur.state !== 'disconnected') return prev
+            return { ...prev, [udid]: emptyRuntime(udid) }
+          })
           // A device reconnecting implicitly resolves any prior connection-
           // loss banner (watchdog auto-connect now broadcasts `device_connected`
           // rather than `device_reconnected`; the legacy case still handles
@@ -607,14 +619,13 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
         break
       }
       case 'device_disconnected': {
-        // In dual-device mode we only show the full-screen banner when the
-        // LAST connected device goes away. If another device is still alive
-        // (remaining_count > 0), the sidebar chip already reflects the
-        // per-device state; no need to nag the user. Backward compat: when
-        // the broadcast omits remaining_count we default to 0 (old behaviour).
+        // The global controls represent the primary device. Losing that
+        // device must stop the controls even when a follower remains online.
+        // Backward compat: when remaining_count is omitted, default to 0.
         const remaining = typeof wsMessage.data?.remaining_count === 'number'
           ? wsMessage.data.remaining_count : 0
-        if (remaining === 0) {
+        const primaryLost = !!primary && !!msgUdid && msgUdid === primary
+        if (remaining === 0 || primaryLost) {
           const isEn = typeof localStorage !== 'undefined' && localStorage.getItem('locwarp.lang') === 'en'
           setError(isEn
             ? 'Device disconnected (USB unplugged or tunnel died), please reconnect USB'
@@ -665,15 +676,9 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
           setEta(null)
           setRandomWalkCenter(null)
         } else if (st === 'disconnected') {
-          // USB unplug or tunnel death of THIS engine. In dual-device
-          // mode the surviving device is still running the same sim, so
-          // keep routePath / destination AND keep running/paused alone:
-          // flipping running to false here would revert the toolbar's
-          // 停止 button back to 開始 even though the other device is
-          // still actively running the simulation. Just record the new
-          // state for completeness; the global running flag is reset by
-          // the device_disconnected handler when remaining_count hits 0.
-          setStatus((prev) => ({ ...prev, state: st }))
+          // Events from non-primary devices were filtered above, so this is
+          // authoritative for the global controls.
+          setStatus((prev) => ({ ...prev, running: false, paused: false, state: st }))
         } else if (st === 'paused') {
           setStatus((prev) => ({ ...prev, paused: true, state: st }))
         } else if (st) {
@@ -1002,15 +1007,22 @@ export function useSimulation(subscribe?: WsSubscribe, primaryUdid?: string | nu
     if (initialFetched.current) return
     initialFetched.current = true
     api.getStatus().then((res) => {
-      if (res.position) {
-        setCurrentPosition({ lat: res.position.lat, lng: res.position.lng })
+      const position = res.current_position ?? res.position
+      if (position) {
+        setCurrentPosition({ lat: position.lat, lng: position.lng })
       }
       if (res.mode) _setMode(res.mode)
-      if (res.running != null || res.paused != null) {
+      const state = typeof res.state === 'string' ? res.state : undefined
+      if (state || res.running != null || res.paused != null || res.is_paused != null) {
+        const paused = res.is_paused != null ? !!res.is_paused : !!res.paused
+        const running = res.running != null
+          ? !!res.running
+          : !!state && !['idle', 'teleport', 'disconnected'].includes(state)
         setStatus({
-          running: !!res.running,
-          paused: !!res.paused,
-          speed: res.speed ?? 0,
+          running,
+          paused,
+          speed: res.speed_mps ?? res.speed ?? 0,
+          state,
         })
       }
     }).catch(() => {

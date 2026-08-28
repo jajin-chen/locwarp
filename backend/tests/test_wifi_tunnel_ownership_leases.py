@@ -965,6 +965,63 @@ async def test_start_and_connect_already_running_rebinds_without_borrowed_stop(
     )
 
 
+async def test_start_and_connect_reuses_existing_connection_and_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An offline pin retry must not rebuild an already-connected primary."""
+
+    primary_udid = "pauline-primary"
+    offline_hint = "sleeping-follower"
+    dm = _LeaseDeviceManager(primary_udid)
+    existing_connection = _Connection("C0")
+    dm._connections[primary_udid] = existing_connection
+    _patch_device_manager(monkeypatch, dm)
+
+    state = _patch_state(monkeypatch, lambda _udid: None)
+    existing_engine = _Engine("E0")
+    state.simulation_engines[primary_udid] = existing_engine
+    state._primary_udid = primary_udid
+
+    monkeypatch.setattr(
+        device,
+        "_build_tunnel_udid_candidates",
+        lambda _req: [primary_udid],
+    )
+    borrowed = _Runner("borrowed-primary")
+    await borrowed.start(primary_udid, "192.0.2.31", 49152)
+    old_watchdog = asyncio.create_task(asyncio.Event().wait())
+    tunnel_manager._tunnels[primary_udid] = borrowed  # type: ignore[assignment]
+    tunnel_manager._tunnel_watchdogs[primary_udid] = old_watchdog
+    tunnel_manager._tunnel_generations[primary_udid] = 1
+
+    result = await device.wifi_tunnel_start_and_connect(
+        device.WifiTunnelStartRequest(
+            ip="192.0.2.31",
+            port=49152,
+            udid=offline_hint,
+        ),
+    )
+
+    assert result["status"] == "connected"
+    assert result["udid"] == primary_udid
+    assert dm.connect_count == 0
+    assert dm._connections[primary_udid] is existing_connection
+    assert state.simulation_engines[primary_udid] is existing_engine
+    assert state._primary_udid == primary_udid
+    assert tunnel_manager._tunnels[primary_udid] is borrowed
+    assert borrowed.stop_calls == 0
+    assert not old_watchdog.done()
+
+    runner, watchdog, side_effects = await tunnel_manager._detach_tunnel(primary_udid)
+    await tunnel_manager._stop_tunnel_parts(
+        runner,
+        watchdog,
+        caller="test_existing_connection_teardown",
+        udid=primary_udid,
+        side_effects=side_effects,
+    )
+
+
 async def test_start_and_connect_engine_exception_cleans_owned_resources_and_returns_500(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

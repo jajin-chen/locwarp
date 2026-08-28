@@ -453,7 +453,25 @@ async def insert_waypoint(req: InsertWaypointRequest):
 
 @router.post("/randomwalk")
 async def random_walk(req: RandomWalkRequest):
-    engine = await _engine(req.udid)
+    from main import app_state as _app_state
+
+    action_udid = req.udid or _app_state._primary_udid
+
+    async def _ensure_start_position():
+        eng = await _engine(action_udid)
+        if eng.current_position is None:
+            await eng.teleport(req.center.lat, req.center.lng)
+
+    try:
+        await _try_with_recovery_retry(action_udid, _ensure_start_position)
+    except DeviceLostError as e:
+        raise (await _handle_device_lost(e, action_udid))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    engine = await _engine(action_udid)
     _spawn(engine.random_walk(
         req.center, req.radius_m, req.mode,
         speed_kmh=req.speed_kmh,

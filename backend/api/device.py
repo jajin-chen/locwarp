@@ -1294,6 +1294,35 @@ async def _wifi_tunnel_start_and_connect_impl(
             raise HTTPException(status_code=500, detail="Tunnel started but no RSD info available")
 
         dm = _dm()
+        existing_connection = dm._connections.get(temp_key) if temp_key else None
+        existing_engine = app_state.simulation_engines.get(temp_key) if temp_key else None
+        if (
+            tunnel_status == "already_running"
+            and req.udid != temp_key
+            and existing_connection is not None
+            and existing_engine is not None
+            and getattr(existing_connection, "connection_type", None) == "Network"
+        ):
+            # An offline-device retry may resolve to a different device's
+            # already-live tunnel.  That tunnel, DM lease, and engine are a
+            # complete connection already; reconnecting it would stop the
+            # active primary simulation and replace its positioned engine.
+            async with _tunnels_lock:
+                attempt.resolved_udid = temp_key
+                if _start_attempt_fenced_locked(attempt):
+                    raise TunnelStartCancelled
+            success = True
+            return {
+                "status": "connected",
+                "udid": temp_key,
+                "name": tunnel_result.get("name") or getattr(existing_connection, "name", "iPhone"),
+                "ios_version": tunnel_result.get("ios_version") or getattr(existing_connection, "ios_version", "0.0"),
+                "connection_type": "Network",
+                "port": tunnel_result.get("port", req.port),
+                "rsd_address": rsd_address,
+                "rsd_port": rsd_port,
+            }
+
         if len(dm._connections) >= MAX_DEVICES:
             raise HTTPException(
                 status_code=409,
