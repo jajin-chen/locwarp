@@ -21,6 +21,11 @@
     --muted: #97a0b3;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  #phone-app { width: 100%; height: 100%; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
   /* Total page-zoom lockout. `pan-x pan-y` lets the user scroll/pan
      but explicitly disables the pinch gesture, so the browser never
      zooms the page (which would throw the FAB / top-bar / +/- buttons
@@ -76,7 +81,7 @@
 
   /* Capability-link gate */
   #gate {
-    position: fixed; inset: 0; z-index: 2000;
+    position: fixed; inset: 0; z-index: 6000;
     background: rgba(8,10,14,0.96); display: flex; align-items: center; justify-content: center;
     padding: 24px;
   }
@@ -138,7 +143,7 @@
 
   /* Confirm sheet */
   #sheet {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1200;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5200;
     background: var(--panel-solid); border-top: 1px solid var(--border);
     border-radius: 18px 18px 0 0;
     padding: 18px 18px calc(env(safe-area-inset-bottom, 0px) + 18px);
@@ -155,6 +160,7 @@
   }
   #sheet .primary { background: var(--accent); color: #fff; }
   #sheet .ghost { background: #2a3140; color: var(--text); }
+  #sheet button:disabled { opacity: 0.5; cursor: wait; }
   #sheet .mode-row { display: flex; gap: 6px; margin-bottom: 12px; }
   #sheet .mode-row button {
     flex: 1; padding: 8px; font-size: 12px; font-weight: 500;
@@ -173,7 +179,7 @@
   /* Toast — above all modals so error feedback is always readable */
   #toast {
     position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 50px);
-    transform: translate(-50%, -16px); z-index: 1600;
+    transform: translate(-50%, -16px); z-index: 5300;
     background: var(--panel-solid); border: 1px solid var(--border);
     border-radius: 999px; padding: 8px 14px; font-size: 12px;
     opacity: 0; transition: opacity 0.18s, transform 0.18s;
@@ -227,6 +233,46 @@
   #search-results .item .full { font-size: 11px; color: var(--muted); margin-top: 2px; }
   #search-results .empty { color: var(--muted); font-size: 12px; text-align: center; padding: 20px; }
 
+  /* Mobile bookmark library */
+  #actions .btn[data-kind="bookmarks"] .ic { background: rgba(240,179,74,0.18); color: var(--warn); }
+  #bookmarks-modal, #bookmark-action-modal, #bookmark-form-modal { z-index: 5200; }
+  #bookmarks-modal .card { max-width: 480px; max-height: calc(100vh - 104px); display: flex; flex-direction: column; }
+  #bookmarks-modal .bookmark-toolbar { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+  #bookmarks-modal .bookmark-toolbar input { margin: 0; flex: 1; min-width: 0; }
+  #bookmarks-modal .bookmark-toolbar button,
+  #bookmarks-modal .bookmark-footer button { flex: 0 0 auto; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border); background: #2a3140; color: var(--text); font-size: 13px; cursor: pointer; }
+  #bookmarks-modal .bookmark-toolbar button:disabled,
+  #bookmarks-modal .bookmark-footer button:disabled,
+  #bookmark-form-modal button:disabled { opacity: 0.5; cursor: wait; }
+  #bookmark-list { min-height: 80px; overflow-y: auto; margin: 0 -4px 8px; padding: 0 4px; }
+  #bookmark-list .bookmark-category { margin-bottom: 10px; }
+  #bookmark-list .bookmark-category-title { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; font-weight: 600; padding: 7px 4px; text-transform: none; cursor: pointer; }
+  #bookmark-list .bookmark-category-title:focus-visible { outline: 1px solid var(--accent); border-radius: 6px; }
+  #bookmark-list .category-caret { margin-left: auto; font-size: 12px; }
+  #bookmark-list .category-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+  #bookmark-list .bookmark-item { display: flex; align-items: center; gap: 8px; padding: 9px 4px; border-bottom: 1px solid rgba(255,255,255,0.06); min-height: 54px; }
+  #bookmark-list .bookmark-item:last-child { border-bottom: 0; }
+  #bookmark-list .bookmark-main { min-width: 0; flex: 1; cursor: pointer; }
+  #bookmark-list .bookmark-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bookmark-list .bookmark-detail { color: var(--muted); font-size: 11px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bookmark-list .bookmark-menu { flex: 0 0 auto; min-width: 42px; min-height: 42px; padding: 8px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-size: 21px; line-height: 1; cursor: pointer; }
+  #bookmark-list .bookmark-menu:active { background: var(--accent-soft); color: var(--accent); }
+  #bookmark-list .empty, #bookmark-list .error, #bookmark-list .loading { color: var(--muted); font-size: 12px; text-align: center; padding: 24px 8px; }
+  #bookmark-list .error { color: var(--danger); }
+  #bookmarks-modal .bookmark-footer { display: flex; gap: 8px; margin-top: auto; }
+  #bookmarks-modal .bookmark-footer button { flex: 1; }
+  #bookmarks-modal .bookmark-footer .primary, #bookmark-form-modal .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #bookmark-action-modal .card { max-width: 380px; }
+  #bookmark-action-modal .bookmark-action-summary { color: var(--muted); font-size: 12px; line-height: 1.5; margin: -4px 0 12px; white-space: pre-line; }
+  #bookmark-action-modal .bookmark-action-list { display: flex; flex-direction: column; gap: 7px; }
+  #bookmark-action-modal .bookmark-action-list button { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: #2a3140; color: var(--text); font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }
+  #bookmark-action-modal .bookmark-action-list button.primary { background: var(--accent-soft); border-color: rgba(108,140,255,0.45); color: var(--accent); }
+  #bookmark-action-modal .bookmark-action-list button.danger { color: var(--danger); }
+  #bookmark-form-modal .card { max-height: calc(100vh - 104px); overflow-y: auto; }
+  #bookmark-form-modal select { width: 100%; padding: 10px 12px; font-size: 16px; background: #0f1218; color: var(--text); border: 1px solid var(--border); border-radius: 8px; outline: none; margin-bottom: 10px; }
+  #bookmark-form-modal select:focus { border-color: var(--accent); }
+  #bookmark-form-modal .form-error { min-height: 18px; margin: -2px 0 5px; color: var(--danger); font-size: 12px; }
+
   /* Pending pin marker */
   .pending-pin {
     width: 28px; height: 28px; border-radius: 50% 50% 50% 0;
@@ -243,6 +289,7 @@
 </head>
 <body>
 
+<div id="phone-app">
 <div id="map"></div>
 
 <div id="topbar">
@@ -250,7 +297,7 @@
   <span id="device-pills" class="device-pills"></span>
 </div>
 
-<div id="actions">
+<div id="actions" aria-hidden="true">
   <div class="btn" data-kind="teleport">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 2 L4 22 L12 18 L20 22 Z" />
@@ -276,6 +323,12 @@
     </svg></span>
     <span>座標飛</span>
   </div>
+  <button type="button" class="btn" data-kind="bookmarks">
+    <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3z" />
+    </svg></span>
+    <span>收藏</span>
+  </button>
   <div class="btn" data-kind="stop">
     <span class="ic"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg></span>
     <span>停止</span>
@@ -288,13 +341,13 @@
   </div>
 </div>
 
-<button id="fab" aria-label="開啟功能">
+<button id="fab" aria-label="開啟功能" aria-controls="actions" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
     <path d="M12 5v14M5 12h14" />
   </svg>
 </button>
 
-<div id="sheet" role="dialog" aria-modal="true">
+<div id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" aria-hidden="true" inert>
   <h2 id="sheet-title">確認動作?</h2>
   <div class="coord" id="sheet-coord"></div>
   <div class="mode-row" id="sheet-modes" style="display:none">
@@ -338,9 +391,65 @@
   </div>
 </div>
 
-<div id="gate" style="display:none">
+<!-- Bookmark library modal -->
+<div class="modal" id="bookmarks-modal" role="dialog" aria-modal="true" aria-labelledby="bookmarks-modal-title">
   <div class="card">
-    <h1>手機操控網址無效</h1>
+    <h3 id="bookmarks-modal-title">收藏</h3>
+    <div class="bookmark-toolbar">
+      <label class="sr-only" for="bookmark-search-input">搜尋收藏</label>
+      <input type="text" id="bookmark-search-input" placeholder="搜尋收藏名稱 / 地址 / 座標" autocomplete="off" />
+      <button type="button" id="bookmark-refresh" aria-label="重新整理收藏">↻</button>
+    </div>
+    <div class="sr-only" id="bookmark-status" role="status" aria-live="polite"></div>
+    <div id="bookmark-list" aria-busy="false"></div>
+    <div class="bookmark-footer">
+      <button type="button" class="ghost" id="bookmark-close">關閉</button>
+      <button type="button" class="primary" id="bookmark-add">新增收藏</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bookmark row action modal -->
+<div class="modal" id="bookmark-action-modal" role="dialog" aria-modal="true" aria-labelledby="bookmark-action-title">
+  <div class="card">
+    <h3 id="bookmark-action-title">收藏操作</h3>
+    <div class="bookmark-action-summary" id="bookmark-action-summary"></div>
+    <div class="bookmark-action-list">
+      <button type="button" class="primary" id="bookmark-preview">預覽地圖位置</button>
+      <button type="button" id="bookmark-teleport">瞬移到這裡</button>
+      <button type="button" id="bookmark-navigate">導航到這裡</button>
+      <button type="button" id="bookmark-edit">編輯收藏</button>
+      <button type="button" class="danger" id="bookmark-delete">刪除收藏</button>
+      <button type="button" id="bookmark-action-close">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bookmark add/edit form -->
+<div class="modal" id="bookmark-form-modal" role="dialog" aria-modal="true" aria-labelledby="bookmark-form-title">
+  <div class="card">
+    <h3 id="bookmark-form-title">新增收藏</h3>
+    <label for="bookmark-name-input">名稱</label>
+    <input type="text" id="bookmark-name-input" maxlength="200" autocomplete="off" />
+    <label for="bookmark-lat-input">緯度</label>
+    <input type="number" id="bookmark-lat-input" inputmode="decimal" min="-90" max="90" step="any" />
+    <label for="bookmark-lng-input">經度</label>
+    <input type="number" id="bookmark-lng-input" inputmode="decimal" min="-180" max="180" step="any" />
+    <label for="bookmark-category-input">分類</label>
+    <select id="bookmark-category-input"></select>
+    <div class="form-error" id="bookmark-form-error" role="alert"></div>
+    <div class="btn-row">
+      <button type="button" class="ghost" id="bookmark-form-cancel">取消</button>
+      <button type="button" class="primary" id="bookmark-form-submit">儲存</button>
+    </div>
+  </div>
+</div>
+
+</div><!-- /#phone-app -->
+
+<div id="gate" style="display:none" role="dialog" aria-modal="true" aria-labelledby="gate-title" aria-hidden="true" tabindex="-1">
+  <div class="card">
+    <h1 id="gate-title">手機操控網址無效</h1>
     <p>請使用桌面 LocWarp 顯示的完整手機操控網址開啟，網址必須包含授權資訊。</p>
     <div class="err" id="invalid-link" role="alert">缺少或無效的手機操控網址授權資訊。</div>
   </div>
@@ -681,6 +790,14 @@
   function setOpen(open) {
     fab.classList.toggle('open', open);
     actions.classList.toggle('open', open);
+    fab.setAttribute('aria-expanded', open ? 'true' : 'false');
+    actions.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (open && document.activeElement === fab) {
+      setTimeout(() => {
+        const firstAction = actions.querySelector('button.btn:not([disabled]), .btn[tabindex="0"]');
+        if (firstAction) firstAction.focus();
+      }, 0);
+    }
   }
   fab.addEventListener('click', () => setOpen(!fab.classList.contains('open')));
 
@@ -717,6 +834,8 @@
         openSearch();
       } else if (kind === 'coord') {
         openCoord();
+      } else if (kind === 'bookmarks') {
+        void openBookmarks().catch((e) => toast('開啟收藏失敗: ' + (e && e.message ? e.message : '未知錯誤'), 'err'));
       }
     });
   });
@@ -740,8 +859,8 @@
     });
   });
 
-  function openSheet(kind, lat, lng) {
-    pendingAction = { kind, lat, lng };
+  function openSheet(kind, lat, lng, bookmark) {
+    pendingAction = { kind, lat, lng, bookmark: bookmark || null };
     sheetModes.style.display = 'none';
     sheetCustom.style.display = 'none';
     if (kind === 'teleport') {
@@ -758,22 +877,43 @@
     } else if (kind === 'restore') {
       sheetTitle.textContent = '還原真實 GPS?';
       sheetCoord.textContent = '清除虛擬定位,iPhone 回到真實位置';
+    } else if (kind === 'bookmark-delete') {
+      sheetTitle.textContent = '刪除收藏?';
+      sheetCoord.textContent = bookmark && bookmark.name ? bookmark.name : '這筆收藏';
     }
+    setRemoteBackgroundInert(true);
+    sheet.inert = false;
+    sheet.removeAttribute('aria-hidden');
     sheet.classList.add('open');
+    setTimeout(() => sheetCancel.focus(), 0);
   }
   function closeSheet() {
     sheet.classList.remove('open');
+    sheet.inert = true;
+    sheet.setAttribute('aria-hidden', 'true');
+    setRemoteBackgroundInert(false);
     pendingAction = null;
     pendingMode = null;
     showActionMode('');
     clearPendingPin();
   }
-  sheetCancel.addEventListener('click', closeSheet);
+  sheetCancel.addEventListener('click', () => {
+    const reopenBookmarks = pendingAction && pendingAction.bookmark;
+    closeSheet();
+    if (reopenBookmarks) {
+      setRemoteBackgroundInert(true);
+      setBookmarkLibraryCovered(false);
+      bookmarksModal.classList.add('open');
+      setTimeout(() => bookmarkSearchInput.focus(), 0);
+    } else fab.focus();
+  });
 
   sheetOk.addEventListener('click', async () => {
     if (!pendingAction) return;
     const a = pendingAction;
+    let actionFailed = false;
     sheetOk.disabled = true;
+    sheetCancel.disabled = true;
     try {
       if (a.kind === 'teleport') {
         await api('/api/phone/teleport', { method: 'POST', body: { lat: a.lat, lng: a.lng } });
@@ -802,13 +942,29 @@
         await api('/api/phone/restore', { method: 'POST' });
         clearCurrentPin();
         toast('已還原 GPS');
+      } else if (a.kind === 'bookmark-delete') {
+        if (!a.bookmark || !a.bookmark.id) throw new Error('收藏資料無效');
+        await api('/api/bookmarks/' + encodeURIComponent(a.bookmark.id), { method: 'DELETE' });
+        await loadBookmarks(true);
+        toast('已刪除收藏');
       }
       closeSheet();
-      pollStatus();
+      if (a.kind === 'bookmark-delete') {
+        setRemoteBackgroundInert(true);
+        setBookmarkLibraryCovered(false);
+        bookmarksModal.classList.add('open');
+        setTimeout(() => bookmarkSearchInput.focus(), 0);
+      } else fab.focus();
+      void pollStatus();
     } catch (e) {
+      actionFailed = true;
       toast('失敗: ' + e.message, 'err');
     } finally {
       sheetOk.disabled = false;
+      sheetCancel.disabled = false;
+      if (actionFailed && sheet.classList.contains('open') && gate.style.display === 'none') {
+        sheetOk.focus();
+      }
     }
   });
 
@@ -885,15 +1041,513 @@
   document.getElementById('coord-go').addEventListener('click', submitCoord);
   coordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitCoord(); });
 
+  // ── Bookmark library ──────────────────────────────────────
+  // The phone and desktop pages use the same persisted bookmark store. Keep
+  // this surface deliberately small: browse/search, preview, teleport,
+  // navigate and the basic CRUD actions needed away from the desktop.
+  const bookmarksModal = document.getElementById('bookmarks-modal');
+  const bookmarkList = document.getElementById('bookmark-list');
+  const bookmarkStatus = document.getElementById('bookmark-status');
+  const bookmarkSearchInput = document.getElementById('bookmark-search-input');
+  const bookmarkRefresh = document.getElementById('bookmark-refresh');
+  const bookmarkAdd = document.getElementById('bookmark-add');
+  const bookmarkActionModal = document.getElementById('bookmark-action-modal');
+  const bookmarkActionTitle = document.getElementById('bookmark-action-title');
+  const bookmarkActionSummary = document.getElementById('bookmark-action-summary');
+  const bookmarkFormModal = document.getElementById('bookmark-form-modal');
+  const bookmarkFormTitle = document.getElementById('bookmark-form-title');
+  const bookmarkNameInput = document.getElementById('bookmark-name-input');
+  const bookmarkLatInput = document.getElementById('bookmark-lat-input');
+  const bookmarkLngInput = document.getElementById('bookmark-lng-input');
+  const bookmarkCategoryInput = document.getElementById('bookmark-category-input');
+  const bookmarkFormError = document.getElementById('bookmark-form-error');
+  const bookmarkFormSubmit = document.getElementById('bookmark-form-submit');
+  const bookmarkFormCancel = document.getElementById('bookmark-form-cancel');
+  let bookmarkStore = { categories: [], bookmarks: [] };
+  let bookmarkError = '';
+  let bookmarkBusy = false;
+  let bookmarkLoadPromise = null;
+  let bookmarkReloadRequested = false;
+  let bookmarkFormBusy = false;
+  let selectedBookmark = null;
+  let editingBookmark = null;
+  let bookmarkActionReturnFocus = null;
+  let bookmarkFormReturnFocus = null;
+  const remoteBackgroundElements = [
+    document.getElementById('map'),
+    document.getElementById('topbar'),
+    actions,
+    fab,
+    document.getElementById('search-modal'),
+    document.getElementById('coord-modal'),
+  ].filter(Boolean);
+  const bookmarkCollapsed = (() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('locwarp.phone.bookmark.collapsed') || '[]');
+      return new Set(Array.isArray(stored) ? stored.map(String) : []);
+    } catch (e) {
+      return new Set();
+    }
+  })();
+
+  function saveBookmarkCollapsed() {
+    try { localStorage.setItem('locwarp.phone.bookmark.collapsed', JSON.stringify(Array.from(bookmarkCollapsed))); } catch (e) {}
+  }
+
+  function bookmarkCategoryName(categoryId) {
+    const cat = bookmarkStore.categories.find((c) => c && c.id === categoryId);
+    return cat && cat.name ? String(cat.name) : (categoryId === 'default' ? '預設' : '未分類');
+  }
+
+  function bookmarkCategoryColor(categoryId) {
+    const cat = bookmarkStore.categories.find((c) => c && c.id === categoryId);
+    const color = cat && typeof cat.color === 'string' ? cat.color.trim() : '';
+    return /^#[0-9a-f]{3,8}$/i.test(color) ? color : 'var(--accent)';
+  }
+
+  function bookmarkSearchText(bookmark) {
+    return [
+      bookmark.name,
+      bookmark.address,
+      bookmark.category_id,
+      bookmarkCategoryName(bookmark.category_id || 'default'),
+      bookmark.lat,
+      bookmark.lng,
+    ].map((value) => String(value == null ? '' : value)).join(' ').toLocaleLowerCase();
+  }
+
+  function createBookmarkMessage(className, message) {
+    const el = document.createElement('div');
+    el.className = className;
+    el.textContent = message;
+    return el;
+  }
+
+  function renderBookmarkList() {
+    bookmarkList.replaceChildren();
+    bookmarkList.setAttribute('aria-busy', bookmarkBusy ? 'true' : 'false');
+    bookmarkRefresh.disabled = bookmarkBusy;
+    bookmarkAdd.disabled = bookmarkBusy;
+    if (bookmarkBusy) {
+      bookmarkStatus.textContent = '載入收藏中';
+      bookmarkList.appendChild(createBookmarkMessage('loading', '載入收藏中...'));
+      return;
+    }
+    if (bookmarkError) {
+      bookmarkStatus.textContent = bookmarkError;
+      bookmarkList.appendChild(createBookmarkMessage('error', bookmarkError));
+      return;
+    }
+
+    const query = bookmarkSearchInput.value.trim().toLocaleLowerCase();
+    const filtered = bookmarkStore.bookmarks.filter((bm) => !query || bookmarkSearchText(bm).includes(query));
+    if (filtered.length === 0) {
+      const emptyMessage = bookmarkStore.bookmarks.length ? '找不到符合的收藏' : '尚無收藏';
+      bookmarkStatus.textContent = emptyMessage;
+      bookmarkList.appendChild(createBookmarkMessage('empty', emptyMessage));
+      return;
+    }
+    bookmarkStatus.textContent = '找到 ' + filtered.length + ' 筆收藏';
+
+    const categories = bookmarkStore.categories.map((cat, index) => ({ cat, index })).sort((a, b) => {
+      const order = Number(a.cat.sort_order || 0) - Number(b.cat.sort_order || 0);
+      return order || a.index - b.index;
+    }).map((entry) => entry.cat);
+    const groups = [];
+    const byCategory = new Map();
+    categories.forEach((cat) => {
+      const group = { id: cat.id, name: cat.name || cat.id || '預設', color: bookmarkCategoryColor(cat.id), bookmarks: [] };
+      groups.push(group);
+      byCategory.set(cat.id, group);
+    });
+    filtered.forEach((bm) => {
+      const categoryId = bm.category_id || 'default';
+      let group = byCategory.get(categoryId);
+      if (!group) {
+        group = { id: categoryId, name: bookmarkCategoryName(categoryId), color: bookmarkCategoryColor(categoryId), bookmarks: [] };
+        groups.push(group);
+        byCategory.set(categoryId, group);
+      }
+      group.bookmarks.push(bm);
+    });
+
+    groups.forEach((group) => {
+      if (group.bookmarks.length === 0) return;
+      const section = document.createElement('section');
+      section.className = 'bookmark-category';
+      const heading = document.createElement('div');
+      heading.className = 'bookmark-category-title';
+      const dot = document.createElement('span');
+      dot.className = 'category-dot';
+      dot.style.background = group.color;
+      heading.appendChild(dot);
+      const title = document.createElement('span');
+      title.textContent = String(group.name || '未分類') + ' (' + group.bookmarks.length + ')';
+      heading.appendChild(title);
+      const groupId = String(group.id || 'default');
+      heading.dataset.categoryId = groupId;
+      const collapsed = !query && bookmarkCollapsed.has(groupId);
+      const caret = document.createElement('span');
+      caret.className = 'category-caret';
+      caret.textContent = collapsed ? '▸' : '▾';
+      heading.appendChild(caret);
+      heading.setAttribute('role', 'button');
+      heading.setAttribute('tabindex', '0');
+      heading.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      section.appendChild(heading);
+
+      const items = document.createElement('div');
+      items.hidden = collapsed;
+      group.bookmarks.forEach((bm) => {
+        const row = document.createElement('div');
+        row.className = 'bookmark-item';
+        const main = document.createElement('div');
+        main.className = 'bookmark-main';
+        main.setAttribute('role', 'button');
+        main.setAttribute('tabindex', '0');
+        const name = document.createElement('div');
+        name.className = 'bookmark-name';
+        name.textContent = String(bm.name || '未命名收藏');
+        main.appendChild(name);
+        const detail = document.createElement('div');
+        detail.className = 'bookmark-detail';
+        const coords = Number(bm.lat).toFixed(6) + ', ' + Number(bm.lng).toFixed(6);
+        detail.textContent = bm.address ? coords + ' · ' + String(bm.address) : coords;
+        main.appendChild(detail);
+        const openRowAction = () => openBookmarkAction(bm);
+        main.addEventListener('click', openRowAction);
+        main.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRowAction(); }
+        });
+        row.appendChild(main);
+        const menu = document.createElement('button');
+        menu.type = 'button';
+        menu.className = 'bookmark-menu';
+        menu.setAttribute('aria-label', '開啟「' + String(bm.name || '未命名收藏') + '」操作');
+        menu.textContent = '⋯';
+        menu.addEventListener('click', () => openBookmarkAction(bm));
+        row.appendChild(menu);
+        items.appendChild(row);
+      });
+      const toggleGroup = () => {
+        if (query) return;
+        const restoreFocus = document.activeElement === heading;
+        if (bookmarkCollapsed.has(groupId)) bookmarkCollapsed.delete(groupId);
+        else bookmarkCollapsed.add(groupId);
+        saveBookmarkCollapsed();
+        renderBookmarkList();
+        if (restoreFocus) {
+          const replacement = Array.from(bookmarkList.querySelectorAll('.bookmark-category-title'))
+            .find((el) => el.dataset.categoryId === groupId);
+          if (replacement) replacement.focus();
+        }
+      };
+      heading.addEventListener('click', toggleGroup);
+      heading.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(); }
+      });
+      section.appendChild(items);
+      bookmarkList.appendChild(section);
+    });
+  }
+
+  function loadBookmarks(forceRefresh = false) {
+    if (bookmarkLoadPromise) {
+      if (forceRefresh) bookmarkReloadRequested = true;
+      return bookmarkLoadPromise;
+    }
+    bookmarkLoadPromise = (async () => {
+      do {
+        bookmarkReloadRequested = false;
+        bookmarkBusy = true;
+        bookmarkError = '';
+        renderBookmarkList();
+        try {
+          const payload = await api('/api/bookmarks');
+          bookmarkStore = {
+            categories: Array.isArray(payload && payload.categories) ? payload.categories : [],
+            bookmarks: Array.isArray(payload && payload.bookmarks) ? payload.bookmarks : [],
+          };
+        } catch (e) {
+          bookmarkError = '載入收藏失敗: ' + (e && e.message ? e.message : '未知錯誤');
+        }
+      } while (bookmarkReloadRequested);
+    })().finally(() => {
+      bookmarkBusy = false;
+      bookmarkLoadPromise = null;
+      renderBookmarkList();
+    });
+    return bookmarkLoadPromise;
+  }
+
+  function setBookmarkLibraryCovered(covered) {
+    bookmarksModal.inert = covered;
+    if (covered) bookmarksModal.setAttribute('aria-hidden', 'true');
+    else bookmarksModal.removeAttribute('aria-hidden');
+  }
+
+  function setRemoteBackgroundInert(blocked) {
+    remoteBackgroundElements.forEach((element) => { element.inert = blocked; });
+  }
+
+  function closeBookmarks() {
+    setBookmarkLibraryCovered(false);
+    bookmarksModal.classList.remove('open');
+    setRemoteBackgroundInert(false);
+    fab.focus();
+  }
+
+  function closeBookmarkAction(restoreFocus) {
+    bookmarkActionModal.classList.remove('open');
+    setBookmarkLibraryCovered(false);
+    selectedBookmark = null;
+    if (restoreFocus !== false && bookmarkActionReturnFocus && bookmarkActionReturnFocus.isConnected) {
+      bookmarkActionReturnFocus.focus();
+    }
+    bookmarkActionReturnFocus = null;
+  }
+
+  function openBookmarkAction(bookmark) {
+    bookmarkActionReturnFocus = document.activeElement;
+    selectedBookmark = bookmark;
+    bookmarkActionTitle.textContent = String(bookmark.name || '收藏操作');
+    const coords = Number(bookmark.lat).toFixed(6) + ', ' + Number(bookmark.lng).toFixed(6);
+    bookmarkActionSummary.textContent = bookmark.address ? coords + '\n' + String(bookmark.address) : coords;
+    setBookmarkLibraryCovered(true);
+    bookmarkActionModal.classList.add('open');
+    setTimeout(() => document.getElementById('bookmark-preview').focus(), 0);
+  }
+
+  function openBookmarkPreview(bookmark) {
+    closeBookmarkAction(false);
+    bookmarksModal.classList.remove('open');
+    setRemoteBackgroundInert(false);
+    pendingMode = null;
+    showActionMode('');
+    clearPendingPin();
+    setPendingPin(Number(bookmark.lat), Number(bookmark.lng));
+    map.setView([Number(bookmark.lat), Number(bookmark.lng)], Math.max(map.getZoom(), 15));
+    toast('已預覽收藏位置');
+    fab.focus();
+  }
+
+  function openBookmarkTeleport(bookmark) {
+    closeBookmarkAction(false);
+    bookmarksModal.classList.remove('open');
+    setRemoteBackgroundInert(false);
+    setPendingPin(Number(bookmark.lat), Number(bookmark.lng));
+    map.setView([Number(bookmark.lat), Number(bookmark.lng)], Math.max(map.getZoom(), 15));
+    openSheet('teleport', Number(bookmark.lat), Number(bookmark.lng), bookmark);
+  }
+
+  function openBookmarkNavigate(bookmark) {
+    const cur = lastStatus && lastStatus.current_position;
+    if (!cur || !lastStatus.connected) {
+      toast('還沒有虛擬位置,請先瞬移或飛座標', 'err');
+      return;
+    }
+    closeBookmarkAction(false);
+    bookmarksModal.classList.remove('open');
+    setRemoteBackgroundInert(false);
+    setPendingPin(Number(bookmark.lat), Number(bookmark.lng));
+    map.setView([Number(bookmark.lat), Number(bookmark.lng)], Math.max(map.getZoom(), 15));
+    openSheet('navigate', Number(bookmark.lat), Number(bookmark.lng), bookmark);
+  }
+
+  function renderBookmarkCategoryOptions(selectedId) {
+    bookmarkCategoryInput.replaceChildren();
+    const categories = bookmarkStore.categories.length ? bookmarkStore.categories : [{ id: 'default', name: '預設' }];
+    let matched = false;
+    categories.forEach((cat) => {
+      const option = document.createElement('option');
+      option.value = String(cat.id || 'default');
+      option.textContent = String(cat.name || cat.id || '預設');
+      if (option.value === String(selectedId || 'default')) { option.selected = true; matched = true; }
+      bookmarkCategoryInput.appendChild(option);
+    });
+    if (!matched && selectedId) {
+      const option = document.createElement('option');
+      option.value = String(selectedId);
+      option.textContent = bookmarkCategoryName(selectedId);
+      option.selected = true;
+      bookmarkCategoryInput.appendChild(option);
+    }
+  }
+
+  function openBookmarkForm(bookmark, returnFocus) {
+    bookmarkFormReturnFocus = returnFocus || document.activeElement;
+    editingBookmark = bookmark || null;
+    bookmarkFormTitle.textContent = editingBookmark ? '編輯收藏' : '新增收藏';
+    bookmarkFormError.textContent = '';
+    bookmarkNameInput.value = editingBookmark ? String(editingBookmark.name || '') : '';
+    const current = lastStatus && lastStatus.current_position;
+    bookmarkLatInput.value = editingBookmark ? String(editingBookmark.lat) : (current ? String(current.lat) : '');
+    bookmarkLngInput.value = editingBookmark ? String(editingBookmark.lng) : (current ? String(current.lng) : '');
+    const defaultCategory = editingBookmark && editingBookmark.category_id ? editingBookmark.category_id :
+      (bookmarkStore.categories[0] && bookmarkStore.categories[0].id) || 'default';
+    renderBookmarkCategoryOptions(defaultCategory);
+    setBookmarkLibraryCovered(true);
+    bookmarkFormModal.classList.add('open');
+    setTimeout(() => bookmarkNameInput.focus(), 100);
+  }
+
+  function closeBookmarkForm() {
+    if (bookmarkFormBusy) return;
+    bookmarkFormModal.classList.remove('open');
+    setBookmarkLibraryCovered(false);
+    editingBookmark = null;
+    if (bookmarkFormReturnFocus && bookmarkFormReturnFocus.isConnected) bookmarkFormReturnFocus.focus();
+    else if (bookmarksModal.classList.contains('open')) bookmarkSearchInput.focus();
+    bookmarkFormReturnFocus = null;
+  }
+
+  async function submitBookmarkForm() {
+    if (bookmarkFormBusy) return;
+    const name = bookmarkNameInput.value.trim();
+    const latRaw = bookmarkLatInput.value.trim();
+    const lngRaw = bookmarkLngInput.value.trim();
+    const lat = Number(latRaw);
+    const lng = Number(lngRaw);
+    if (!name) { bookmarkFormError.textContent = '請輸入收藏名稱'; return; }
+    if (!latRaw || !Number.isFinite(lat) || lat < -90 || lat > 90) { bookmarkFormError.textContent = '緯度必須介於 -90 與 90'; return; }
+    if (!lngRaw || !Number.isFinite(lng) || lng < -180 || lng > 180) { bookmarkFormError.textContent = '經度必須介於 -180 與 180'; return; }
+
+    const fields = { name, lat, lng, category_id: bookmarkCategoryInput.value || 'default' };
+    // PUT receives the complete existing bookmark so address, country code
+    // and timestamps survive an edit even though the phone form is compact.
+    const body = editingBookmark ? Object.assign({}, editingBookmark, fields) : fields;
+    bookmarkFormBusy = true;
+    bookmarkFormError.textContent = '';
+    bookmarkFormSubmit.disabled = true;
+    bookmarkFormCancel.disabled = true;
+    let saved = false;
+    try {
+      if (editingBookmark && editingBookmark.id) {
+        await api('/api/bookmarks/' + encodeURIComponent(editingBookmark.id), { method: 'PUT', body });
+        toast('已更新收藏');
+      } else {
+        await api('/api/bookmarks', { method: 'POST', body });
+        toast('已新增收藏');
+      }
+      await loadBookmarks(true);
+      saved = true;
+    } catch (e) {
+      bookmarkFormError.textContent = '儲存失敗: ' + (e && e.message ? e.message : '未知錯誤');
+      toast(bookmarkFormError.textContent, 'err');
+    } finally {
+      bookmarkFormBusy = false;
+      bookmarkFormSubmit.disabled = false;
+      bookmarkFormCancel.disabled = false;
+      if (saved) closeBookmarkForm();
+      else if (bookmarkFormModal.classList.contains('open') && gate.style.display === 'none') {
+        bookmarkFormSubmit.focus();
+      }
+    }
+  }
+
+  async function openBookmarks() {
+    bookmarkSearchInput.value = '';
+    setBookmarkLibraryCovered(false);
+    setRemoteBackgroundInert(true);
+    bookmarksModal.classList.add('open');
+    setTimeout(() => bookmarkSearchInput.focus(), 0);
+    renderBookmarkList();
+    await loadBookmarks();
+  }
+
+  document.getElementById('bookmark-close').addEventListener('click', closeBookmarks);
+  bookmarkRefresh.addEventListener('click', () => {
+    void loadBookmarks(true).catch((e) => toast('重新整理收藏失敗: ' + (e && e.message ? e.message : '未知錯誤'), 'err'));
+  });
+  bookmarkSearchInput.addEventListener('input', renderBookmarkList);
+  bookmarkAdd.addEventListener('click', () => openBookmarkForm(null, bookmarkAdd));
+  document.getElementById('bookmark-action-close').addEventListener('click', () => closeBookmarkAction());
+  document.getElementById('bookmark-preview').addEventListener('click', () => { if (selectedBookmark) openBookmarkPreview(selectedBookmark); });
+  document.getElementById('bookmark-teleport').addEventListener('click', () => { if (selectedBookmark) openBookmarkTeleport(selectedBookmark); });
+  document.getElementById('bookmark-navigate').addEventListener('click', () => { if (selectedBookmark) openBookmarkNavigate(selectedBookmark); });
+  document.getElementById('bookmark-edit').addEventListener('click', () => {
+    if (!selectedBookmark) return;
+    const bm = selectedBookmark;
+    const returnFocus = bookmarkActionReturnFocus;
+    closeBookmarkAction(false);
+    openBookmarkForm(bm, returnFocus);
+  });
+  document.getElementById('bookmark-delete').addEventListener('click', () => {
+    if (!selectedBookmark || !selectedBookmark.id) return;
+    const bm = selectedBookmark;
+    closeBookmarkAction(false);
+    bookmarksModal.classList.remove('open');
+    setRemoteBackgroundInert(false);
+    openSheet('bookmark-delete', Number(bm.lat), Number(bm.lng), bm);
+  });
+  bookmarkFormCancel.addEventListener('click', closeBookmarkForm);
+  bookmarkFormSubmit.addEventListener('click', () => {
+    void submitBookmarkForm().catch((e) => toast('儲存收藏失敗: ' + (e && e.message ? e.message : '未知錯誤'), 'err'));
+  });
+  [bookmarkNameInput, bookmarkLatInput, bookmarkLngInput].forEach((input) => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        void submitBookmarkForm().catch((error) => toast('儲存收藏失敗: ' + (error && error.message ? error.message : '未知錯誤'), 'err'));
+      }
+    });
+  });
+
+  document.addEventListener('keydown', (e) => {
+    const activeDialog = gate.style.display !== 'none' ? gate :
+      (sheet.classList.contains('open') ? sheet :
+      (bookmarkFormModal.classList.contains('open') ? bookmarkFormModal :
+        (bookmarkActionModal.classList.contains('open') ? bookmarkActionModal :
+          (bookmarksModal.classList.contains('open') ? bookmarksModal : null))));
+    if (!activeDialog) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (activeDialog === gate) return;
+      if (activeDialog === sheet) {
+        if (!sheetCancel.disabled) sheetCancel.click();
+      } else if (activeDialog === bookmarkFormModal) closeBookmarkForm();
+      else if (activeDialog === bookmarkActionModal) closeBookmarkAction();
+      else closeBookmarks();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const focusable = Array.from(activeDialog.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )).filter((element) => element.getClientRects().length > 0);
+    if (focusable.length === 0) {
+      e.preventDefault();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!activeDialog.contains(document.activeElement)) {
+      e.preventDefault();
+      first.focus();
+    } else if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+
   // ── Invalid capability-link gate ──────────────────────────
+  const phoneApp = document.getElementById('phone-app');
   const gate = document.getElementById('gate');
   const invalidLink = document.getElementById('invalid-link');
 
   function showGate(message) {
+    phoneApp.inert = true;
     gate.style.display = '';
+    gate.removeAttribute('aria-hidden');
     invalidLink.textContent = message || '缺少或無效的手機操控網址授權資訊。';
+    setTimeout(() => gate.focus(), 0);
   }
-  function hideGate() { gate.style.display = 'none'; }
+  function hideGate() {
+    gate.style.display = 'none';
+    gate.setAttribute('aria-hidden', 'true');
+    phoneApp.inert = false;
+  }
 
   // Tell the desktop UI "this phone reached the LAN URL" so it can
   // confirm the phone reached the LAN URL end-to-end. Fire-and-forget —
