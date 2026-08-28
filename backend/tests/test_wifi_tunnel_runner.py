@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import logging
+from contextlib import asynccontextmanager
 
 import pytest
 
@@ -138,6 +139,122 @@ async def test_second_start_is_rejected_while_runner_is_active(monkeypatch) -> N
     with pytest.raises(RuntimeError, match="already running"):
         await runner.start("udid", "192.0.2.10", 49152)
     await runner.stop()
+
+
+async def test_runner_closes_remote_pairing_control_service_on_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pymobiledevice3.remote import tunnel_service
+
+    class _FakeTunnel:
+        address = "fd00::1"
+        port = 1234
+        interface = "utun0"
+        protocol = "tcp"
+        client = None
+
+        async def wait_closed(self) -> None:
+            await asyncio.Event().wait()
+
+    class _FakeService:
+        remote_identifier = "fake"
+
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        @asynccontextmanager
+        async def start_tcp_tunnel(self):
+            tunnel = _FakeTunnel()
+            tunnel.client = tunnel
+            yield tunnel
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    service = _FakeService()
+
+    async def create_service(*_args, **_kwargs):
+        return service
+
+    monkeypatch.setattr(
+        tunnel_service,
+        "create_core_device_tunnel_service_using_remotepairing",
+        create_service,
+    )
+
+    runner = TunnelRunner()
+    await runner.start("udid", "192.0.2.10", 49152, timeout=0.5)
+    await runner.stop()
+
+    assert service.close_calls == 1
+    assert runner.task is None
+
+
+async def test_runner_bounds_a_hung_remote_pairing_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core import wifi_tunnel as wifi_tunnel_module
+    from pymobiledevice3.remote import tunnel_service
+
+    # Keep this regression fast while exercising the same bounded-close path
+    # used in production.  A wedged DTX close must not keep runner.stop()
+    # waiting forever or leave the close coroutine unretrieved.
+    monkeypatch.setattr(wifi_tunnel_module, "_REMOTE_PAIRING_CLOSE_TIMEOUT", 0.01)
+    monkeypatch.setattr(
+        wifi_tunnel_module,
+        "_REMOTE_PAIRING_CLOSE_DRAIN_TIMEOUT",
+        0.01,
+    )
+
+    class _FakeTunnel:
+        address = "fd00::1"
+        port = 1234
+        interface = "utun0"
+        protocol = "tcp"
+        client = None
+
+        async def wait_closed(self) -> None:
+            await asyncio.Event().wait()
+
+    class _FakeService:
+        remote_identifier = "fake"
+
+        def __init__(self) -> None:
+            self.close_started = asyncio.Event()
+            self.close_cancelled = asyncio.Event()
+
+        @asynccontextmanager
+        async def start_tcp_tunnel(self):
+            tunnel = _FakeTunnel()
+            tunnel.client = tunnel
+            yield tunnel
+
+        async def close(self) -> None:
+            self.close_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.close_cancelled.set()
+                raise
+
+    service = _FakeService()
+
+    async def create_service(*_args, **_kwargs):
+        return service
+
+    monkeypatch.setattr(
+        tunnel_service,
+        "create_core_device_tunnel_service_using_remotepairing",
+        create_service,
+    )
+
+    runner = TunnelRunner()
+    await runner.start("udid", "192.0.2.10", 49152, timeout=0.5)
+    await asyncio.wait_for(runner.stop(), timeout=1.0)
+
+    assert service.close_started.is_set()
+    assert service.close_cancelled.is_set()
+    assert runner.task is None
 
 
 async def test_stop_retrieves_and_logs_completed_task_error(caplog) -> None:

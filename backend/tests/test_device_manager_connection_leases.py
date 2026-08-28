@@ -9,7 +9,7 @@ import pytest
 
 import api.websocket as websocket
 import core.device_manager as device_manager_module
-from core.device_manager import DeviceManager, _ActiveConnection
+from core.device_manager import DeviceLostError, DeviceManager, _ActiveConnection
 
 
 class _FakeRsd:
@@ -308,6 +308,78 @@ async def test_owned_connect_callback_success_closes_previous_after_callback(
     assert manager._connections[old.udid] is new
     assert closed == [old]
     assert _CallbackRsd.instances[-1].close_calls == 0
+
+
+async def test_owned_connect_replacement_does_not_reconnect_retiring_location_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Closing C0 after C1 install must not acquire a DVT provider on C1."""
+
+    _patch_callback_rsd(monkeypatch)
+    manager = DeviceManager()
+    old = _connection("C0")
+
+    class _RetiringLocationService:
+        def __init__(self) -> None:
+            self.clear_calls = 0
+
+        async def clear(self) -> None:
+            self.clear_calls += 1
+
+    retiring_service = _RetiringLocationService()
+    old.location_service = retiring_service
+    manager._connections[old.udid] = old
+
+    _info, new = await manager.connect_wifi_tunnel_owned(
+        "192.0.2.10",
+        49152,
+    )
+
+    assert manager._connections[old.udid] is new
+    assert retiring_service.clear_calls == 0
+
+
+async def test_fresh_dvt_provider_closes_result_when_connection_lease_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider opened for C0 must not be published after C1 wins."""
+
+    opened = asyncio.Event()
+    release = asyncio.Event()
+    providers: list[object] = []
+
+    class _FakeDvt:
+        def __init__(self, _lockdown) -> None:
+            self.close_calls = 0
+            providers.append(self)
+
+        async def __aenter__(self):
+            opened.set()
+            await release.wait()
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            self.close_calls += 1
+
+    monkeypatch.setattr(device_manager_module, "DvtProvider", _FakeDvt)
+    manager = DeviceManager()
+    old = _connection("C0")
+    replacement = _connection("C1")
+    manager._connections[old.udid] = old
+
+    task = asyncio.create_task(
+        manager.get_fresh_dvt_provider(old.udid, expected=old, timeout=1.0),
+    )
+    await asyncio.wait_for(opened.wait(), timeout=0.5)
+    manager._connections[old.udid] = replacement
+    release.set()
+
+    with pytest.raises(DeviceLostError, match="lease was replaced"):
+        await asyncio.wait_for(task, timeout=0.5)
+
+    assert len(providers) == 1
+    assert providers[0].close_calls == 1
+    assert replacement.dvt_provider is None
 
 
 async def test_owned_connect_callback_error_closes_uninstalled_c1_and_keeps_c0(

@@ -82,6 +82,50 @@ async def test_port_scan_cancels_all_probe_tasks_when_scan_is_cancelled(
     assert sorted(cancelled_ports) == [49152, 49153, 49154]
 
 
+async def test_concurrent_scans_share_the_selector_probe_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two fallback scans must not multiply live sockets past the cap."""
+    monkeypatch.setattr(tunnel_discovery, "_SCAN_CONCURRENCY", 2)
+    active = 0
+    peak = 0
+    release = asyncio.Event()
+
+    async def blocking_probe(_ip: str, _port: int, _timeout: float) -> bool:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await release.wait()
+            return False
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(tunnel_discovery, "_tcp_probe", blocking_probe)
+    scans = [
+        asyncio.create_task(
+            tunnel_discovery._scan_ports_for_ip(
+                f"192.0.2.{index}",
+                start=49152,
+                end=49154,
+                concurrency=3,
+                timeout=0.01,
+            ),
+        )
+        for index in (10, 11)
+    ]
+    try:
+        await asyncio.sleep(0)
+        await asyncio.sleep(0.02)
+        release.set()
+        assert await asyncio.gather(*scans) == [[], []]
+    finally:
+        release.set()
+        await asyncio.gather(*scans, return_exceptions=True)
+
+    assert peak <= 2
+
+
 async def test_fallback_endpoints_exclude_lockdownd_port() -> None:
     async def fake_port_scan(_ip: str) -> list[int]:
         return [62078, 50100, 62078]

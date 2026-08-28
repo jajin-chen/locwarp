@@ -8,9 +8,36 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
+import weakref
 from collections.abc import Iterable
 
 logger = logging.getLogger("wifi_tunnel")
+
+
+# Windows' SelectorEventLoop delegates to ``select.select`` and cannot watch
+# more than 512 sockets.  A full 16k-port scan used to open 1024 sockets at a
+# time, which could exhaust that process-wide budget while three DTX tunnels
+# and the HTTP server were still active.  Keep discovery probes in a shared,
+# per-event-loop budget so concurrent watchdog/API scans cannot multiply the
+# limit.  The value leaves headroom for the live tunnel and control-plane
+# sockets instead of treating the select limit as a target.
+_SCAN_CONCURRENCY = 96
+_probe_budgets: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, asyncio.Semaphore
+] = weakref.WeakKeyDictionary()
+_probe_budgets_lock = threading.Lock()
+
+
+def _probe_budget() -> asyncio.Semaphore:
+    """Return the scanner budget for the currently running event loop."""
+    loop = asyncio.get_running_loop()
+    with _probe_budgets_lock:
+        budget = _probe_budgets.get(loop)
+        if budget is None:
+            budget = asyncio.Semaphore(_SCAN_CONCURRENCY)
+            _probe_budgets[loop] = budget
+        return budget
 
 
 # TCP scanning can see lockdownd in the same dynamic range as RemotePairing.
@@ -79,8 +106,14 @@ async def _scan_subnet_for_port(port: int = 49152) -> list[str]:
         return []
 
     candidates = [f"{prefix}.{i}" for i in range(1, 255) if f"{prefix}.{i}" != my_ip]
+    budget = _probe_budget()
+
+    async def _probe_host(ip: str) -> bool:
+        async with budget:
+            return await _tcp_probe(ip, port, 0.4)
+
     results = await asyncio.gather(
-        *[_tcp_probe(ip, port, 0.4) for ip in candidates],
+        *[_probe_host(ip) for ip in candidates],
         return_exceptions=True,
     )
     hits = [ip for ip, ok in zip(candidates, results) if ok is True]
@@ -91,7 +124,7 @@ async def _scan_ports_for_ip(
     ip: str,
     start: int = 49152,
     end: int = 65535,
-    concurrency: int = 1024,
+    concurrency: int = _SCAN_CONCURRENCY,
     timeout: float = 0.35,
 ) -> list[int]:
     """Scan the IANA dynamic / ephemeral range on a single IP for open TCP ports.
@@ -101,31 +134,54 @@ async def _scan_ports_for_ip(
     Scanning one host across 16k ports finishes in a few seconds because most
     closed ports return RST immediately on a same-LAN probe.
     """
-    sem = asyncio.Semaphore(concurrency)
+    # ``concurrency`` remains injectable for focused tests, but never permits
+    # a caller to bypass the process-wide selector safety budget.  The shared
+    # semaphore also covers multiple watchdog scans running at once.
+    sem = asyncio.Semaphore(max(1, min(concurrency, _SCAN_CONCURRENCY)))
+    budget = _probe_budget()
 
     async def _probe_one(p: int) -> int | None:
         async with sem:
-            ok = await _tcp_probe(ip, p, timeout)
+            async with budget:
+                ok = await _tcp_probe(ip, p, timeout)
             return p if ok else None
 
-    tasks = [asyncio.create_task(_probe_one(p)) for p in range(start, end + 1)]
+    ports = list(range(start, end + 1))
+    queue: asyncio.Queue[int] = asyncio.Queue()
+    for port in ports:
+        queue.put_nowait(port)
+
     hits: list[int] = []
-    try:
-        for fut in asyncio.as_completed(tasks):
+    worker_count = min(len(ports), max(1, min(concurrency, _SCAN_CONCURRENCY)))
+
+    async def _worker() -> None:
+        while True:
             try:
-                res = await fut
-            except (OSError, ConnectionError, asyncio.TimeoutError):
-                res = None
-            if res is not None:
-                hits.append(res)
-    finally:
-        # A start budget timeout cancels this scanner while thousands of
-        # probes may still be pending. Always drain them so cancelled scans
-        # cannot keep sockets/tasks alive in the backend event loop.
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+                port = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            try:
+                try:
+                    result = await _probe_one(port)
+                except (OSError, ConnectionError, asyncio.TimeoutError):
+                    result = None
+                if result is not None:
+                    hits.append(result)
+            finally:
+                queue.task_done()
+
+    workers = [asyncio.create_task(_worker()) for _ in range(worker_count)]
+    try:
+        await asyncio.gather(*workers)
+    except BaseException:
+        # A start budget timeout or caller cancellation must stop and drain
+        # the bounded worker set before propagating.  Unlike the old
+        # 16,384-task implementation, no large pending task fan-out remains.
+        for worker in workers:
+            if not worker.done():
+                worker.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
+        raise
     return filter_remotepairing_ports(sorted(hits))
 
 

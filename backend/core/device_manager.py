@@ -17,6 +17,7 @@ access DVT services.  This requires administrator privileges on Windows.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import socket
 import time
@@ -56,6 +57,17 @@ class UnsupportedIosVersionError(RuntimeError):
         super().__init__(f"iOS {version} is not supported (requires {self.MIN_VERSION}+)")
 
 logger = logging.getLogger(__name__)
+
+
+# The detached-close policy is carried in the cleanup task's context rather
+# than in the private method signature.  A few lightweight DeviceManager test
+# doubles (and older integrations) override ``_close_detached_connection``
+# with the original two-argument contract; keeping that contract avoids
+# turning a lifecycle hardening change into an adapter break.
+_clear_location_on_detached_close = contextvars.ContextVar(
+    "clear_location_on_detached_close",
+    default=True,
+)
 
 
 class UsbmuxAvailability:
@@ -422,9 +434,24 @@ class DeviceManager:
         udid: str,
         conn: _ActiveConnection,
     ) -> None:
-        """Close resources from a previously detached connection."""
-        # Clear any active location simulation first.
-        if conn.location_service is not None:
+        """Close resources from a previously detached connection.
+
+        Location clearing is disabled by the cleanup task context when a
+        connection is being replaced.
+        The old location service may be backed by a dead DVT channel; calling
+        its normal ``clear()`` in that state can use its UDID-based reconnect
+        factory and accidentally acquire a provider on the new connection.
+        Replacement callers stop the old simulation engine before this
+        method, then close the exact old provider/RSD lease without allowing
+        cross-generation recovery.  Ordinary user disconnects retain the
+        best-effort clear behavior.
+        """
+        # Clear any active location simulation first, but never reconnect a
+        # retiring lease after a replacement has already been installed.
+        if (
+            _clear_location_on_detached_close.get()
+            and conn.location_service is not None
+        ):
             try:
                 await conn.location_service.clear()
             except Exception:
@@ -487,12 +514,19 @@ class DeviceManager:
         self,
         udid: str,
         conn: _ActiveConnection,
+        *,
+        clear_location: bool = True,
     ) -> bool:
         """Finish a detached close even when the caller is cancelled."""
-        return await self._drain_cleanup(
-            self._close_detached_connection(udid, conn),
-            label=f"detached connection {udid}",
-        )
+        token = _clear_location_on_detached_close.set(clear_location)
+        try:
+            cleanup = self._close_detached_connection(udid, conn)
+            return await self._drain_cleanup(
+                cleanup,
+                label=f"detached connection {udid}",
+            )
+        finally:
+            _clear_location_on_detached_close.reset(token)
 
     async def _abort_previous_connection(
         self,
@@ -797,7 +831,10 @@ class DeviceManager:
             udid = conn.udid
 
             async def _factory(_udid: str = udid) -> DvtProvider:
-                return await self.get_fresh_dvt_provider(_udid)
+                # Bind recovery to this exact connection lease.  A retiring
+                # location service must never reacquire a provider on a newer
+                # WiFi connection that happens to use the same UDID.
+                return await self.get_fresh_dvt_provider(_udid, expected=conn)
 
             return DvtLocationService(
                 dvt,
@@ -1003,7 +1040,14 @@ class DeviceManager:
                     self._connections[udid] = conn
                 installed = True
             if previous is not None and previous is not conn:
-                cancelled = await self._drain_detached_close(udid, previous)
+                # C0 has already been superseded by C1.  Do not let C0's
+                # location service reconnect through the UDID-based factory
+                # and allocate an extra DVT provider on C1.
+                cancelled = await self._drain_detached_close(
+                    udid,
+                    previous,
+                    clear_location=False,
+                )
                 if cancelled:
                     # The lease was installed but never delivered to the caller.
                     # Roll back only our exact object; a concurrent reconnect C2
@@ -1123,7 +1167,11 @@ class DeviceManager:
     # ------------------------------------------------------------------
 
     async def get_fresh_dvt_provider(
-        self, udid: str, *, timeout: float = 15.0
+        self,
+        udid: str,
+        *,
+        timeout: float = 15.0,
+        expected: _ActiveConnection | None = None,
     ) -> DvtProvider:
         """Return a freshly-opened ``DvtProvider`` for *udid*.
 
@@ -1146,6 +1194,12 @@ class DeviceManager:
         while True:
             async with self._lock:
                 conn = self._connections.get(udid)
+
+            if expected is not None and conn is not expected:
+                raise DeviceLostError(
+                    f"Device {udid} connection lease was replaced",
+                    reason=DeviceLostError.REASON_TUNNEL_DEAD,
+                )
 
             if conn is None:
                 raise DeviceLostError(
@@ -1189,9 +1243,31 @@ class DeviceManager:
                 continue
 
             # Success — swap into the active connection record so future
-            # discover/clear paths find it. Best-effort close on the old.
-            old_dvt = conn.dvt_provider
-            conn.dvt_provider = new_dvt
+            # discover/clear paths find it. Revalidate the exact lease after
+            # the await: a tunnel restart may have replaced this connection
+            # while the provider handshake was in flight.
+            async with self._lock:
+                lease_current = self._connections.get(udid) is conn and (
+                    expected is None or conn is expected
+                )
+                if lease_current:
+                    old_dvt = conn.dvt_provider
+                    conn.dvt_provider = new_dvt
+                else:
+                    old_dvt = None
+            if not lease_current:
+                try:
+                    await new_dvt.__aexit__(None, None, None)
+                except Exception:
+                    logger.debug(
+                        "Ignoring error closing provider opened for stale lease %s",
+                        udid,
+                        exc_info=True,
+                    )
+                raise DeviceLostError(
+                    f"Device {udid} connection lease was replaced",
+                    reason=DeviceLostError.REASON_TUNNEL_DEAD,
+                )
             if old_dvt is not None and old_dvt is not new_dvt:
                 try:
                     await old_dvt.__aexit__(None, None, None)

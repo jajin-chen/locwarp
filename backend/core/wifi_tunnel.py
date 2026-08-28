@@ -13,6 +13,14 @@ import logging
 logger = logging.getLogger("wifi_tunnel")
 
 
+# Closing a RemotePairing control service is part of runner ownership.  Keep
+# the wait bounded so a wedged DTX close cannot hold the runner lock forever;
+# the short drain also gives a cancellation-aware implementation a chance to
+# finish and lets us retrieve its result before the task reference is gone.
+_REMOTE_PAIRING_CLOSE_TIMEOUT = 5.0
+_REMOTE_PAIRING_CLOSE_DRAIN_TIMEOUT = 1.0
+
+
 class TunnelRunner:
     """Owns the tunnel asyncio task and its RSD info."""
 
@@ -33,6 +41,45 @@ class TunnelRunner:
     def is_running(self) -> bool:
         return self.task is not None and not self.task.done()
 
+    async def _close_remote_pairing_service(self, service) -> None:
+        """Close the control socket without blocking runner teardown forever."""
+        close_task = asyncio.create_task(service.close())
+        caller_cancelled = False
+        try:
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(close_task),
+                    timeout=_REMOTE_PAIRING_CLOSE_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("RemotePairing service close timed out; cancelling")
+            except asyncio.CancelledError:
+                # The runner itself is being cancelled.  Still cancel and
+                # retrieve the owned close task before allowing the runner to
+                # finish, otherwise asyncio will report another pending task.
+                caller_cancelled = True
+        finally:
+            if not close_task.done():
+                close_task.cancel()
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(close_task),
+                    timeout=_REMOTE_PAIRING_CLOSE_DRAIN_TIMEOUT,
+                )
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                if not close_task.done():
+                    close_task.cancel()
+            if close_task.done():
+                try:
+                    close_task.result()
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.debug("RemotePairing service close failed", exc_info=True)
+
+        if caller_cancelled:
+            raise asyncio.CancelledError
+
     async def _finish_task(
         self,
         task: asyncio.Task,
@@ -51,6 +98,7 @@ class TunnelRunner:
         from pymobiledevice3.remote.tunnel_service import (
             create_core_device_tunnel_service_using_remotepairing,
         )
+        service = None
         try:
             logger.info("Connecting to RemotePairing service at %s:%d", ip, port)
             service = await create_core_device_tunnel_service_using_remotepairing(
@@ -107,6 +155,21 @@ class TunnelRunner:
             self._ready.set()
             raise
         finally:
+            # ``start_tcp_tunnel()`` owns only the data tunnel.  The
+            # RemotePairing control service returned by the factory is a
+            # separate socket and must be closed explicitly on every runner
+            # exit; otherwise repeated watchdog restarts leave control
+            # transports (and their DTX reader tasks) for garbage collection.
+            if service is not None:
+                try:
+                    await self._close_remote_pairing_service(service)
+                except BaseException:
+                    logger.debug(
+                        "RemotePairing service close failed for %s:%d",
+                        ip,
+                        port,
+                        exc_info=True,
+                    )
             self.info = None
 
     async def start(self, udid: str, ip: str, port: int, timeout: float = 20.0) -> dict:
