@@ -1,4 +1,5 @@
 import L from 'leaflet';
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 
 // MapLibre GL (+ its Leaflet binding) is ~800KB and only needed for the
 // OpenFreeMap Liberty vector layer, so it is loaded on demand via dynamic
@@ -10,10 +11,14 @@ let maplibreStackPromise: Promise<void> | null = null;
 function loadMaplibreStack(): Promise<void> {
   if (!maplibreStackPromise) {
     maplibreStackPromise = (async () => {
-      const [{ default: maplibregl }] = await Promise.all([
+      const [maplibregl] = await Promise.all([
         import('maplibre-gl'),
         import('maplibre-gl/dist/maplibre-gl.css'),
       ]);
+      // MapLibre GL 6 is ESM-only and exposes named exports through the
+      // namespace object. Point the packaged Electron build at Vite's worker
+      // chunk because import.meta.url is file:// there.
+      maplibregl.config.WORKER_URL = maplibreWorkerUrl;
       if (typeof window !== 'undefined' && !(window as any).maplibregl) {
         (window as any).maplibregl = maplibregl;
       }
