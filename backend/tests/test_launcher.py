@@ -50,6 +50,7 @@ def test_start_frontend_watches_backend_during_port_wait(monkeypatch) -> None:
     frontend = Mock()
     wait = Mock(return_value=True)
     monkeypatch.setattr(start, "is_port_open", lambda _port: False)
+    monkeypatch.setattr(start, "choose_frontend_port", lambda: start.FRONTEND_PORT)
     monkeypatch.setattr(start.subprocess, "Popen", Mock(return_value=frontend))
     monkeypatch.setattr(start, "wait_for_port", wait)
     monkeypatch.setattr(start, "procs", [])
@@ -61,6 +62,16 @@ def test_start_frontend_watches_backend_during_port_wait(monkeypatch) -> None:
         process=frontend,
         watched_processes=(("後端", backend),),
     )
+
+
+def test_choose_frontend_port_falls_back_when_default_is_unavailable(monkeypatch) -> None:
+    monkeypatch.setattr(
+        start,
+        "can_bind_port",
+        lambda port: port == start.FRONTEND_FALLBACK_PORT,
+    )
+
+    assert start.choose_frontend_port() == start.FRONTEND_FALLBACK_PORT
 
 
 @pytest.mark.parametrize("return_code", [0, 23])

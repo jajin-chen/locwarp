@@ -19,6 +19,8 @@ FRONTEND = os.path.join(ROOT, "frontend")
 
 BACKEND_PORT = 8777
 FRONTEND_PORT = 5173
+FRONTEND_FALLBACK_PORT = 3001
+FRONTEND_FALLBACK_SCAN_LIMIT = 20
 
 procs = []
 
@@ -47,6 +49,31 @@ def is_port_open(port):
             return True
     except (ConnectionRefusedError, OSError, TimeoutError):
         return False
+
+
+def can_bind_port(port):
+    """Return whether the frontend can bind its listen address to *port*."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("0.0.0.0", port))
+        return True
+    except OSError:
+        return False
+
+
+def choose_frontend_port():
+    """Choose a usable frontend port, including Windows-reserved-port fallback."""
+    candidates = [
+        FRONTEND_PORT,
+        *range(
+            FRONTEND_FALLBACK_PORT,
+            FRONTEND_FALLBACK_PORT + FRONTEND_FALLBACK_SCAN_LIMIT,
+        ),
+    ]
+    for port in candidates:
+        if can_bind_port(port):
+            return port
+    return None
 
 
 def kill_port(port):
@@ -148,13 +175,26 @@ def start_backend():
 
 
 def start_frontend(backend_process=None):
-    print(f"  [4/4] 啟動前端服務 (port {FRONTEND_PORT})...")
+    global FRONTEND_PORT
+
+    requested_port = FRONTEND_PORT
+    print(f"  [4/4] 啟動前端服務 (port {requested_port})...")
 
     # 清理殘留
-    if is_port_open(FRONTEND_PORT):
-        print(f"      Port {FRONTEND_PORT} 被佔用，清理中...")
-        kill_port(FRONTEND_PORT)
+    if is_port_open(requested_port):
+        print(f"      Port {requested_port} 被佔用，清理中...")
+        kill_port(requested_port)
         time.sleep(1)
+
+    selected_port = choose_frontend_port()
+    if selected_port is None:
+        print("      找不到可用的前端 port（已檢查預設與 fallback 埠）")
+        return None
+    FRONTEND_PORT = selected_port
+    if selected_port != requested_port:
+        print(
+            f"      Port {requested_port} 無法綁定，改用 port {selected_port}"
+        )
 
     # 用 --port 強制指定 port，避免 Vite 跳到其他 port
     p = subprocess.Popen(
