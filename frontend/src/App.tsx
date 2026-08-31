@@ -233,10 +233,10 @@ const App: React.FC = () => {
   // most recent one. Falls back to the legacy single-IP keys for users
   // upgrading from a build that didn't track multiple IPs yet.
   //
-  // Group-mode safety: each per-IP attempt is independent. The whole
-  // pass is skipped if a device is already connected at trigger time
-  // (USB plug, or backend already brought a tunnel back up via its own
-  // restart logic) so we don't fight with an existing USB connection.
+  // Group-mode safety: each per-IP attempt is independent. Keep an existing
+  // USB session untouched, but do not skip the whole pass merely because one
+  // or two WiFi tunnels are already alive: `alreadyTunneled` below filters
+  // those endpoints while still allowing a missing iPhone to join.
   const wifiAutoConnectAttemptedRef = useRef(false)
   useEffect(() => {
     if (!ws.connected) return
@@ -277,9 +277,10 @@ const App: React.FC = () => {
     const tid = setTimeout(() => {
       ;(async () => {
         try {
-          // Skip if a device is already connected (USB plug, or backend
-          // already brought a tunnel back up via its own restart logic).
-          if (device.connectedDevices.length > 0) return
+          // Keep an existing USB session untouched. WiFi sessions are
+          // filtered by their active endpoints below, so a missing third
+          // iPhone still gets an auto-connect attempt.
+          if (device.connectedDevices.some((d) => d.connection_type === 'USB')) return
           const status = await api.wifiTunnelStatus()
           const alreadyTunneled = new Set(
             (status?.tunnels || [])
@@ -1461,7 +1462,7 @@ const App: React.FC = () => {
           devices={device.connectedDevices}
           runtimes={sim.runtimes}
           onAdd={() => {
-            if (device.connectedDevices.length >= 2) {
+            if (device.connectedDevices.length >= 3) {
               setToastMsg(t('device.max_reached'))
               return
             }
