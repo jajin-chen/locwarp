@@ -494,6 +494,7 @@ const App: React.FC = () => {
   const mapApiRef = useRef<{
     panTo: (lat: number, lng: number, zoom?: number) => void
     fitBounds: (points: { lat: number; lng: number }[]) => void
+    getCenter: () => { lat: number; lng: number } | null
   } | null>(null)
   const handleMapPanOnly = useCallback((lat: number, lng: number) => {
     const cl = clampLat(lat)
@@ -724,15 +725,19 @@ const App: React.FC = () => {
         sim.joystickStart()
       }
     } else if (sim.mode === SimMode.RandomWalk) {
-      if (!sim.currentPosition) {
+      // A freshly rebuilt device engine has no virtual position yet. Use the
+      // visible map center as the first random-walk location; the backend will
+      // teleport there before starting the walk.
+      const center = sim.currentPosition ?? mapApiRef.current?.getCenter()
+      if (!center) {
         showToast(t('toast.no_position_random'))
         return
       }
       if (udids.length >= 2) {
-        const outcome = await sim.randomWalkAll(udids, sim.currentPosition, randomWalkRadius)
+        const outcome = await sim.randomWalkAll(udids, center, randomWalkRadius)
         showToast(toastForFanout(t, t('mode.random_walk'), outcome, device.connectedDevices))
       } else {
-        sim.randomWalk(sim.currentPosition, randomWalkRadius)
+        sim.randomWalk(center, randomWalkRadius)
       }
     } else if (sim.mode === SimMode.Loop) {
       handleStartWaypointRoute()

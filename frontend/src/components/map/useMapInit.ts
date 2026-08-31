@@ -45,6 +45,7 @@ export function useMapInit({
   onMapReady?: (api: {
     panTo: (lat: number, lng: number, zoom?: number) => void;
     fitBounds: (points: { lat: number; lng: number }[]) => void;
+    getCenter: () => { lat: number; lng: number } | null;
   }) => void;
   prevPositionRef: MutableRefObject<Position | null>;
 }): MapInitRefs {
@@ -268,6 +269,12 @@ export function useMapInit({
             }
             const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng] as [number, number]));
             m.fitBounds(bounds, { padding: [60, 60], maxZoom: 17, animate: true });
+          },
+          getCenter: () => {
+            const m = mapRef.current;
+            if (!m) return null;
+            const center = m.getCenter();
+            return { lat: center.lat, lng: center.lng };
           },
         });
       } catch { /* non-fatal */ }

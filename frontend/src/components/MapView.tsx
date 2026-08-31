@@ -76,6 +76,7 @@ interface MapViewProps {
   onMapReady?: (api: {
     panTo: (lat: number, lng: number, zoom?: number) => void;
     fitBounds: (points: { lat: number; lng: number }[]) => void;
+    getCenter: () => { lat: number; lng: number } | null;
   }) => void;
   // Preview-only pin: rendered when the user previews a coord (camera-only
   // fly) so they can see exactly where they're looking on the map. Distinct

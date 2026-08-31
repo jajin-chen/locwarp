@@ -1479,6 +1479,19 @@ async def _wifi_tunnel_start_and_connect_impl(
             if _start_attempt_fenced_locked(attempt):
                 raise TunnelStartCancelled
 
+        # The WebUI connects iOS 17+ devices through this composite WiFi
+        # route, so mirror the USB watchdog's group-mode handoff here. Without
+        # it a third phone is connected and has an engine, but remains idle
+        # with no position while the primary keeps moving.
+        try:
+            from main import _auto_sync_new_device_to_primary
+            await _auto_sync_new_device_to_primary(info.udid)
+        except Exception:
+            _tunnel_logger.exception(
+                "Auto-sync of new WiFi device %s to primary failed",
+                info.udid,
+            )
+
         success = True
         return {
             "status": "connected",

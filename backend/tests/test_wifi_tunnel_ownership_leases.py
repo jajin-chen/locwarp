@@ -965,6 +965,69 @@ async def test_start_and_connect_already_running_rebinds_without_borrowed_stop(
     )
 
 
+async def test_start_and_connect_auto_syncs_new_wifi_follower(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A newly connected WiFi phone must join the active primary movement."""
+
+    follower_udid = "pauline-follower"
+    primary_udid = "pauline-primary"
+    dm = _LeaseDeviceManager(follower_udid)
+    _patch_device_manager(monkeypatch, dm)
+
+    follower_engine = _Engine("E-follower")
+
+    async def create_engine(udid: str) -> None:
+        state.simulation_engines[udid] = follower_engine
+
+    state = _patch_state(monkeypatch, create_engine)
+    state.simulation_engines[primary_udid] = _Engine("E-primary")
+    state._primary_udid = primary_udid
+
+    monkeypatch.setattr(
+        device,
+        "_build_tunnel_udid_candidates",
+        lambda _req: [follower_udid],
+    )
+    runner = _Runner("R-follower")
+    monkeypatch.setattr(device, "TunnelRunner", lambda: runner)
+
+    async def idle_watchdog(*_args, **_kwargs) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(device, "_per_tunnel_watchdog", idle_watchdog)
+
+    synced: list[str] = []
+
+    async def auto_sync(udid: str) -> None:
+        synced.append(udid)
+
+    monkeypatch.setattr("main._auto_sync_new_device_to_primary", auto_sync)
+
+    result = await device.wifi_tunnel_start_and_connect(
+        device.WifiTunnelStartRequest(
+            ip="192.0.2.32",
+            port=49152,
+            udid=follower_udid,
+        ),
+    )
+
+    assert result["status"] == "connected"
+    assert result["udid"] == follower_udid
+    assert synced == [follower_udid]
+
+    owned_runner, watchdog, side_effects = await tunnel_manager._detach_tunnel(
+        follower_udid,
+    )
+    await tunnel_manager._stop_tunnel_parts(
+        owned_runner,
+        watchdog,
+        caller="test_auto_sync_teardown",
+        udid=follower_udid,
+        side_effects=side_effects,
+    )
+
+
 async def test_start_and_connect_reuses_existing_connection_and_engine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
