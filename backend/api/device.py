@@ -502,8 +502,13 @@ async def wifi_tunnel_find_port(req: WifiTunnelFindPortRequest):
 
 @router.get("/wifi/tunnel/discover")
 async def wifi_tunnel_discover():
-    """Find iPhones on the local network. First tries mDNS (Bonjour RemotePairing
-    broadcast); if that yields nothing, falls back to a smart /24 subnet scan."""
+    """Find iPhones on the local network.
+
+    mDNS (Bonjour RemotePairing broadcast) is preferred.  When it reports
+    fewer than the group-device target, the discovery service supplements it
+    with a smart /24 subnet scan so a partial multicast result cannot hide a
+    reachable phone.
+    """
     devices = await discover_tunnel_candidates()
     # A TCP scan reports one entry per open port. Collapse those entries by
     # IP so the frontend's device cap counts phones, not listeners, and pass

@@ -33,6 +33,23 @@ async def test_tcp_probe_applies_its_timeout_once(monkeypatch: pytest.MonkeyPatc
     assert wait_for_calls == [0.35]
 
 
+async def test_port_scan_default_keeps_shared_probe_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probe_timeouts: list[float] = []
+
+    async def fake_probe(_ip: str, _port: int, timeout: float) -> bool:
+        probe_timeouts.append(timeout)
+        return False
+
+    monkeypatch.setattr(tunnel_discovery, "_tcp_probe", fake_probe)
+
+    assert await tunnel_discovery._scan_ports_for_ip(
+        "192.0.2.10", start=49152, end=49152, concurrency=1,
+    ) == []
+    assert probe_timeouts == [0.35]
+
+
 async def test_port_scan_cancels_all_probe_tasks_when_scan_is_cancelled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

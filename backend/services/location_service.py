@@ -105,16 +105,19 @@ class DvtLocationService(LocationService):
         self._location_sim: LocationSimulation | None = None
         self._active = False
         self._reconnect_lock = asyncio.Lock()
+        self._instrument_lock = asyncio.Lock()
 
     async def _ensure_instrument(self) -> LocationSimulation:
         """Lazily create, connect, and cache the LocationSimulation instrument."""
-        if self._location_sim is None:
-            self._location_sim = LocationSimulation(self._dvt)
-            await self._location_sim.connect()
-            logger.debug("DVT LocationSimulation instrument initialised and connected")
-        return self._location_sim
+        async with self._instrument_lock:
+            if self._location_sim is None:
+                instrument = LocationSimulation(self._dvt)
+                await instrument.connect()
+                self._location_sim = instrument
+                logger.debug("DVT LocationSimulation instrument initialised and connected")
+            return self._location_sim
 
-    async def _reconnect(self) -> None:
+    async def _reconnect(self, *, failed_provider: DvtProvider | None = None) -> None:
         """Tear down and fully recreate the DVT provider and instrument.
 
         Preferred path (``dvt_factory`` provided): defer rebuild to
@@ -129,7 +132,11 @@ class DvtLocationService(LocationService):
         rebuilding from the cached lockdown, for callers that haven't
         wired up the factory yet (and for unit tests).
         """
-        async with self._reconnect_lock:
+        async with self._reconnect_lock, self._instrument_lock:
+            # Another failed operation may already have replaced this provider.
+            # Reuse its recovery instead of closing the now-working channel.
+            if failed_provider is not None and self._dvt is not failed_provider:
+                return
             # Close the old DVT provider gracefully.
             try:
                 await self._dvt.__aexit__(None, None, None)
@@ -191,8 +198,10 @@ class DvtLocationService(LocationService):
 
     async def set(self, lat: float, lng: float) -> None:
         """Simulate the device location using the DVT instrument channel."""
+        failed_provider = None
         try:
             sim = await self._ensure_instrument()
+            failed_provider = self._dvt
             await sim.set(lat, lng)
             self._active = True
             logger.debug("DVT location set to (%.6f, %.6f) [%s]", lat, lng, self._udid or "?")
@@ -200,7 +209,7 @@ class DvtLocationService(LocationService):
                 ConnectionResetError, asyncio.TimeoutError) as exc:
             logger.warning("DVT channel dropped (%s: %s); reconnecting and retrying",
                            type(exc).__name__, exc)
-            await self._reconnect()
+            await self._reconnect(failed_provider=failed_provider or self._dvt)
             sim = await self._ensure_instrument()
             await sim.set(lat, lng)
             self._active = True
@@ -214,8 +223,10 @@ class DvtLocationService(LocationService):
         if not self._active:
             logger.debug("DVT clear called but no simulation is active")
             return
+        failed_provider = None
         try:
             sim = await self._ensure_instrument()
+            failed_provider = self._dvt
             await sim.clear()
             self._active = False
             logger.info("DVT simulated location cleared")
@@ -223,7 +234,7 @@ class DvtLocationService(LocationService):
                 ConnectionResetError, asyncio.TimeoutError) as exc:
             logger.warning("DVT channel dropped during clear (%s: %s); reconnecting",
                            type(exc).__name__, exc)
-            await self._reconnect()
+            await self._reconnect(failed_provider=failed_provider or self._dvt)
             sim = await self._ensure_instrument()
             await sim.clear()
             self._active = False

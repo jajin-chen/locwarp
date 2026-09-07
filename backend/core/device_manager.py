@@ -158,6 +158,7 @@ class _ActiveConnection:
     rsd: Optional[RemoteServiceDiscoveryService] = None
     location_service: Optional[LocationService] = None
     usbmux_lockdown: object = None  # Original lockdown client (for legacy fallback on iOS 17+)
+    location_init_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
 
 
 class DeviceManager:
@@ -661,16 +662,39 @@ class DeviceManager:
                 f"Device {udid} is not connected. Call connect() first."
             )
 
-        if conn.location_service is not None:
-            return conn.location_service
+        async with conn.location_init_lock:
+            async with self._lock:
+                if self._connections.get(udid) is not conn:
+                    raise DeviceLostError(f"Device {udid} connection lease was replaced")
+                if conn.location_service is not None:
+                    return conn.location_service
 
-        ver = _parse_ios_version(conn.ios_version)
-        if ver >= (17, 0):
-            loc = await self._create_dvt_location_service(conn)
-        else:
-            loc = await self._create_legacy_location_service(conn)
-        conn.location_service = loc
-        return loc
+            previous_dvt = conn.dvt_provider
+            try:
+                ver = _parse_ios_version(conn.ios_version)
+                if ver >= (17, 0):
+                    loc = await self._create_dvt_location_service(conn)
+                else:
+                    loc = await self._create_legacy_location_service(conn)
+                async with self._lock:
+                    if self._connections.get(udid) is not conn:
+                        raise DeviceLostError(f"Device {udid} connection lease was replaced")
+                    conn.location_service = loc
+                    return loc
+            except BaseException:
+                # Initialization may finish after detached cleanup already ran.
+                # Close only the provider acquired here, never the replacement.
+                orphan = conn.dvt_provider
+                if orphan is not None and orphan is not previous_dvt:
+                    conn.dvt_provider = None
+                    try:
+                        await self._drain_cleanup(
+                            orphan.__aexit__(None, None, None),
+                            label=f"aborted location initialization {udid}",
+                        )
+                    except Exception:
+                        logger.exception("Failed closing aborted DVT initialization for %s", udid)
+                raise
 
     async def _ensure_personalized_ddi_mounted(self, conn: _ActiveConnection) -> None:
         """Check whether the Personalized DDI is mounted on the iPhone.
@@ -722,18 +746,18 @@ class DeviceManager:
                 pass
             return
 
-        logger.warning(
-            "Personalized DDI is NOT mounted on %s. LocWarp will not "
-            "auto-mount; please mount DDI for this iPhone first, then "
-            "reconnect.", conn.udid,
+        logger.info(
+            "Image mounter did not report a Personalized DDI on %s; "
+            "trying DVT directly. If location service setup fails, "
+            "check the device's DDI mount state.", conn.udid,
         )
         try:
             from api.websocket import broadcast
             await broadcast("ddi_not_mounted", {
                 "udid": conn.udid,
                 "hint": (
-                    "iPhone 上未偵測到 DDI。請先為這支 iPhone 掛載一次 DDI(Developer Disk Image),"
-                    "再重新連接 LocWarp;或先重開 iPhone 後再試。"
+                    "影像服務未回報已掛載 DDI,LocWarp 仍會嘗試 DVT 定位服務。"
+                    "若定位連線失敗,請確認這支 iPhone 的 DDI 掛載狀態後再重新連接。"
                 ),
             })
         except Exception:
@@ -808,18 +832,37 @@ class DeviceManager:
     ) -> DvtLocationService:
         """Spin up a DVT provider and hand it to ``DvtLocationService``.
 
-        If DVT fails because the Developer Disk Image is not mounted,
-        we try to mount it automatically and retry once.
+        Check the reported DDI state, then try DVT directly. Personalized
+        images are not automatically mounted here.
         """
-        # Try to mount DDI proactively (fast no-op when already mounted).
+        # Check DDI status without changing the device's mounted images.
         try:
             await self._ensure_personalized_ddi_mounted(conn)
         except Exception:
-            logger.warning("DDI auto-mount failed; DVT may still fail", exc_info=True)
+            logger.warning("DDI status check failed; trying DVT directly", exc_info=True)
 
         try:
             dvt = DvtProvider(conn.lockdown)
-            await dvt.__aenter__()
+            try:
+                # pymobiledevice3 publishes its DTX handle only after the
+                # handshake and does not clean up CancelledError mid-enter.
+                # Drain that bounded handshake before closing on cancellation.
+                cancelled = await self._drain_cleanup(
+                    dvt.__aenter__(), label=f"DVT handshake {conn.udid}",
+                )
+                if cancelled:
+                    raise asyncio.CancelledError
+            except BaseException:
+                # A cancelled/failed handshake can already own a socket even
+                # though it has not yet been published on the connection.
+                try:
+                    await self._drain_cleanup(
+                        dvt.__aexit__(None, None, None),
+                        label=f"failed DVT handshake {conn.udid}",
+                    )
+                except Exception:
+                    logger.exception("Failed closing DVT handshake for %s", conn.udid)
+                raise
             conn.dvt_provider = dvt
             logger.debug("DVT provider opened for %s", conn.udid)
             # Bind a per-udid factory so DvtLocationService._reconnect can
@@ -843,6 +886,17 @@ class DeviceManager:
                 udid=udid,
             )
         except Exception as dvt_exc:
+            legacy_lockdown = conn.usbmux_lockdown or conn.lockdown
+            if isinstance(legacy_lockdown, RemoteServiceDiscoveryService):
+                # RSD does not advertise the legacy lockdown developer service.
+                # Its lazy constructor would appear to succeed, then fail every
+                # location update and leave an unusable service cached.
+                logger.warning(
+                    "DVT location service failed for %s (%s); no direct lockdown "
+                    "connection is available for the legacy fallback",
+                    conn.udid, dvt_exc,
+                )
+                raise
             logger.warning(
                 "DVT location service failed for %s (%s). Falling back to "
                 "legacy DtSimulateLocation over lockdown.",
@@ -852,9 +906,13 @@ class DeviceManager:
             # devices (reported working on iOS 26 by multiple users), so
             # try the legacy service before giving up entirely.
             try:
-                # Prefer the original usbmux/TCP lockdown for DtSimulateLocation;
-                # fall back to whatever we have stored if not available.
-                legacy_lockdown = conn.usbmux_lockdown or conn.lockdown
+                # Verify availability without changing the device's location.
+                # DtSimulateLocation opens a new connection for every command,
+                # so constructing the wrapper alone cannot validate this fallback.
+                probe = await legacy_lockdown.start_lockdown_developer_service(
+                    DtSimulateLocation.SERVICE_NAME
+                )
+                await probe.close()
                 legacy = LegacyLocationService(legacy_lockdown)
                 logger.info("Using LegacyLocationService fallback for %s", conn.udid)
                 return legacy
@@ -1279,7 +1337,9 @@ class DeviceManager:
             logger.info("DVT provider re-acquired for %s", udid)
             return new_dvt
 
-    async def full_reconnect(self, udid: str) -> bool:
+    async def full_reconnect(
+        self, udid: str, *, expected: _ActiveConnection | None = None,
+    ) -> bool:
         """Last-resort recovery: force a complete teardown + reconnect.
 
         Used as the API-layer safety net (``api/location.py``) when the
@@ -1293,6 +1353,9 @@ class DeviceManager:
         """
         async with self._lock:
             conn = self._connections.get(udid)
+            if expected is not None and conn is not expected:
+                logger.info("full_reconnect: skipping retired connection for %s", udid)
+                return False
         conn_type = conn.connection_type if conn else None
 
         from services.tunnel_manager import _tunnels, _attempt_tunnel_restart
@@ -1305,9 +1368,15 @@ class DeviceManager:
                 )
                 return False
             try:
-                ok = await _attempt_tunnel_restart(
-                    udid, runner.target_ip, runner.target_port, None, runner,
-                )
+                if expected is not None:
+                    ok = await _attempt_tunnel_restart(
+                        udid, runner.target_ip, runner.target_port, None, runner,
+                        connection_lease=expected,
+                    )
+                else:
+                    ok = await _attempt_tunnel_restart(
+                        udid, runner.target_ip, runner.target_port, None, runner,
+                    )
                 return bool(ok)
             except Exception:
                 logger.exception("full_reconnect: WiFi tunnel restart failed for %s", udid)
@@ -1316,7 +1385,11 @@ class DeviceManager:
         # USB (or unknown type — try the bluntest recovery available).
         try:
             try:
-                await self.disconnect(udid)
+                if expected is not None:
+                    if not await self.disconnect_if_current(udid, expected):
+                        return False
+                else:
+                    await self.disconnect(udid)
             except Exception:
                 logger.debug("full_reconnect: USB disconnect failed", exc_info=True)
             await self.connect(udid)

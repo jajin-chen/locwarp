@@ -23,6 +23,10 @@ logger = logging.getLogger("wifi_tunnel")
 # limit.  The value leaves headroom for the live tunnel and control-plane
 # sockets instead of treating the select limit as a target.
 _SCAN_CONCURRENCY = 96
+# Keep the normal per-probe timeout compatible with tunnel startup, manual
+# scans, and watchdog fallback.  The supplemental-discovery path below applies
+# its own overall deadline instead of weakening this shared connection probe.
+_PORT_SCAN_TIMEOUT = 0.35
 _probe_budgets: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop, asyncio.Semaphore
 ] = weakref.WeakKeyDictionary()
@@ -125,7 +129,7 @@ async def _scan_ports_for_ip(
     start: int = 49152,
     end: int = 65535,
     concurrency: int = _SCAN_CONCURRENCY,
-    timeout: float = 0.35,
+    timeout: float = _PORT_SCAN_TIMEOUT,
 ) -> list[int]:
     """Scan the IANA dynamic / ephemeral range on a single IP for open TCP ports.
 
@@ -187,6 +191,25 @@ async def _scan_ports_for_ip(
 
 REMOTEPAIRING_SERVICE = "_remotepairing._tcp.local."
 _MDNS_BROWSE_SECONDS = 3.0
+# LocWarp's group mode supports up to three devices.  A partial mDNS result
+# must still trigger the cheap subnet probes, otherwise one visible phone can
+# hide the other two when multicast discovery is incomplete on a multi-NIC LAN.
+_DISCOVERY_HOST_TARGET = 3
+_PARTIAL_DISCOVERY_SCAN_TIMEOUT = 12.0
+
+
+def _mdns_device_identity(candidate: dict) -> str:
+    """Return a stable identity for one mDNS service/device.
+
+    A single zeroconf service can expose more than one address.  Count its
+    service name (then host, then IP when metadata is absent), not each address,
+    when deciding whether mDNS found enough devices.
+    """
+    for key in ("name", "host", "ip"):
+        value = candidate.get(key)
+        if value:
+            return str(value).strip()
+    return ""
 
 
 def _mdns_entries_to_candidates(infos) -> list[dict]:
@@ -267,9 +290,13 @@ async def discover_tunnel_candidates(
     subnet_scan=None,
     port_scan=None,
 ) -> list[dict]:
-    """Find iPhones on the local network. First tries mDNS; if that yields
-    nothing, falls back to the smart /24 scan (probe 49152 + 62078, then
-    full-range port scan per live host). Deduped on (ip, port).
+    """Find iPhones on the local network.
+
+    mDNS is preferred, but a partial mDNS result must be supplemented by the
+    smart /24 scan (probe 49152 + 62078, then full-range port scan per *new*
+    live host).  Some Windows multi-NIC setups receive only one
+    ``_remotepairing`` advertisement even though the other phones are
+    reachable by TCP.  Deduped on (ip, port).
 
     The browse / subnet_scan / port_scan hooks exist for tests only.
     """
@@ -283,8 +310,25 @@ async def discover_tunnel_candidates(
     except Exception as e:
         logger.warning("mDNS browse failed: %s", e)
 
-    if not results:
-        logger.info("mDNS empty; falling back to smart /24 scan (probe + full-range)")
+    mdns_ips = {
+        str(r.get("ip")).strip()
+        for r in results
+        if r.get("ip")
+    }
+    mdns_devices = {
+        identity
+        for identity in (_mdns_device_identity(r) for r in results)
+        if identity
+    }
+    partial_mdns = bool(results)
+    if len(mdns_devices) < _DISCOVERY_HOST_TARGET:
+        if results:
+            logger.info(
+                "mDNS found %d host(s); supplementing with smart /24 scan",
+                len(mdns_devices),
+            )
+        else:
+            logger.info("mDNS empty; falling back to smart /24 scan (probe + full-range)")
         try:
             candidates: set[str] = set()
             for p in (49152, 62078):
@@ -293,15 +337,37 @@ async def discover_tunnel_candidates(
                 except Exception as e:
                     logger.warning("probe scan port %d failed: %s", p, e)
 
+            # mDNS already supplied a current RemotePairing port for these
+            # hosts.  Scan only newly discovered IPs so supplementation does
+            # not make a healthy mDNS result pay a second full-range scan.
+            candidates.difference_update(mdns_ips)
             if candidates:
                 logger.info(
-                    "Smart scan found %d live host(s); full-range scanning each",
+                    "Smart scan found %d new live host(s); full-range scanning each",
                     len(candidates),
                 )
 
                 async def _scan_one(ip: str) -> tuple[str, list[int]]:
                     try:
-                        return ip, await port_scan(ip)
+                        scan = port_scan(ip)
+                        if partial_mdns:
+                            # A black-holed host can otherwise keep the
+                            # request busy for every port in the dynamic
+                            # range.  Bound only this best-effort supplement;
+                            # direct/manual/fallback scans retain the normal
+                            # per-probe timeout and cancellation behavior.
+                            ports = await asyncio.wait_for(
+                                scan, timeout=_PARTIAL_DISCOVERY_SCAN_TIMEOUT,
+                            )
+                        else:
+                            ports = await scan
+                        return ip, ports
+                    except asyncio.TimeoutError:
+                        logger.info(
+                            "bounded supplemental port scan for %s timed out",
+                            ip,
+                        )
+                        return ip, []
                     except Exception as e:
                         logger.warning("port scan for %s failed: %s", ip, e)
                         return ip, []

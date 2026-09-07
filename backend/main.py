@@ -171,6 +171,9 @@ class AppState:
         from api.websocket import broadcast
 
         loc_service = await self.device_manager.get_location_service(udid)
+        # Another caller can finish while we await the same service initializer.
+        if udid in self.simulation_engines:
+            return
 
         async def event_callback(event_type: str, data: dict):
             # Always tag emissions with udid so the frontend can route per-device.

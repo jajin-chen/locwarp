@@ -27,8 +27,8 @@ router = APIRouter(prefix="/api/location", tags=["location"])
 async def _engine(udid: str | None = None):
     """Return the active SimulationEngine for *udid* (or the primary one if
     unspecified), lazily rebuilding when the slot is empty. On the first
-    attempt we just rebuild the engine; if that fails we force a full
-    disconnect + reconnect + engine rebuild (covers the common iOS 17+ case
+    attempt we just rebuild the engine; if that fails we use transport-aware
+    reconnect + engine rebuild (covers the common iOS 17+ case
     where the RSD tunnel is alive but the DVT channel has silently gone stale)."""
     from main import app_state
     import logging as _logging
@@ -71,26 +71,24 @@ async def _engine(udid: str | None = None):
     _log.info("simulation_engine missing; attempt 1 (rebuild) for %s", target_udid)
     try:
         await app_state.create_engine_for_device(target_udid)
-        if app_state.simulation_engine is not None:
+        eng = app_state.get_engine(target_udid)
+        if eng is not None:
             _log.info("Engine rebuild succeeded on attempt 1")
-            return app_state.simulation_engine
+            return eng
     except Exception:
         _log.exception("Engine rebuild (attempt 1) failed for %s", target_udid)
 
-    # Attempt 2: hard reset — disconnect + reconnect + rebuild
-    _log.info("attempt 2 (hard reset) for %s", target_udid)
+    # Preserve WiFi routing before teardown; connect() alone is the USB path.
+    _log.info("attempt 2 (full reconnect) for %s", target_udid)
     try:
-        try:
-            await dm.disconnect(target_udid)
-        except Exception:
-            _log.warning("disconnect during hard reset failed; proceeding", exc_info=True)
-        await dm.connect(target_udid)
-        await app_state.create_engine_for_device(target_udid)
-        if app_state.simulation_engine is not None:
-            _log.info("Engine rebuild succeeded on attempt 2")
-            return app_state.simulation_engine
+        if await dm.full_reconnect(target_udid):
+            await app_state.create_engine_for_device(target_udid)
+            eng = app_state.get_engine(target_udid)
+            if eng is not None:
+                _log.info("Engine rebuild succeeded on attempt 2")
+                return eng
     except Exception:
-        _log.exception("Engine rebuild (attempt 2, hard reset) failed for %s", target_udid)
+        _log.exception("Engine rebuild (attempt 2, full reconnect) failed for %s", target_udid)
 
     raise HTTPException(
         status_code=400,
@@ -138,7 +136,9 @@ def _device_lost_message(exc: Exception) -> tuple[str, str]:
     )
 
 
-async def _try_with_recovery_retry(udid: str | None, op):
+async def _try_with_recovery_retry(
+    udid: str | None, op, *, lease: "_LocationActionLease | None" = None,
+):
     """Run *op* (a 0-arg async callable). On DeviceLostError, attempt
     one ``device_manager.full_reconnect(udid)``; if that succeeds, retry
     *op* once. Caller is responsible for re-resolving the engine inside
@@ -157,11 +157,35 @@ async def _try_with_recovery_retry(udid: str | None, op):
         from main import app_state
         import logging as _logging
         _log = _logging.getLogger("locwarp")
+        if lease is not None:
+            current_connection = app_state.device_manager._connections.get(udid)
+            current_engine = app_state.simulation_engines.get(udid)
+            if not (
+                lease.udid == udid and lease.connection is not None
+                and lease.engine is not None
+                and current_connection is lease.connection
+                and current_engine is lease.engine
+            ):
+                # A delayed failure belongs to the retired attempt, not to the
+                # replacement. Retry only on a coherent current owner; never
+                # launch another reconnect that could tear that owner down.
+                if (
+                    current_connection is not None and current_engine is not None
+                    and current_connection.location_service is current_engine.location_service
+                ):
+                    _log.info("Request lease replaced for %s; retrying on current engine", udid)
+                    return await op()
+                raise
         _log.warning(
             "DeviceLostError on %s; attempting full_reconnect safety-net retry", udid,
         )
         try:
-            recovered = await app_state.device_manager.full_reconnect(udid)
+            if lease is not None:
+                recovered = await app_state.device_manager.full_reconnect(
+                    udid, expected=lease.connection,
+                )
+            else:
+                recovered = await app_state.device_manager.full_reconnect(udid)
         except Exception:
             _log.exception("full_reconnect raised during safety-net retry")
             recovered = False
@@ -172,74 +196,76 @@ async def _try_with_recovery_retry(udid: str | None, op):
         return await op()
 
 
-async def _handle_device_lost(exc: Exception, udid: str | None = None) -> "HTTPException":
-    """Clean up after a DeviceLostError for the SPECIFIC udid that failed.
+class _LocationActionLease:
+    """The engine and connection actually used by this request attempt."""
 
-    Previous behaviour disconnected every currently-connected device, which
-    was a dual-device mode bug: unplug A while B is fine → B also gets
-    torn down. Now the caller passes the udid of the failing action and
-    only that device is cleaned up. When udid is None (legacy callers not
-    yet updated), we fall back to disconnecting all as before to preserve
-    behaviour, but log a warning.
-    """
+    def __init__(self, udid: str | None):
+        self.udid = udid
+        self.engine = None
+        self.connection = None
+
+    async def resolve_engine(self):
+        from main import app_state
+
+        self.engine = None
+        self.connection = None
+        engine = await _engine(self.udid)
+        connection = app_state.device_manager._connections.get(self.udid)
+        self.engine = engine
+        # An engine can itself be stale while a replacement is being installed.
+        # Never associate it with a connection owning a different service.
+        if connection is not None and connection.location_service is engine.location_service:
+            self.connection = connection
+        return engine
+
+
+async def _handle_device_lost(
+    exc: Exception, udid: str | None = None, *, lease: _LocationActionLease | None = None,
+) -> "HTTPException":
+    """Clean up only the exact failed request's engine and connection."""
     from main import app_state
     from api.websocket import broadcast
     import logging as _logging
     _log = _logging.getLogger("locwarp")
-
     dm = app_state.device_manager
-    if udid is not None:
-        lost_udids = [udid] if udid in dm._connections else []
-        if not lost_udids:
-            _log.info("device_lost: udid %s no longer in _connections; nothing to clean", udid)
-    else:
-        _log.warning("device_lost called without udid; falling back to clearing all devices")
-        lost_udids = list(dm._connections.keys())
 
-    for u in lost_udids:
-        # Stop any in-flight simulation on THIS engine so random-walk /
-        # loop / multi-stop handlers exit cleanly instead of flooding a
-        # dead DVT channel with push attempts.
-        old_eng = app_state.simulation_engines.get(u)
-        if old_eng is not None:
-            try:
-                old_eng._stop_event.set()
-                old_eng._pause_event.set()
-                active = getattr(old_eng, "_active_task", None)
-                if active is not None and not active.done():
-                    active.cancel()
-            except Exception:
-                _log.debug("device_lost: failed to stop old engine %s", u, exc_info=True)
+    if (
+        lease is not None and udid is not None and lease.udid == udid
+        and lease.connection is not None and lease.engine is not None
+        and dm._connections.get(udid) is lease.connection
+        and app_state.simulation_engines.get(udid) is lease.engine
+    ):
+        old_eng = lease.engine
         try:
-            await dm.disconnect(u)
-            _log.info("device_lost cleanup: disconnected %s", u)
+            old_eng._stop_event.set()
+            old_eng._pause_event.set()
+            active = getattr(old_eng, "_active_task", None)
+            if active is not None and not active.done():
+                active.cancel()
         except Exception:
-            _log.exception("device_lost cleanup: disconnect failed for %s", u)
-        # Only remove this udid's engine; the legacy `= None` setter clears
-        # every engine (bad for dual mode).
-        app_state.simulation_engines.pop(u, None)
-        if app_state._primary_udid == u:
-            remaining = next(iter(app_state.simulation_engines.keys()), None)
-            app_state._primary_udid = remaining
-
-    try:
-        await broadcast("device_disconnected", {
-            "udids": lost_udids,
-            "reason": "device_lost",
-            "error": str(exc),
-            "remaining_count": len(dm._connections),
-        })
-    except Exception:
-        _log.exception("Failed to broadcast device_disconnected")
+            _log.debug("device_lost: failed to stop old engine %s", udid, exc_info=True)
+        # No await between checking and removing this engine. A replacement
+        # published while disconnect closes the old transport remains untouched.
+        app_state.simulation_engines.pop(udid)
+        if app_state._primary_udid == udid:
+            app_state._primary_udid = next(iter(app_state.simulation_engines), None)
+        try:
+            disconnected = await dm.disconnect_if_current(udid, lease.connection)
+            if disconnected and udid not in dm._connections:
+                _log.info("device_lost cleanup: disconnected %s", udid)
+                await broadcast("device_disconnected", {
+                    "udids": [udid], "reason": "device_lost", "error": str(exc),
+                    "remaining_count": len(dm._connections),
+                })
+        except Exception:
+            _log.exception("device_lost cleanup failed for %s", udid)
+    else:
+        _log.info("device_lost: skipping stale or unowned cleanup for %s", udid)
 
     reason, message = _device_lost_message(exc)
     return HTTPException(
         status_code=503,
-        detail={
-            "code": "device_lost",
-            "reason": reason,
-            "message": message,
-        },
+        detail={"code": "device_lost", "reason": reason, "message": message},
     )
 
 
@@ -316,16 +342,18 @@ async def teleport(req: TeleportRequest):
 
     # The op closure re-resolves the engine each call: full_reconnect
     # rebuilds it, so a captured reference would point at the dead one.
+    lease = _LocationActionLease(action_udid)
+
     async def _do_teleport():
-        eng = await _engine(action_udid)
+        eng = await lease.resolve_engine()
         await eng.teleport(req.lat, req.lng)
 
     try:
-        await _try_with_recovery_retry(action_udid, _do_teleport)
+        await _try_with_recovery_retry(action_udid, _do_teleport, lease=lease)
     except HTTPException:
         raise
     except DeviceLostError as e:
-        raise (await _handle_device_lost(e, action_udid))
+        raise (await _handle_device_lost(e, action_udid, lease=lease))
     except Exception as e:
         import traceback, logging
         logging.getLogger("locwarp").error("Teleport failed:\n%s", traceback.format_exc())
@@ -334,7 +362,7 @@ async def teleport(req: TeleportRequest):
         cause = e
         while cause is not None:
             if isinstance(cause, DeviceLostError):
-                raise (await _handle_device_lost(cause, action_udid))
+                raise (await _handle_device_lost(cause, action_udid, lease=lease))
             cause = cause.__cause__
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -457,15 +485,17 @@ async def random_walk(req: RandomWalkRequest):
 
     action_udid = req.udid or _app_state._primary_udid
 
+    lease = _LocationActionLease(action_udid)
+
     async def _ensure_start_position():
-        eng = await _engine(action_udid)
+        eng = await lease.resolve_engine()
         if eng.current_position is None:
             await eng.teleport(req.center.lat, req.center.lng)
 
     try:
-        await _try_with_recovery_retry(action_udid, _ensure_start_position)
+        await _try_with_recovery_retry(action_udid, _ensure_start_position, lease=lease)
     except DeviceLostError as e:
-        raise (await _handle_device_lost(e, action_udid))
+        raise (await _handle_device_lost(e, action_udid, lease=lease))
     except HTTPException:
         raise
     except Exception as e:
@@ -523,23 +553,25 @@ async def goldditto_cycle(req: GoldDittoCycleRequest):
     from main import app_state as _app_state
     action_udid = req.udid or _app_state._primary_udid
 
+    lease = _LocationActionLease(action_udid)
+
     async def _do_cycle():
-        eng = await _engine(action_udid)
+        eng = await lease.resolve_engine()
         await eng.goldditto_cycle(req.lat, req.lng)
 
     try:
-        await _try_with_recovery_retry(action_udid, _do_cycle)
+        await _try_with_recovery_retry(action_udid, _do_cycle, lease=lease)
     except HTTPException:
         raise
     except DeviceLostError as e:
-        raise (await _handle_device_lost(e, action_udid))
+        raise (await _handle_device_lost(e, action_udid, lease=lease))
     except Exception as e:
         import traceback, logging
         logging.getLogger("locwarp").error("Gold Ditto cycle failed:\n%s", traceback.format_exc())
         cause = e
         while cause is not None:
             if isinstance(cause, DeviceLostError):
-                raise (await _handle_device_lost(cause, action_udid))
+                raise (await _handle_device_lost(cause, action_udid, lease=lease))
             cause = cause.__cause__
         raise HTTPException(status_code=500, detail=str(e))
     return {"status": "ok", "lat": req.lat, "lng": req.lng}
@@ -550,14 +582,16 @@ async def restore(udid: str | None = None):
     from main import app_state as _app_state
     action_udid = udid or _app_state._primary_udid
 
+    lease = _LocationActionLease(action_udid)
+
     async def _do_restore():
-        eng = await _engine(action_udid)
+        eng = await lease.resolve_engine()
         await eng.restore()
 
     try:
-        await _try_with_recovery_retry(action_udid, _do_restore)
+        await _try_with_recovery_retry(action_udid, _do_restore, lease=lease)
     except DeviceLostError as e:
-        raise (await _handle_device_lost(e, action_udid))
+        raise (await _handle_device_lost(e, action_udid, lease=lease))
     return {"status": "restored"}
 
 

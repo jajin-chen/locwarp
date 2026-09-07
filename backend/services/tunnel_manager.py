@@ -141,6 +141,8 @@ _tunnel_stop_all_watermark = 0
 _tunnel_stop_watermarks: dict[str, int] = {}
 _pending_tunnel_starts: dict[int, TunnelStartAttempt] = {}
 _tunnel_generations: dict[str, int] = {}
+# The first caller owns restart cleanup; concurrent callers share its result.
+_tunnel_restarts: dict[tuple[str, int, int | None], asyncio.Future[bool]] = {}
 # Restart setup can launch a long-lived resume/auto-sync coroutine after the
 # replacement runner is registered. Keep those tasks owned by the runner so a
 # stop/replacement can cancel them before they touch a disconnected RSD.
@@ -1613,16 +1615,49 @@ async def _attempt_tunnel_restart(
     original_runner: TunnelRunner,
     connection_lease: object | None = None,
 ) -> bool:
-    """Restart with a narrow adoption commit after runner.start completes."""
-    return await _attempt_tunnel_restart_impl(
-        udid,
-        ip,
-        port,
-        snapshot,
-        original_runner,
-        connection_lease,
-        adoption_lock=_get_tunnel_lifecycle_lock(),
-    )
+    """Share an in-flight restart of the same runner generation.
+
+    Keep execution in the owning caller so its cancellation still drives the
+    existing rollback path. Cancelling a joining API request must not cancel
+    the watchdog's restart (or another API request's restart).
+    """
+    async with _tunnels_lock:
+        if _tunnels.get(udid) is not original_runner:
+            return False
+        key = (udid, id(original_runner), _tunnel_generations.get(udid))
+        pending = _tunnel_restarts.get(key)
+        owner = pending is None
+        if owner:
+            pending = asyncio.get_running_loop().create_future()
+            _tunnel_restarts[key] = pending
+
+    if not owner:
+        return await asyncio.shield(pending)
+
+    try:
+        result = await _attempt_tunnel_restart_impl(
+            udid,
+            ip,
+            port,
+            snapshot,
+            original_runner,
+            connection_lease,
+            adoption_lock=_get_tunnel_lifecycle_lock(),
+        )
+        pending.set_result(result)
+        return result
+    except asyncio.CancelledError:
+        pending.cancel()
+        raise
+    except BaseException as exc:
+        pending.set_exception(exc)
+        # The owner re-raises; retrieve here as there may be no joiners.
+        pending.exception()
+        raise
+    finally:
+        # No await: remove the completed flight even while cancelling.
+        if _tunnel_restarts.get(key) is pending:
+            _tunnel_restarts.pop(key)
 
 
 async def _per_tunnel_watchdog(
