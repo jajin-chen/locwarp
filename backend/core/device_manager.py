@@ -156,6 +156,7 @@ class _ActiveConnection:
     tunnel_proxy: Optional[CoreDeviceTunnelProxy] = None
     tunnel_context: object = None  # async context manager for the tunnel
     rsd: Optional[RemoteServiceDiscoveryService] = None
+    rsd_owned: bool = True  # A supplied userspace RSD remains owned by its runner.
     location_service: Optional[LocationService] = None
     usbmux_lockdown: object = None  # Original lockdown client (for legacy fallback on iOS 17+)
     location_init_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
@@ -466,7 +467,7 @@ class DeviceManager:
                 logger.exception("Error closing DvtProvider for %s", udid)
 
         # Close RSD.
-        if conn.rsd is not None:
+        if conn.rsd is not None and conn.rsd_owned:
             try:
                 await conn.rsd.close()
             except Exception:
@@ -949,6 +950,7 @@ class DeviceManager:
         rsd_address: str,
         rsd_port: int,
         *,
+        rsd: RemoteServiceDiscoveryService | None = None,
         before_close_previous: Callable[
             [str, _ActiveConnection | None], Awaitable[None]
         ] | None = None,
@@ -959,6 +961,13 @@ class DeviceManager:
         in-process ``TunnelRunner`` or ``pymobiledevice3 remote start-tunnel``).
         The caller provides the RSD address and port.
 
+        ``rsd`` may be supplied by a userspace ``TunnelRunner`` when the
+        address is reachable only through its in-process dial plane. Kernel
+        tunnels leave it unset and use the normal address/port connect loop.
+        A supplied RSD is borrowed; only its runner closes it. Re-adopting
+        the same active RSD returns the existing lease without retiring its
+        services or invoking the replacement callback.
+
         Returns a ``DeviceInfo`` and the exact connection lease installed for
         it.  The lease can later be passed to ``disconnect(expected=...)`` so
         stale rollback cannot remove a newer connection for the same UDID.
@@ -966,42 +975,47 @@ class DeviceManager:
         logger.info("Connecting via WiFi tunnel RSD at %s:%d", rsd_address, rsd_port)
 
         import asyncio as _asyncio
-        rsd = None
+        preconnected_rsd = rsd
         last_exc: Exception | None = None
         # TUN interface routes may take a few seconds to become reachable
         # after the tunnel process reports ready, so retry with backoff.
-        for attempt in range(1, 11):
-            rsd = RemoteServiceDiscoveryService((rsd_address, rsd_port))
-            try:
-                await rsd.connect()
-                last_exc = None
-                break
-            except asyncio.CancelledError:
-                # ``CancelledError`` is a BaseException and bypasses the
-                # retry handler below.  The RSD may nevertheless have
-                # partially opened its transport, so drain it before the
-                # cancellation escapes this method.
-                await self._drain_rsd_close(rsd)
-                rsd = None
-                raise
-            except Exception as exc:
-                last_exc = exc
-                logger.warning(
-                    "RSD connect attempt %d/10 failed (%s): %s",
-                    attempt, exc.__class__.__name__, exc,
-                )
-                close_cancelled = await self._drain_rsd_close(rsd)
-                rsd = None
-                if close_cancelled:
-                    raise asyncio.CancelledError
-                await _asyncio.sleep(min(0.5 * attempt, 2.0))
-            except BaseException:
-                # System-level BaseExceptions have the same ownership rule as
-                # cancellation: close the partially connected RSD, then
-                # re-raise without retrying.
-                await self._drain_rsd_close(rsd)
-                rsd = None
-                raise
+        if preconnected_rsd is None:
+            rsd = None
+            for attempt in range(1, 11):
+                rsd = RemoteServiceDiscoveryService((rsd_address, rsd_port))
+                try:
+                    await rsd.connect()
+                    last_exc = None
+                    break
+                except asyncio.CancelledError:
+                    # ``CancelledError`` is a BaseException and bypasses the
+                    # retry handler below. The RSD may nevertheless have
+                    # partially opened its transport, so drain it before the
+                    # cancellation escapes this method.
+                    await self._drain_rsd_close(rsd)
+                    rsd = None
+                    raise
+                except Exception as exc:
+                    last_exc = exc
+                    logger.warning(
+                        "RSD connect attempt %d/10 failed (%s): %s",
+                        attempt, exc.__class__.__name__, exc,
+                    )
+                    close_cancelled = await self._drain_rsd_close(rsd)
+                    rsd = None
+                    if close_cancelled:
+                        raise asyncio.CancelledError
+                    await _asyncio.sleep(min(0.5 * attempt, 2.0))
+                except BaseException:
+                    # System-level BaseExceptions have the same ownership rule
+                    # as cancellation: close the partially connected RSD, then
+                    # re-raise without retrying.
+                    await self._drain_rsd_close(rsd)
+                    rsd = None
+                    raise
+        else:
+            rsd = preconnected_rsd
+            logger.info("Using pre-connected userspace RSD at %s:%d", rsd_address, rsd_port)
 
         if last_exc is not None:
             logger.error("Failed to connect to RSD at %s:%d after retries", rsd_address, rsd_port)
@@ -1016,6 +1030,21 @@ class DeviceManager:
             props = peer.get("Properties", {})
             udid = props.get("UniqueDeviceID", "")
             ios_version_str = props.get("OSVersion", "0.0")
+            if preconnected_rsd is not None:
+                async with self._lock:
+                    current = self._connections.get(udid)
+                    if (
+                        current is not None
+                        and current.rsd is preconnected_rsd
+                        and current.connection_type == "Network"
+                    ):
+                        return DeviceInfo(
+                            udid=current.udid,
+                            name=current.name,
+                            ios_version=current.ios_version,
+                            connection_type=current.connection_type,
+                            is_connected=True,
+                        ), current
             # peer_info["Properties"] only carries DeviceClass ("iPhone"), not
             # the user-set DeviceName (e.g. "My iPhone"). RSD.connect() already
             # opens a lockdown service over the tunnel internally and exposes
@@ -1049,6 +1078,7 @@ class DeviceManager:
                 connection_type="Network",
                 name=device_name,
                 rsd=rsd,
+                rsd_owned=preconnected_rsd is None,
             )
 
             # Snapshot the predecessor without installing C1.  Production
@@ -1125,7 +1155,7 @@ class DeviceManager:
                 is_connected=True,
             ), conn
         except BaseException:
-            if not installed and rsd is not None:
+            if not installed and rsd is not None and preconnected_rsd is None:
                 try:
                     await self._drain_rsd_close(rsd)
                 except BaseException:

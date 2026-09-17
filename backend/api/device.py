@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from models.schemas import DeviceInfo
+from core.windows_tunnel import HostTunnelError
 from services.tunnel_discovery import (
     _scan_ports_for_ip,
     discover_tunnel_candidates,
@@ -67,26 +68,24 @@ async def wifi_tunnel_connect(req: WifiTunnelConnectRequest):
     from main import app_state
     from core.device_manager import UnsupportedIosVersionError
     dm = _dm()
-    # Max 3 devices (group mode). connect_wifi_tunnel may reconnect an existing udid;
-    # we can only cheaply check the pre-state here.
-    if len(dm._connections) >= MAX_DEVICES:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "max_devices_reached", "message": f"已連接最多 {MAX_DEVICES} 台裝置"},
-        )
     connection_lease = None
     connected_udid = None
     connected_engine = None
     adoption_lock = None
     adoption_lock_acquired = False
     runner_snapshot = None
+    preconnected_rsd = None
     adoption_committed = False
     was_primary = False
+    preexisting_leases = ()
 
     async def _cleanup_owned_connection() -> None:
         if adoption_committed:
             return
-        if connection_lease is None or connected_udid is None:
+        if (
+            connection_lease is None or connected_udid is None
+            or any(connection_lease is lease for lease in preexisting_leases)
+        ):
             return
         await _cleanup_wifi_connection_for(
             connected_udid,
@@ -137,18 +136,33 @@ async def wifi_tunnel_connect(req: WifiTunnelConnectRequest):
                         _tunnel_generations.get(key),
                     )
                     break
-        # The fast pre-check above is only an early rejection.  A concurrent
-        # direct connect may have consumed the final slot while this request
-        # waited for the adoption commit lock, so enforce the cap again at
-        # the serialized DM-install boundary.
+        if runner_snapshot is not None:
+            preconnected_rsd = getattr(runner_snapshot[1], "rsd", None)
+            existing = dm._connections.get(runner_snapshot[0])
+            if (
+                existing is not None
+                and getattr(existing, "connection_type", None) == "Network"
+                and app_state.simulation_engines.get(runner_snapshot[0]) is not None
+                and (preconnected_rsd is None or getattr(existing, "rsd", None) is preconnected_rsd)
+            ):
+                return {
+                    "status": "connected",
+                    "udid": runner_snapshot[0],
+                    "name": getattr(existing, "name", "iPhone"),
+                    "ios_version": getattr(existing, "ios_version", "0.0"),
+                    "connection_type": "Network",
+                }
+        # Enforce the cap at the serialized install boundary, after reuse.
         if len(dm._connections) >= MAX_DEVICES:
             raise HTTPException(
                 status_code=409,
                 detail={"code": "max_devices_reached", "message": f"已連接最多 {MAX_DEVICES} 台裝置"},
             )
+        preexisting_leases = tuple(dm._connections.values())
         info, connection_lease = await dm.connect_wifi_tunnel_owned(
             req.rsd_address,
             req.rsd_port,
+            rsd=preconnected_rsd,
             before_close_previous=_before_close_previous,
         )
         connected_udid = info.udid
@@ -641,7 +655,12 @@ async def _wifi_tunnel_start_impl(
 
         async with _tunnels_lock:
             live_count = sum(1 for r in _tunnels.values() if r.is_running())
-        if live_count >= MAX_DEVICES:
+            reusable = any(
+                key in candidates and runner.is_running()
+                and runner.target_ip == req.ip and runner.target_port in port_candidates
+                for key, runner in _tunnels.items()
+            )
+        if live_count >= MAX_DEVICES and not reusable:
             raise HTTPException(
                 status_code=409,
                 detail={"code": "max_devices_reached", "message": f"已連接最多 {MAX_DEVICES} 台裝置"},
@@ -743,6 +762,10 @@ async def _wifi_tunnel_start_impl(
                         cand, req.ip, port, attempt_timeout,
                     )
 
+                    async with _tunnels_lock:
+                        if sum(1 for r in _tunnels.values() if r.is_running()) >= MAX_DEVICES:
+                            # At capacity only same_result above may proceed.
+                            continue
                     runner = TunnelRunner()
                     candidate_fenced = False
                     async with _tunnels_lock:
@@ -775,6 +798,19 @@ async def _wifi_tunnel_start_impl(
                         probe_task.cancel()
                     try:
                         info = await probe_task
+                    except HostTunnelError as e:
+                        await _stop_tunnel_parts(
+                            runner, None, caller="host_tunnel_unavailable", udid=cand,
+                        )
+                        raise HTTPException(
+                            status_code=503,
+                            detail={
+                                "code": e.code,
+                                "message": str(e),
+                                "winerror": e.winerror,
+                                "retryable": False,
+                            },
+                        ) from e
                     except asyncio.TimeoutError as e:
                         last_error = e
                         await _stop_tunnel_parts(
@@ -1179,6 +1215,7 @@ async def _wifi_tunnel_start_and_connect_impl(
     connected_lease = None
     connected_engine = None
     was_primary = False
+    preexisting_leases = ()
     adoption_lock = None
     adoption_lock_acquired = False
 
@@ -1211,7 +1248,10 @@ async def _wifi_tunnel_start_and_connect_impl(
                 )
             except Exception:
                 pass
-        if connected_udid and connected_lease is not None:
+        if (
+            connected_udid and connected_lease is not None
+            and not any(connected_lease is lease for lease in preexisting_leases)
+        ):
             try:
                 await _cleanup_wifi_connection_for(
                     connected_udid,
@@ -1257,17 +1297,8 @@ async def _wifi_tunnel_start_and_connect_impl(
             )
 
     try:
-        # Cap check before we even spawn a runner. Counts active runners,
-        # not dm._connections — a tunnel that's mid-handshake but not yet
-        # registered as a device connection still consumes a slot.
-        async with _tunnels_lock:
-            live_count = sum(1 for r in _tunnels.values() if r.is_running())
-            if live_count >= MAX_DEVICES:
-                raise HTTPException(
-                    status_code=409,
-                    detail={"code": "max_devices_reached", "message": f"已連接最多 {MAX_DEVICES} 台裝置"},
-                )
-
+        # The resolver enforces the runner cap while permitting reuse of an
+        # existing endpoint even when every device slot is occupied.
         tunnel_result = await _wifi_tunnel_start_impl(
             req,
             attempt,
@@ -1281,6 +1312,7 @@ async def _wifi_tunnel_start_and_connect_impl(
         rsd_address = tunnel_result.get("rsd_address")
         rsd_port = tunnel_result.get("rsd_port")
         temp_key = tunnel_result.get("udid")
+        preconnected_rsd = getattr(attempt.runner, "rsd", None)
 
         # Candidate probing/runner.start is complete.  Serialize only the
         # adoption commit (DM lease, engine, registry re-key and watchdog
@@ -1288,6 +1320,20 @@ async def _wifi_tunnel_start_and_connect_impl(
         adoption_lock = _get_tunnel_lifecycle_lock()
         await adoption_lock.acquire()
         adoption_lock_acquired = True
+
+        async with _tunnels_lock:
+            runner = attempt.runner
+            current_info = getattr(runner, "info", None) or {}
+            if (
+                runner is None
+                or _tunnels.get(temp_key) is not runner
+                or not runner.is_running()
+                or current_info.get("rsd_address") != rsd_address
+                or current_info.get("rsd_port") != rsd_port
+                or getattr(runner, "rsd", None) is not preconnected_rsd
+                or _start_attempt_fenced_locked(attempt)
+            ):
+                raise TunnelStartCancelled
 
         # These checks must stay inside the cleanup scope. A successful
         # /start has already registered a runner and watchdog; rejecting a
@@ -1303,15 +1349,16 @@ async def _wifi_tunnel_start_and_connect_impl(
         existing_engine = app_state.simulation_engines.get(temp_key) if temp_key else None
         if (
             tunnel_status == "already_running"
-            and req.udid != temp_key
             and existing_connection is not None
             and existing_engine is not None
             and getattr(existing_connection, "connection_type", None) == "Network"
+            and (
+                preconnected_rsd is None
+                or getattr(existing_connection, "rsd", None) is preconnected_rsd
+            )
         ):
-            # An offline-device retry may resolve to a different device's
-            # already-live tunnel.  That tunnel, DM lease, and engine are a
-            # complete connection already; reconnecting it would stop the
-            # active primary simulation and replace its positioned engine.
+            # Repeating a complete connection preserves its lease, engine,
+            # positioned state and watchdog, including same-UDID retries.
             async with _tunnels_lock:
                 attempt.resolved_udid = temp_key
                 if _start_attempt_fenced_locked(attempt):
@@ -1334,9 +1381,11 @@ async def _wifi_tunnel_start_and_connect_impl(
                 detail={"code": "max_devices_reached", "message": f"已連接最多 {MAX_DEVICES} 台裝置"},
             )
 
+        preexisting_leases = tuple(dm._connections.values())
         info, connected_lease = await dm.connect_wifi_tunnel_owned(
             rsd_address,
             rsd_port,
+            rsd=preconnected_rsd,
             before_close_previous=_before_close_previous,
         )
         connected_udid = info.udid

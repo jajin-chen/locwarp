@@ -42,6 +42,9 @@ class _Runner:
     async def stop(self) -> None:
         self.stop_calls += 1
 
+    def is_running(self):
+        return self.info is not None and self.stop_calls == 0
+
 
 class _DeviceManager:
     def __init__(
@@ -256,17 +259,59 @@ def _seed_original(udid: str, generation: int) -> _Runner:
     return original
 
 
+async def test_restart_rejects_rsd_cleared_while_waiting_for_adoption(monkeypatch):
+    udid = "udid-stale-restart"
+    original = _seed_original(udid, 7)
+    replacement = _Runner("replacement")
+    replacement.rsd = object()
+    monkeypatch.setattr(tunnel_manager, "TunnelRunner", lambda: replacement)
+    started = asyncio.Event()
+    original_start = replacement.start
+
+    async def observed_start(*args, **kwargs):
+        result = await original_start(*args, **kwargs)
+        started.set()
+        return result
+
+    monkeypatch.setattr(replacement, "start", observed_start)
+    lock = tunnel_manager._get_tunnel_lifecycle_lock()
+    await lock.acquire()
+    task = asyncio.create_task(tunnel_manager._attempt_tunnel_restart(
+        udid, "192.0.2.10", 51234, None, original,
+    ))
+    try:
+        await asyncio.wait_for(started.wait(), 0.5)
+        replacement.rsd = None
+    finally:
+        lock.release()
+    assert await task is False
+    assert tunnel_manager._tunnels[udid] is original
+    assert replacement.stop_calls == 1
+
+
+@pytest.mark.parametrize("userspace", [False, True])
 async def test_restart_post_setup_failure_restores_original_runner_generation(
     monkeypatch: pytest.MonkeyPatch,
+    userspace,
 ) -> None:
     udid = "udid-1"
     original_generation = 7
     original = _seed_original(udid, original_generation)
     replacement = _Runner("replacement")
+    replacement.rsd = object() if userspace else None
     monkeypatch.setattr(tunnel_manager, "TunnelRunner", lambda: replacement)
 
     info = SimpleNamespace(udid=udid, name="Phone", ios_version="17.5")
     dm = _DeviceManager(info, network_connection=True)
+    original_connect = dm.connect_wifi_tunnel_owned
+    adopted = []
+
+    async def connect_with_runner_rsd(address, port, *, rsd=None, **kwargs):
+        assert rsd is replacement.rsd
+        adopted.append(rsd)
+        return await original_connect(address, port, **kwargs)
+
+    monkeypatch.setattr(dm, "connect_wifi_tunnel_owned", connect_with_runner_rsd)
     monkeypatch.setattr(
         tunnel_manager,
         "_dm",
@@ -287,6 +332,7 @@ async def test_restart_post_setup_failure_restores_original_runner_generation(
     )
 
     assert result is False
+    assert adopted == [replacement.rsd]
     assert tunnel_manager._tunnels[udid] is original
     assert tunnel_manager._tunnel_generations[udid] == original_generation
     assert tunnel_manager._tunnel_owner_locked(

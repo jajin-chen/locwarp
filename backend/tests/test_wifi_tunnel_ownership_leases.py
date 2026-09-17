@@ -447,10 +447,9 @@ async def test_legacy_direct_connect_rechecks_cap_inside_adoption_lock(
                 ),
             ),
         )
-        # A owns the adoption lock while its DM handshake is blocked.  B has
-        # nevertheless completed the outer pre-check and is now waiting for
-        # the serialized install boundary.
-        await asyncio.wait_for(dm.outer_prechecks_done.wait(), timeout=0.5)
+        # B must wait for the serialized install boundary while A owns it.
+        await asyncio.sleep(0)
+        assert not second.done()
         assert not first.done()
         assert not second.done()
         assert dm.connect_addresses == ["fd00::A"]
@@ -1028,8 +1027,62 @@ async def test_start_and_connect_auto_syncs_new_wifi_follower(
     )
 
 
+@pytest.mark.parametrize("failure", ["death", "rsd_cleared", "replaced"])
+async def test_adoption_rechecks_runner_after_waiting_for_lifecycle_lock(monkeypatch, failure):
+    udid = "stale-runner"
+    dm = _LeaseDeviceManager(udid)
+    _patch_device_manager(monkeypatch, dm)
+    state = _patch_state(monkeypatch, lambda _udid: None)
+    connection = _Connection("healthy")
+    engine = _Engine("healthy")
+    dm._connections[udid] = connection
+    state.simulation_engines[udid] = engine
+    runner = _Runner("stale")
+    runner.rsd = object()
+    connection.rsd = runner.rsd
+    await runner.start(udid, "192.0.2.61", 49152)
+    tunnel_manager._tunnels[udid] = runner
+    monkeypatch.setattr(device, "_build_tunnel_udid_candidates", lambda _req: [udid])
+    resolved = asyncio.Event()
+    original_start = device._wifi_tunnel_start_impl
+
+    async def observed_start(*args, **kwargs):
+        result = await original_start(*args, **kwargs)
+        resolved.set()
+        return result
+
+    monkeypatch.setattr(device, "_wifi_tunnel_start_impl", observed_start)
+    lock = device._get_tunnel_lifecycle_lock()
+    await lock.acquire()
+    request = asyncio.create_task(device.wifi_tunnel_start_and_connect(
+        device.WifiTunnelStartRequest(ip="192.0.2.61", port=49152, udid=udid),
+    ))
+    try:
+        await asyncio.wait_for(resolved.wait(), 0.5)
+        assert not request.done()
+        if failure == "death":
+            await runner.stop()
+        elif failure == "rsd_cleared":
+            runner.rsd = None
+        else:
+            tunnel_manager._tunnels[udid] = _Runner("replacement")
+    finally:
+        lock.release()
+    with pytest.raises(HTTPException) as caught:
+        await request
+    assert caught.value.status_code == 409
+    assert dm.connect_count == 0
+    assert dm._connections[udid] is connection
+    assert state.simulation_engines[udid] is engine
+    await runner.stop()
+
+
+@pytest.mark.parametrize("same_udid", [False, True])
+@pytest.mark.parametrize("at_capacity", [False, True])
 async def test_start_and_connect_reuses_existing_connection_and_engine(
     monkeypatch: pytest.MonkeyPatch,
+    same_udid,
+    at_capacity,
 ) -> None:
     """An offline pin retry must not rebuild an already-connected primary."""
 
@@ -1051,17 +1104,22 @@ async def test_start_and_connect_reuses_existing_connection_and_engine(
         lambda _req: [primary_udid],
     )
     borrowed = _Runner("borrowed-primary")
+    borrowed.rsd = object()
+    existing_connection.rsd = borrowed.rsd
     await borrowed.start(primary_udid, "192.0.2.31", 49152)
     old_watchdog = asyncio.create_task(asyncio.Event().wait())
     tunnel_manager._tunnels[primary_udid] = borrowed  # type: ignore[assignment]
     tunnel_manager._tunnel_watchdogs[primary_udid] = old_watchdog
     tunnel_manager._tunnel_generations[primary_udid] = 1
 
+    if at_capacity:
+        monkeypatch.setattr(device, "MAX_DEVICES", 1)
+
     result = await device.wifi_tunnel_start_and_connect(
         device.WifiTunnelStartRequest(
             ip="192.0.2.31",
             port=49152,
-            udid=offline_hint,
+            udid=primary_udid if same_udid else offline_hint,
         ),
     )
 
@@ -1074,6 +1132,26 @@ async def test_start_and_connect_reuses_existing_connection_and_engine(
     assert tunnel_manager._tunnels[primary_udid] is borrowed
     assert borrowed.stop_calls == 0
     assert not old_watchdog.done()
+
+    direct = await device.wifi_tunnel_connect(device.WifiTunnelConnectRequest(
+        rsd_address=borrowed.info["rsd_address"], rsd_port=borrowed.info["rsd_port"],
+    ))
+    assert direct["status"] == "connected"
+    assert dm.connect_count == 0
+    assert dm._connections[primary_udid] is existing_connection
+    assert state.simulation_engines[primary_udid] is existing_engine
+    assert not old_watchdog.done()
+
+    monkeypatch.setattr(device, "MAX_DEVICES", 1)
+    with pytest.raises(HTTPException) as rejected:
+        await device.wifi_tunnel_start_and_connect(device.WifiTunnelStartRequest(
+            ip="192.0.2.99", port=49152, udid=primary_udid,
+        ))
+    assert rejected.value.status_code == 409
+    assert dm._connections[primary_udid] is existing_connection
+    assert state.simulation_engines[primary_udid] is existing_engine
+    assert tunnel_manager._tunnels[primary_udid] is borrowed
+    assert borrowed.stop_calls == 0
 
     runner, watchdog, side_effects = await tunnel_manager._detach_tunnel(primary_udid)
     await tunnel_manager._stop_tunnel_parts(
@@ -1260,10 +1338,12 @@ async def test_same_endpoint_adoption_waits_for_owner_failure_and_preserves_new_
         )
 
 
+@pytest.mark.parametrize("userspace", [False, True])
 async def test_restart_and_start_and_connect_share_adoption_lock_and_exact_final_lease(
     monkeypatch: pytest.MonkeyPatch,
+    userspace,
 ) -> None:
-    """API adoption waits for restart post-setup, then rebinds exact C2/E2."""
+    """API adoption waits for restart post-setup, then reuses its exact C1/E1."""
 
     udid = "udid-1"
     ip = "192.0.2.52"
@@ -1293,6 +1373,18 @@ async def test_restart_and_start_and_connect_share_adoption_lock_and_exact_final
     state._primary_udid = udid
     original = _Runner("R-original")
     replacement = _Runner("R-restart")
+    replacement.rsd = object() if userspace else None
+    original_connect = dm.connect_wifi_tunnel_owned
+    adopted_rsd = []
+
+    async def checked_connect(address, port, *, rsd=None, **kwargs):
+        assert rsd is replacement.rsd
+        adopted_rsd.append(rsd)
+        info, lease = await original_connect(address, port, **kwargs)
+        lease.rsd = rsd
+        return info, lease
+
+    monkeypatch.setattr(dm, "connect_wifi_tunnel_owned", checked_connect)
     tunnel_manager._tunnels[udid] = original  # type: ignore[assignment]
     tunnel_manager._tunnel_generations[udid] = 7
     monkeypatch.setattr(tunnel_manager, "TunnelRunner", lambda: replacement)
@@ -1357,15 +1449,18 @@ async def test_restart_and_start_and_connect_share_adoption_lock_and_exact_final
         assert await asyncio.wait_for(restart_task, timeout=0.5) is True
         result = await asyncio.wait_for(api_task, timeout=0.5)
         assert result["status"] == "connected"
-        assert api_engine_started.is_set()
+        assert not api_engine_started.is_set()
 
         final_runner = tunnel_manager._tunnels[udid]
         final_generation = tunnel_manager._tunnel_generations[udid]
         final_lease = dm._connections[udid]
         final_engine = state.simulation_engines[udid]
         assert final_runner is replacement
-        assert final_generation > 8
-        assert final_lease.name == "C2"
+        assert final_generation == 8
+        assert final_lease.name == "C1"
+        assert final_lease.rsd is replacement.rsd
+        assert adopted_rsd == [replacement.rsd]
+        assert len(created_engines) == 1
         assert final_engine is created_engines[-1]
         final_wd = tunnel_manager._tunnel_watchdogs[udid]
         matching = [

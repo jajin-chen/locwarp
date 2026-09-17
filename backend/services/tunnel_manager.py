@@ -1123,6 +1123,7 @@ async def _attempt_tunnel_restart_impl(
 
     new_rsd_address = info.get("rsd_address")
     new_rsd_port = info.get("rsd_port")
+    new_preconnected_rsd = getattr(new_runner, "rsd", None)
     if not new_rsd_address or not new_rsd_port:
         _tunnel_logger.warning(
             "Tunnel restart for %s returned no RSD info; treating as failure",
@@ -1218,6 +1219,14 @@ async def _attempt_tunnel_restart_impl(
         # User may have stopped this tunnel during our async window. Keep the
         # registry mutation short, then stop a losing runner after releasing
         # the lock; TunnelRunner.stop() can wait on network I/O.
+        current_info = new_runner.info or {}
+        if (
+            not new_runner.is_running()
+            or current_info.get("rsd_address") != new_rsd_address
+            or current_info.get("rsd_port") != new_rsd_port
+            or getattr(new_runner, "rsd", None) is not new_preconnected_rsd
+        ):
+            raise RuntimeError("Restart tunnel became unavailable before adoption")
         discard_restart = False
         try:
             async with _tunnels_lock:
@@ -1312,6 +1321,7 @@ async def _attempt_tunnel_restart_impl(
         dev_info, connected_lease = await dm.connect_wifi_tunnel_owned(
             new_rsd_address,
             new_rsd_port,
+            rsd=new_preconnected_rsd,
             before_close_previous=_before_close_previous,
         )
         connected_udid = dev_info.udid

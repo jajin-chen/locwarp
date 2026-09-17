@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { useT } from './i18n'
+import { useI18n } from './i18n'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useDevice } from './hooks/useDevice'
 import { useSimulation } from './hooks/useSimulation'
@@ -57,7 +57,7 @@ const SPEED_MAP: Record<MoveMode, number> = {
 }
 
 const App: React.FC = () => {
-  const t = useT()
+  const { t, lang } = useI18n()
   const ws = useWebSocket()
   const device = useDevice(ws.subscribe)
   // Pass primary-device udid into useSimulation so its legacy single-device
@@ -216,9 +216,13 @@ const App: React.FC = () => {
   // Auto-scan devices when WebSocket (re)connects (e.g. after backend restart)
   useEffect(() => {
     if (ws.connected) {
-      device.scan()
+      void device.scan()
+      // The WebSocket reconnect does not replay the old tunnel lifecycle
+      // events. Refresh the authoritative tunnel registry here so a backend
+      // restart cannot leave a stale tunnel card in the UI.
+      void device.checkTunnelStatus()
     }
-  }, [ws.connected])
+  }, [ws.connected, device.scan, device.checkTunnelStatus])
 
   // Auto-attempt WiFi tunnel on first WS connect if the user previously
   // saved at least one IP/port AND has the auto-connect toggle on. Runs
@@ -342,7 +346,7 @@ const App: React.FC = () => {
           // tries the right pair record FIRST.
           await Promise.allSettled(
             candidates.map(async (entry) => {
-              const info = await device.startWifiTunnel(
+              const info = await device.autoStartWifiTunnel(
                 entry.ip, entry.port, entry.udid, entry.ports,
               ).catch(() => null)
               if (!info) return
@@ -1426,6 +1430,12 @@ const App: React.FC = () => {
 
   return (
     <div className="app-layout">
+      {device.hostTunnelError && (
+        <div role="alert" style={{ position: 'fixed', top: 12, left: '20%', right: 20, zIndex: 3000, padding: 12, background: '#4a2020', color: '#fff', borderRadius: 8 }}>
+          {device.hostTunnelError}
+          <div>{lang === 'zh' ? '已暫停自動重試；修復 Windows 網路介面後，請至連線頁手動重試。' : 'Automatic retries paused. Repair the Windows network adapter, then retry manually on the connection page.'}</div>
+        </div>
+      )}
       <div className="noise-overlay" aria-hidden />
       <div className="sidebar">
         <nav className="nav-rail">

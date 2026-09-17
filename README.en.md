@@ -285,7 +285,7 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 
 | Tech | Purpose |
 | --- | --- |
-| pymobiledevice3 `start_tcp_tunnel()` | Establishes RSD tunnel (in-process asyncio task) |
+| pymobiledevice3 `start_tcp_tunnel()` | RSD tunnel; Windows batch startup defaults to an isolated userspace process per device |
 | pytun-pmd3 | Windows TUN interface (wintun.dll, bundled into backend exe) |
 
 ### External Services (all free)
@@ -335,7 +335,7 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 
 - **WebSocket position push**: backend emits `position_update` per tick (`update_interval` is speed-profile-derived); frontend updates map cursor + ETA bar live
 - **Speed resolution**: `config.resolve_speed_profile(mode, speed_kmh, speed_min_kmh, speed_max_kmh)` unifies "mode default / fixed custom / random range" inputs; priority `range > fixed > default`
-- **In-process Wi-Fi tunnel**: since v0.2.3 the backend runs `start_tcp_tunnel()` on its own event loop instead of spawning a helper exe
+- **Wi-Fi tunnel**: Windows source/batch startup isolates each iPhone in a userspace process, avoiding WinTun failures and shared network-stack conflicts. Optional `kernel` mode remains managed by the backend, with adapter setup off the event loop. Isolated-process mode is not yet integrated with the PyInstaller package.
 - **Runtime state directory**: everything goes to `~/.locwarp/` (bookmarks / settings / tunnel info) to avoid PyInstaller's `_MEIPASS` temp-dir issues
 - **Tile referer / OSM swap**: OSM blocks distributable apps on their public tiles, so CartoDB (OSM data hosted on CARTO's CDN, no referer needed) is the default
 - **Multi-device group mode** (v0.2.0+, up to 3 devices): synchronized teleport / movement, primary is never hijacked by a late-plugged device, late joiners sync to the primary's position and auto-resume whatever sim it's running (fanout)
@@ -473,6 +473,11 @@ The installer is self-contained, end users need no Python or Node installed.
 | Backend unreachable after tunnel started | Make sure LocWarp was launched as Administrator |
 | `No such service: com.apple.instruments.dtservicehub` (iOS 17+/26) / LocWarp shows "DDI not mounted" | Since v0.2.58 LocWarp no longer auto-mounts the DDI. Mount it once via Xcode / 愛思助手 / 3uTools / pymobiledevice3 CLI, then reconnect. If mount still fails, toggle Settings → Privacy & Security → **Developer Mode** off, reboot, re-enable, and try mounting again. |
 | **Developer Mode option missing** (iOS 16+) | Since v0.2.61, LocWarp shows a "**Reveal Developer Mode option**" button in the status bar once a device is connected. Clicking it makes the Developer Mode toggle appear in iPhone Settings (no sideloading needed). If the button fails or you prefer manual, see [Appendix: Enabling Developer Mode on iPhone (Windows)](#appendix-enabling-developer-mode-on-iphone-windows) below as a fallback. |
+
+If Windows reports WinTun/PnP Code 56 or `OSError 4319`, close LocWarp and run
+`LocWarp.bat repair`. This only starts stopped device-install services, rescans PnP, and attempts to restart failed WinTun devices; it does not disable the physical network adapter or change the default route. If the problem remains, close other VPN/WireGuard applications that use WinTun and run `LocWarp.bat repair-driver`. The deep mode runs a standalone adapter-creation probe after removing the driver store; if Code 56/4319 remains, the batch file reports that Windows needs a restart and does not reboot automatically. Normal double-click startup never runs either repair mode automatically.
+
+Normal Windows `LocWarp.bat` startup now isolates each iPhone's userspace network stack in its own process, allowing simultaneous devices without WinTun or changes to the physical adapter/default route. `LocWarp.bat userspace` selects the same mode; `LocWarp.bat kernel` explicitly selects the original WinTun path. Direct backend launches can set `LOCWARP_TUNNEL_TRANSPORT=userspace-process`. The legacy `LOCWARP_USE_USERSPACE_TUNNEL=1` remains an in-process, single-device compatibility mode.
 
 ---
 

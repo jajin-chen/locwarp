@@ -158,6 +158,26 @@ def test_port_candidates_deduplicate_validate_and_exclude_lockdownd_port() -> No
     assert device._build_tunnel_port_candidates(req) == [49152, 49153]
 
 
+async def test_host_adapter_failure_stops_candidates_and_scan(monkeypatch, fake_runner, two_udids):
+    from core.windows_tunnel import HostTunnelError
+
+    fake_runner.outcomes = {49152: HostTunnelError(OSError(4319, "adapter failed"))}
+
+    async def forbidden_scan(_ip):
+        pytest.fail("Host adapter failure must not scan device ports")
+
+    monkeypatch.setattr(device, "_scan_ports_for_ip", forbidden_scan)
+    with pytest.raises(HTTPException) as caught:
+        await device.wifi_tunnel_start(device.WifiTunnelStartRequest(
+            ip="192.0.2.10", port=49152, ports=[49153], udid="udid-1",
+        ))
+    assert caught.value.status_code == 503
+    assert caught.value.detail["code"] == "host_tunnel_unavailable"
+    assert caught.value.detail["winerror"] == 4319
+    assert caught.value.detail["retryable"] is False
+    assert len(fake_runner.calls) == 1
+
+
 async def test_timeout_on_first_port_advances_and_returns_actual_port(
     fake_runner,
     one_udid,

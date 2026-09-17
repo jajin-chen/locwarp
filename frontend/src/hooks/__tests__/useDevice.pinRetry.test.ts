@@ -28,6 +28,7 @@ const api = vi.hoisted(() => ({
 vi.mock('../../services/api', () => api)
 
 import { useDevice } from '../useDevice'
+import type { WsMessage } from '../useWebSocket'
 
 const TARGET = 'TARGET-UDID'
 const OTHER_PINNED = 'OTHER-PINNED-UDID'
@@ -69,6 +70,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.stubGlobal('localStorage', makeStorage())
   vi.clearAllMocks()
+  api.wifiTunnelStatus.mockResolvedValue({ tunnels: [], running: false })
 })
 
 afterEach(() => {
@@ -186,4 +188,100 @@ describe('startWifiTunnel', () => {
       udid: TARGET,
     })
   })
+})
+
+
+describe('host tunnel failure', () => {
+  test('blocks all pins and cold-start rearming, preserves healthy tunnels, allows manual recovery', async () => {
+    seedStorage([TARGET, OTHER_PINNED, 'THIRD'])
+    const { result } = renderHook(() => useDevice())
+    api.wifiTunnelStartAndConnect.mockResolvedValueOnce(tunnelResult(OTHER_PINNED))
+    await act(async () => { await result.current.startWifiTunnel('192.168.1.11', 50001) })
+    const hostError = Object.assign(new Error('Windows Wintun unavailable (4319)'), { code: 'host_tunnel_unavailable' })
+    api.wifiTunnelStartAndConnect.mockRejectedValue(hostError)
+    act(() => {
+      result.current.schedulePinReconnect(TARGET)
+      result.current.schedulePinReconnect('THIRD', 10000)
+    })
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(result.current.hostTunnelError).toBe(hostError.message)
+    act(() => { result.current.schedulePinReconnect(TARGET) })
+    await expect(result.current.autoStartWifiTunnel('192.168.1.10')).rejects.toBe(hostError)
+    await act(async () => { await vi.advanceTimersByTimeAsync(300000) })
+    expect(api.wifiTunnelStartAndConnect).toHaveBeenCalledTimes(2)
+    expect(api.wifiTunnelDiscover).not.toHaveBeenCalled()
+    expect(api.wifiTunnelStop).not.toHaveBeenCalled()
+    expect(result.current.tunnels.map((tn) => tn.udid)).toEqual([OTHER_PINNED])
+    expect(result.current.pinnedUdids).toEqual([TARGET, OTHER_PINNED, 'THIRD'])
+    api.wifiTunnelStartAndConnect.mockResolvedValue(tunnelResult(TARGET))
+    await act(async () => { await result.current.startWifiTunnel('192.168.1.10', 50000, TARGET) })
+    expect(result.current.hostTunnelError).toBeNull()
+    expect(result.current.tunnels).toHaveLength(2)
+  })
+})
+
+
+describe('pin retry endpoint ownership', () => {
+  test('skips all ports of healthy phones in saved and discovered candidates', async () => {
+    seedStorage([TARGET, OTHER_PINNED])
+    // The missing phone's saved IP has since been reassigned to a healthy phone.
+    const healthy = { udid: OTHER_PINNED, ip: '192.168.1.10', port: 51000 }
+    api.wifiTunnelStatus.mockResolvedValue({ tunnels: [healthy, { udid: 'SECOND-HEALTHY', ip: '192.168.1.30', port: 54000 }], running: true } as never)
+    api.wifiTunnelDiscover.mockResolvedValue({ devices: [
+      { ip: healthy.ip, port: 52000 },
+      { ip: '192.168.1.30', port: 55000 },
+      { ip: '192.168.1.20', port: 53000 },
+    ] })
+    api.wifiTunnelStartAndConnect.mockResolvedValue(tunnelResult(TARGET))
+    const { result } = renderHook(() => useDevice())
+    act(() => { result.current.schedulePinReconnect(TARGET) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(api.wifiTunnelStartAndConnect).toHaveBeenCalledTimes(1)
+    expect(api.wifiTunnelStartAndConnect).toHaveBeenCalledWith('192.168.1.20', 53000, TARGET)
+    expect(api.wifiTunnelStop).not.toHaveBeenCalled()
+    expect(result.current.pinnedUdids).toEqual([TARGET, OTHER_PINNED])
+  })
+
+  test('does not probe when live ownership status is unavailable', async () => {
+    seedStorage([TARGET])
+    api.wifiTunnelStatus.mockRejectedValue(new Error('backend unavailable'))
+    const { result } = renderHook(() => useDevice())
+    act(() => { result.current.schedulePinReconnect(TARGET) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000) })
+    expect(api.wifiTunnelStatus).toHaveBeenCalledTimes(2)
+    expect(api.wifiTunnelStartAndConnect).not.toHaveBeenCalled()
+    expect(api.wifiTunnelDiscover).not.toHaveBeenCalled()
+  })
+})
+
+
+test('protects phones recovering while discovery is pending, including websocket endpoint metadata', async () => {
+  seedStorage([TARGET, OTHER_PINNED])
+  localStorage.setItem('locwarp.tunnel.savedips', '[]')
+  let finishDiscovery!: (value: { devices: Array<{ ip: string; port: number }> }) => void
+  api.wifiTunnelDiscover.mockReturnValue(new Promise((resolve) => { finishDiscovery = resolve }))
+  api.wifiTunnelStatus
+    .mockResolvedValueOnce({ tunnels: [], running: false })
+    .mockResolvedValue({ tunnels: [{ udid: 'RESTORED', ip: '192.168.1.30', port: 53000 }], running: true } as never)
+  const listeners = new Set<(message: WsMessage) => void>()
+  const subscribe = (listener: (message: WsMessage) => void) => {
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
+  }
+  const { result } = renderHook(() => useDevice(subscribe))
+  act(() => { result.current.schedulePinReconnect(TARGET) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+  expect(api.wifiTunnelDiscover).toHaveBeenCalledTimes(1)
+  act(() => {
+    for (const listener of listeners) listener({ type: 'tunnel_recovered', data: {
+      udid: OTHER_PINNED, ip: '192.168.1.20', port: 52000, rsd_address: 'fd00::2', rsd_port: 1234,
+    } } as WsMessage)
+  })
+  expect(result.current.tunnels[0]).toMatchObject({ ip: '192.168.1.20', port: 52000 })
+  await act(async () => {
+    finishDiscovery({ devices: [{ ip: '192.168.1.20', port: 52001 }, { ip: '192.168.1.30', port: 53001 }] })
+  })
+  expect(api.wifiTunnelStatus).toHaveBeenCalledTimes(2)
+  expect(api.wifiTunnelStartAndConnect).not.toHaveBeenCalled()
+  expect(api.wifiTunnelStop).not.toHaveBeenCalled()
 })

@@ -1,7 +1,7 @@
-"""In-process WiFi tunnel runner.
+"""Own WiFi tunnel lifetime and per-device RSD readiness.
 
-Backend now runs on Python 3.13 (native TLS-PSK support), so the tunnel
-lives inside the backend event loop instead of a separate helper exe.
+Python 3.13 provides native TLS-PSK support. The process transport isolates
+each userspace stack; legacy kernel transport runs in the backend loop.
 The tunnel context (`service.start_tcp_tunnel()`) must stay open for the
 RSD link to remain usable, so we hold it inside a long-running task and
 release it via a stop event.
@@ -9,6 +9,9 @@ release it via a stop event.
 
 import asyncio
 import logging
+import os
+
+from core.windows_tunnel import HostTunnelError, install_windows_tunnel_hook
 
 logger = logging.getLogger("wifi_tunnel")
 
@@ -19,6 +22,14 @@ logger = logging.getLogger("wifi_tunnel")
 # finish and lets us retrieve its result before the task reference is gone.
 _REMOTE_PAIRING_CLOSE_TIMEOUT = 5.0
 _REMOTE_PAIRING_CLOSE_DRAIN_TIMEOUT = 1.0
+_USERSPACE_TUNNEL_ACTIVE = False
+
+
+def _userspace_tunnel_requested() -> bool:
+    """Return whether WiFi tunnels should use the in-process userspace stack."""
+    return os.getenv("LOCWARP_USE_USERSPACE_TUNNEL", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
 
 
 class TunnelRunner:
@@ -31,6 +42,12 @@ class TunnelRunner:
         self._stop: asyncio.Event = asyncio.Event()
         self._ready: asyncio.Event = asyncio.Event()
         self._error: BaseException | None = None
+        # In userspace mode the runner owns an already-connected RSD because
+        # its address is reachable only through UserspaceDialPlane, not via a
+        # host routing-table entry. Kernel mode leaves this None and the
+        # DeviceManager creates the RSD over the WinTun interface.
+        self.rsd = None
+        self._dial_plane = None
         # Original (ip, port) the runner was launched against. Useful so
         # callers can tell "is the running tunnel actually for the same
         # iPhone the user is trying to connect to right now?" without
@@ -94,12 +111,104 @@ class TunnelRunner:
             self.task = None
         return result if isinstance(result, BaseException) else None
 
+    async def _run_process(self, udid: str, ip: str, port: int) -> None:
+        from core.userspace_process import UserspaceTunnelProcess
+        from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscoveryService
+
+        process = UserspaceTunnelProcess()
+        waiters = []
+        try:
+            info = await process.start(udid, ip, port)
+            self.rsd = RemoteServiceDiscoveryService(
+                (info['rsd_address'], info['rsd_port']), open_connection=process.dial,
+            )
+            await self.rsd.connect()
+            self.info = dict(info)
+            self._ready.set()
+            logger.info('Isolated userspace tunnel ready for %s at %s:%d', udid, ip, port)
+            waiters = [asyncio.create_task(self._stop.wait()),
+                       asyncio.create_task(process.wait_closed())]
+            await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+            if not self._stop.is_set():
+                logger.warning('Userspace tunnel process ended for %s', udid)
+        except BaseException as exc:
+            self._error = exc
+            self._ready.set()
+            raise
+        finally:
+            # Unpublish readiness before the first teardown await. The task
+            # remains alive while draining, but must no longer be adopted.
+            rsd_to_close = self.rsd
+            self.rsd = None
+            self.info = None
+            async def cleanup():
+                for waiter in waiters:
+                    waiter.cancel()
+                if waiters:
+                    await asyncio.gather(*waiters, return_exceptions=True)
+                try:
+                    if rsd_to_close is not None:
+                        try:
+                            await asyncio.wait_for(rsd_to_close.close(), timeout=5)
+                        except Exception:
+                            logger.warning('Isolated RSD close failed for %s', udid, exc_info=True)
+                finally:
+                    await process.close()
+                    self.rsd = None
+                    self.info = None
+
+            closing = asyncio.create_task(cleanup())
+            cancelled = False
+            while True:
+                try:
+                    await asyncio.shield(closing)
+                    break
+                except asyncio.CancelledError:
+                    cancelled = True
+            if cancelled:
+                raise asyncio.CancelledError
+
     async def _run(self, udid: str, ip: str, port: int) -> None:
+        if os.getenv('LOCWARP_TUNNEL_TRANSPORT', '').strip().lower() == 'userspace-process':
+            await self._run_process(udid, ip, port)
+            return
+        from pymobiledevice3.remote import tunnel_service
         from pymobiledevice3.remote.tunnel_service import (
             create_core_device_tunnel_service_using_remotepairing,
         )
+
         service = None
+        install_windows_tunnel_hook(tunnel_service)
+        userspace_requested = _userspace_tunnel_requested()
+        userspace_claimed = False
         try:
+            if userspace_requested:
+                global _USERSPACE_TUNNEL_ACTIVE
+                # pmd-pytcp is process-global and only supports one active
+                # userspace tunnel. The check/set has no await between it, so
+                # concurrent candidates cannot interleave here on asyncio's
+                # single event loop.
+                if _USERSPACE_TUNNEL_ACTIVE:
+                    raise RuntimeError(
+                        "userspace tunnel already active; one iPhone per backend process"
+                    )
+                _USERSPACE_TUNNEL_ACTIVE = True
+                userspace_claimed = True
+                from pymobiledevice3.remote.remote_service_discovery import (
+                    RemoteServiceDiscoveryService,
+                )
+                from pymobiledevice3.remote.userspace_tunnel import UserspaceDialPlane
+
+                # The package-level factory consults this flag when the
+                # tunnel context creates its link device. It is reset in the
+                # outer finally so later kernel-mode starts are unaffected.
+                tunnel_service.USE_USERSPACE_TUNNEL = True
+                logger.warning(
+                    "Using userspace WiFi tunnel for %s; this backend process supports one "
+                    "userspace iPhone at a time and does not create a host network adapter",
+                    udid,
+                )
+
             logger.info("Connecting to RemotePairing service at %s:%d", ip, port)
             service = await create_core_device_tunnel_service_using_remotepairing(
                 udid, ip, port,
@@ -107,55 +216,89 @@ class TunnelRunner:
             logger.info("RemotePairing connected (identifier=%s)", service.remote_identifier)
 
             async with service.start_tcp_tunnel() as tunnel:
-                self.info = {
-                    "rsd_address": tunnel.address,
-                    "rsd_port": tunnel.port,
-                    "interface": tunnel.interface,
-                    "protocol": str(tunnel.protocol),
-                }
-                logger.info(
-                    "WiFi tunnel established: %s:%d iface=%s",
-                    tunnel.address, tunnel.port, tunnel.interface,
-                )
-                self._ready.set()
-
-                # Wait until either (a) the user requests stop, or (b) the
-                # underlying TCP socket dies. pymobiledevice3's sock_read_task
-                # exits silently on OSError / ConnectionReset and does NOT
-                # propagate out of the start_tcp_tunnel context, so without
-                # this wait_closed() race the runner task hangs forever even
-                # after the iPhone has gone away. _per_tunnel_watchdog only
-                # restarts when runner.task ends, so detecting tunnel death
-                # here is what wires up the existing auto-restart machinery.
-                stop_task = asyncio.create_task(self._stop.wait())
-                closed_task = asyncio.create_task(tunnel.client.wait_closed())
                 try:
-                    _, pending = await asyncio.wait(
-                        [stop_task, closed_task],
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                finally:
-                    for t in (stop_task, closed_task):
-                        if not t.done():
-                            t.cancel()
-                            try:
-                                await t
-                            except (asyncio.CancelledError, Exception):
-                                pass
+                    if userspace_requested:
+                        tun = getattr(getattr(tunnel, "client", None), "tun", None)
+                        if tun is None:
+                            raise RuntimeError(
+                                "userspace tunnel did not expose its userspace link"
+                            )
+                        tun.set_peer(tunnel.address)
+                        self._dial_plane = UserspaceDialPlane(tun, tunnel.address)
+                        self.rsd = RemoteServiceDiscoveryService(
+                            (tunnel.address, tunnel.port),
+                            open_connection=self._dial_plane.dial,
+                        )
+                        await self.rsd.connect()
 
-                if self._stop.is_set():
-                    logger.info("Tunnel stop signal received; closing context")
-                else:
-                    logger.warning(
-                        "Tunnel underlying TCP socket died (sock_read_task exited); "
-                        "exiting runner so watchdog can restart"
+                    self.info = {
+                        "rsd_address": tunnel.address,
+                        "rsd_port": tunnel.port,
+                        "interface": tunnel.interface,
+                        "protocol": str(tunnel.protocol),
+                    }
+                    if userspace_requested:
+                        self.info["transport"] = "userspace"
+                    logger.info(
+                        "WiFi tunnel established: %s:%d iface=%s transport=%s",
+                        tunnel.address,
+                        tunnel.port,
+                        tunnel.interface,
+                        "userspace" if userspace_requested else "kernel",
                     )
+                    self._ready.set()
+
+                    # Wait until either (a) the user requests stop, or (b) the
+                    # underlying TCP socket dies. pymobiledevice3's
+                    # sock_read_task exits silently on OSError / ConnectionReset
+                    # and does NOT propagate out of the start_tcp_tunnel context,
+                    # so without this wait_closed() race the runner task hangs
+                    # forever after the iPhone goes away.
+                    stop_task = asyncio.create_task(self._stop.wait())
+                    closed_task = asyncio.create_task(tunnel.client.wait_closed())
+                    try:
+                        _, pending = await asyncio.wait(
+                            [stop_task, closed_task],
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                    finally:
+                        for t in (stop_task, closed_task):
+                            if not t.done():
+                                t.cancel()
+                                try:
+                                    await t
+                                except (asyncio.CancelledError, Exception):
+                                    pass
+
+                    if self._stop.is_set():
+                        logger.info("Tunnel stop signal received; closing context")
+                    else:
+                        logger.warning(
+                            "Tunnel underlying TCP socket died (sock_read_task exited); "
+                            "exiting runner so watchdog can restart"
+                        )
+                finally:
+                    rsd_to_close = self.rsd
+                    self.rsd = None
+                    self.info = None
+                    if rsd_to_close is not None:
+                        try:
+                            await rsd_to_close.close()
+                        except Exception:
+                            logger.debug("Userspace RSD close failed", exc_info=True)
+                        self.rsd = None
+                    if self._dial_plane is not None:
+                        try:
+                            await self._dial_plane.__aexit__(None, None, None)
+                        except Exception:
+                            logger.debug("Userspace dial-plane close failed", exc_info=True)
+                        self._dial_plane = None
         except BaseException as exc:
             self._error = exc
             self._ready.set()
             raise
         finally:
-            # ``start_tcp_tunnel()`` owns only the data tunnel.  The
+            # ``start_tcp_tunnel()`` owns only the data tunnel. The
             # RemotePairing control service returned by the factory is a
             # separate socket and must be closed explicitly on every runner
             # exit; otherwise repeated watchdog restarts leave control
@@ -171,6 +314,11 @@ class TunnelRunner:
                         exc_info=True,
                     )
             self.info = None
+            self.rsd = None
+            self._dial_plane = None
+            if userspace_claimed:
+                tunnel_service.USE_USERSPACE_TUNNEL = False
+                _USERSPACE_TUNNEL_ACTIVE = False
 
     async def start(self, udid: str, ip: str, port: int, timeout: float = 20.0) -> dict:
         """Start the tunnel and wait until RSD info is ready.
@@ -194,9 +342,11 @@ class TunnelRunner:
             self.task = task
             try:
                 await asyncio.wait_for(self._ready.wait(), timeout=timeout)
-            except BaseException:
+            except BaseException as exc:
                 self._stop.set()
-                await self._finish_task(task, cancel=True)
+                task_error = await self._finish_task(task, cancel=True)
+                if isinstance(exc, asyncio.TimeoutError) and isinstance(task_error, HostTunnelError):
+                    raise task_error from exc
                 raise
             if self._error is not None:
                 exc = self._error

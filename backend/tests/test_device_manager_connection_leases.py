@@ -49,6 +49,58 @@ def _patch_successful_rsd(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(device_manager_module, "_remember_device_name", lambda *_args: None)
 
 
+async def test_borrowed_rsd_readoption_preserves_lease_and_services(monkeypatch):
+    _patch_successful_rsd(monkeypatch)
+    manager = DeviceManager()
+    rsd = _FakeRsd(("fd00::1", 1234))
+    closed = []
+
+    async def close():
+        closed.append(True)
+
+    rsd.close = close
+    info, first = await manager.connect_wifi_tunnel_owned("fd00::1", 1234, rsd=rsd)
+    provider = object()
+    location = object()
+    first.dvt_provider = provider
+    first.location_service = location
+
+    async def must_not_retire(*_args):
+        pytest.fail("Same live RSD must not retire the current engine")
+
+    second_info, second = await manager.connect_wifi_tunnel_owned(
+        "fd00::1", 1234, rsd=rsd, before_close_previous=must_not_retire,
+    )
+    assert second is first
+    assert second_info == info
+    assert second.dvt_provider is provider
+    assert second.location_service is location
+    assert not closed
+    assert not second.rsd_owned
+    # The runner remains the RSD owner even after DM detaches its lease.
+    first.dvt_provider = None
+    first.location_service = None
+    await manager.disconnect(info.udid, expected=first)
+    assert not closed
+
+
+async def test_replacing_borrowed_rsd_does_not_close_runner_transport(monkeypatch):
+    _patch_successful_rsd(monkeypatch)
+    manager = DeviceManager()
+    rsd = _FakeRsd(("fd00::1", 1234))
+    closed = []
+
+    async def close():
+        closed.append(True)
+
+    rsd.close = close
+    _, first = await manager.connect_wifi_tunnel_owned("fd00::1", 1234, rsd=rsd)
+    _, second = await manager.connect_wifi_tunnel_owned("fd00::2", 1235)
+    assert second is not first
+    assert second.rsd_owned
+    assert not closed
+
+
 class _CallbackRsd:
     """RSD double that proves uninstalled C1 is drained on callback failure."""
 

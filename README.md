@@ -285,7 +285,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 | 技術 | 用途 |
 | --- | --- |
-| pymobiledevice3 `start_tcp_tunnel()` | 建立 RSD tunnel(in-process asyncio task) |
+| pymobiledevice3 `start_tcp_tunnel()` | 建立 RSD tunnel；Windows 批次啟動預設每台獨立 userspace 程序 |
 | pytun-pmd3 | Windows TUN 介面(wintun.dll,已捆入 backend exe) |
 
 ### 外部服務(全部免費)
@@ -335,7 +335,7 @@ TB1i7pEcifAeh8oDLLZFqiRVrpUaZmmDAn
 
 - **WebSocket 位置推播**:backend 每 tick(`update_interval` 由速度 profile 決定)發 `position_update` 事件,前端即時更新地圖游標 + ETA bar
 - **速度解析**:`config.resolve_speed_profile(mode, speed_kmh, speed_min_kmh, speed_max_kmh)` 統一處理「模式預設 / 固定自訂 / 隨機範圍」三種輸入,優先序 `range > 固定 > 預設`
-- **In-process WiFi tunnel**:backend 自 v0.2.3 起直接在主 event loop 內執行 `start_tcp_tunnel()`,不再 spawn 獨立 helper exe
+- **WiFi tunnel**：Windows 原始碼批次啟動預設每台 iPhone 使用獨立 userspace 程序，避免 WinTun 故障與全域網路堆疊衝突；選用 `kernel` 時仍在 backend 管理通道，網卡建立移至背景執行。獨立程序模式尚未整合至 PyInstaller 安裝包。
 - **Runtime 狀態目錄**:一律寫入 `~/.locwarp/`(bookmarks / settings / tunnel info),避免 PyInstaller 的 `_MEIPASS` 臨時目錄問題
 - **Tile referer / OSM 替換**:OSM 的 tile 服務封鎖散佈型應用,已改用 CartoDB(OSM 資料源、CARTO 代管 CDN、免 referer)
 - **多裝置群組模式**(三裝置上限):同步瞬移 / 同步移動,primary 不被後插裝置搶走,後插的裝置自動同步到 primary 的位置並接續 primary 正在執行的任務(fanout)
@@ -516,6 +516,11 @@ locwarp/
 | Tunnel 啟動後 backend 連不上 | 確認以系統管理員身份啟動 |
 | `No such service: com.apple.instruments.dtservicehub` (iOS 17+/26) / LocWarp 跳「iPhone 上未偵測到 DDI」 | v0.2.58 起 LocWarp 不再自動掛 DDI,請用下列任一工具幫 iPhone 掛一次 DDI 後再回來使用:Xcode、愛思助手、3uTools、pymobiledevice3 CLI。也可先「設定 → 隱私權與安全性 → **開發者模式** 關閉,重開機,再次開啟」,然後用上述工具重新掛一次。 |
 | **開發者模式未顯示**(iOS 16+) | v0.2.61 起,LocWarp 連線後在狀態列會出現「**顯示開發者模式選項**」按鈕,點下去 iPhone 設定裡就會出現開發者模式(不用側載 IPA)。若按鈕失敗或想手動處理,可參考下方 [附錄:iPhone 開啟開發者模式(Windows 流程)](#附錄iphone-開啟開發者模式windows-流程) 的側載方式作為備援。 |
+
+若 Windows 的 WinTun/PnP 出現 Code 56 或 `OSError 4319`,可先關閉 LocWarp
+後執行 `LocWarp.bat repair`。這個模式只啟動必要的裝置安裝服務、重掃 PnP，並嘗試重啟失敗的 WinTun 裝置，不會停用實體網卡或修改預設路由；若問題仍在，確認其他 VPN/WireGuard 等 WinTun 程式已關閉後，再執行 `LocWarp.bat repair-driver`。深度模式會在刪除 driver store 後做一次獨立 adapter 建立測試；若仍回傳 Code 56/4319，批次檔會明確回報需要重新啟動，且不會自行重開機。一般雙擊啟動不會自動執行上述修復。
+
+Windows 一般雙擊 `LocWarp.bat` 現在預設使用獨立程序的 userspace tunnel：每台 iPhone 有自己的網路堆疊，可同時連線，不建立 WinTun、不修改實體網卡或預設路由。`LocWarp.bat userspace` 使用相同模式；`LocWarp.bat kernel` 可明確選用原本的 WinTun 路徑。直接啟動後端時，可設定 `LOCWARP_TUNNEL_TRANSPORT=userspace-process` 使用多台免 WinTun 通道。原本的 `LOCWARP_USE_USERSPACE_TUNNEL=1` 仍是單程序／單台相容模式。
 
 ---
 

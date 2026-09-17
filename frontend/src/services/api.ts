@@ -110,7 +110,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const res = await fetchWithRetry(`${API}${path}`, opts)
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(formatError(err.detail, res.statusText))
+    throw Object.assign(new Error(formatError(err.detail, res.statusText)), {
+      code: typeof err.detail === 'object' ? err.detail?.code : undefined,
+    })
   }
   return res.json()
 }

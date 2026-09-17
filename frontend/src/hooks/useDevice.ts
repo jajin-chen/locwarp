@@ -199,6 +199,8 @@ export function useDevice(subscribe?: WsSubscribe) {
   // All three maps below are keyed by lowercased udid (see schedulePinReconnect
   // for why the key must be normalized).
   const pinRetryTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const [hostTunnelError, setHostTunnelError] = useState<string | null>(null)
+  const hostTunnelErrorRef = useRef<Error | null>(null)
   const pinRetryFailures = useRef<Record<string, number>>({})
   // Consecutive reschedule count per device, used to back off the retry
   // interval for devices that stay offline a long time (see schedulePinReconnect).
@@ -246,10 +248,12 @@ export function useDevice(subscribe?: WsSubscribe) {
     // failure-count maps were keyed by the raw udid, those two callers could
     // each arm their own independent 15s loop for the same iPhone, doubling
     // network load and fighting each other over the connection.
+    if (hostTunnelErrorRef.current) return
     const udidLc = udid.toLowerCase()
     if (pinRetryTimers.current[udidLc]) return // already scheduled
     const attempt = async () => {
       delete pinRetryTimers.current[udidLc]
+      if (hostTunnelErrorRef.current) return
       // Stop if the user unpinned, or the tunnel already came back.
       if (!pinnedRef.current.some((u) => u.toLowerCase() === udidLc)) return
       if (tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)) return
@@ -263,7 +267,27 @@ export function useDevice(subscribe?: WsSubscribe) {
       // vanish with no reschedule and no visible error.
       let reconnected = false
       try {
-        const entry = readSavedEntryFor(udid)
+        // Refresh ownership before dialing: discovery can advertise several
+        // ports belonging to an already healthy phone. A missing pin must
+        // never probe that phone using the missing device's pairing record.
+        // If status cannot be verified, leave existing sessions alone and
+        // let the normal backoff retry this check.
+        const status = await wifiTunnelStatus().catch(() => null)
+        if (!status) return
+        let liveTunnels = Array.isArray(status.tunnels) ? status.tunnels : []
+        if (liveTunnels.some((tn) => tn.udid.toLowerCase() === udidLc)) {
+          reconnected = true
+          return
+        }
+        const ownedByAnotherDevice = (ip: string) =>
+          [...liveTunnels, ...tunnelsRef.current].some((tn) =>
+            tn.udid.toLowerCase() !== udidLc && tn.ip === ip,
+          )
+        let entry = readSavedEntryFor(udid)
+        if (entry && ownedByAnotherDevice(entry.ip)) {
+          writeSavedIps(removeSavedIpByUdid(readSavedIps(), udid))
+          entry = null
+        }
         const failures = pinRetryFailures.current[udidLc] ?? 0
         if (entry && failures < 2) {
           // startWifiTunnel's udidHint is only a HINT for the backend's
@@ -330,8 +354,21 @@ export function useDevice(subscribe?: WsSubscribe) {
           // Re-discover once and try the fresh endpoints; identity is
           // verified after connect (drop anything not pinned).
           try {
+            if (hostTunnelErrorRef.current) return
             const dres = await wifiTunnelDiscover()
+            // Discovery can take tens of seconds; another device may have
+            // recovered while it was running. Revalidate ownership before
+            // using the returned endpoints.
+            const freshStatus = await wifiTunnelStatus().catch(() => null)
+            if (!freshStatus) return
+            liveTunnels = Array.isArray(freshStatus.tunnels) ? freshStatus.tunnels : []
+            if (liveTunnels.some((tn) => tn.udid.toLowerCase() === udidLc)) {
+              reconnected = true
+              return
+            }
             for (const d of dres?.devices || []) {
+              if (hostTunnelErrorRef.current) return
+              if (ownedByAnotherDevice(String(d.ip))) continue
               if (tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)) break
               let info: { udid: string } | null | undefined
               try {
@@ -385,6 +422,7 @@ export function useDevice(subscribe?: WsSubscribe) {
         }
       } finally {
         if (
+          !hostTunnelErrorRef.current &&
           !reconnected &&
           pinnedRef.current.some((u) => u.toLowerCase() === udidLc) &&
           !tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)
@@ -499,8 +537,13 @@ export function useDevice(subscribe?: WsSubscribe) {
         const rsd_port = msg.data?.rsd_port
         if (udid && rsd_address && typeof rsd_port === 'number') {
           setTunnels((prev) => {
-            const filtered = prev.filter((tn) => tn.udid !== udid)
-            return [...filtered, { udid, rsd_address, rsd_port }]
+            const existing = prev.find((tn) => tn.udid.toLowerCase() === udid.toLowerCase())
+            const filtered = prev.filter((tn) => tn.udid.toLowerCase() !== udid.toLowerCase())
+            return [...filtered, {
+              ...existing, udid, rsd_address, rsd_port,
+              ...(typeof msg.data?.ip === 'string' ? { ip: msg.data.ip } : {}),
+              ...(typeof msg.data?.port === 'number' ? { port: msg.data.port } : {}),
+            }]
           })
         }
       }
@@ -508,7 +551,8 @@ export function useDevice(subscribe?: WsSubscribe) {
   }, [subscribe])
 
   const startWifiTunnel = useCallback(
-    async (ip: string, port = 49152, udidHint?: string, portHints?: number[]) => {
+    async (ip: string, port = 49152, udidHint?: string, portHints?: number[], automatic = false) => {
+      if (automatic && hostTunnelErrorRef.current) throw hostTunnelErrorRef.current
       try {
         // Keep the legacy three-argument call shape when no hints are
         // supplied; callers and existing integrations treat the fourth
@@ -536,6 +580,8 @@ export function useDevice(subscribe?: WsSubscribe) {
           const filtered = prev.filter((tn) => tn.udid !== res.udid)
           return [...filtered, {
             udid: res.udid,
+            ip,
+            port: usedPort,
             rsd_address: res.rsd_address,
             rsd_port: res.rsd_port,
           }]
@@ -569,8 +615,21 @@ export function useDevice(subscribe?: WsSubscribe) {
         } catch { /* storage disabled */ }
         // A successful connect clears any pending pin-retry for this device.
         clearPinRetry(res.udid)
+        if (!automatic) {
+          hostTunnelErrorRef.current = null
+          setHostTunnelError(null)
+          for (const udid of pinnedRef.current) {
+            if (udid.toLowerCase() !== res.udid.toLowerCase()) schedulePinReconnect(udid)
+          }
+        }
         return info
       } catch (err) {
+        if (err instanceof Error && 'code' in err && err.code === 'host_tunnel_unavailable') {
+          hostTunnelErrorRef.current = err
+          setHostTunnelError(err.message)
+          for (const timer of Object.values(pinRetryTimers.current)) clearTimeout(timer)
+          pinRetryTimers.current = {}
+        }
         console.error('WiFi tunnel failed:', err)
         throw err
       }
@@ -579,7 +638,16 @@ export function useDevice(subscribe?: WsSubscribe) {
   )
   // Expose the latest startWifiTunnel to the pin-retry loop without making
   // it a hook dependency (the callback is stable, deps: []).
-  startWifiTunnelRef.current = startWifiTunnel
+  const autoStartWifiTunnel = useCallback(
+    (ip: string, port?: number, udidHint?: string, portHints?: number[]) =>
+      startWifiTunnel(ip, port, udidHint, portHints, true),
+    [startWifiTunnel],
+  )
+  startWifiTunnelRef.current = autoStartWifiTunnel
+
+  useEffect(() => () => {
+    for (const timer of Object.values(pinRetryTimers.current)) clearTimeout(timer)
+  }, [])
 
   const checkTunnelStatus = useCallback(async () => {
     try {
@@ -646,11 +714,11 @@ export function useDevice(subscribe?: WsSubscribe) {
     devices, connectedDevice, scanning, scan, connect, disconnect,
     startWifiTunnel, checkTunnelStatus, stopTunnel, tunnelStatus, tunnels,
     connectedDevices, primaryDevice,
-    pinnedUdids, togglePin, schedulePinReconnect,
+    pinnedUdids, togglePin, schedulePinReconnect, autoStartWifiTunnel, hostTunnelError,
   }), [
     devices, connectedDevice, scanning, scan, connect, disconnect,
     startWifiTunnel, checkTunnelStatus, stopTunnel, tunnelStatus, tunnels,
     connectedDevices, primaryDevice,
-    pinnedUdids, togglePin, schedulePinReconnect,
+    pinnedUdids, togglePin, schedulePinReconnect, autoStartWifiTunnel, hostTunnelError,
   ])
 }

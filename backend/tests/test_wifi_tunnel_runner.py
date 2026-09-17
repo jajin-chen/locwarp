@@ -190,6 +190,106 @@ async def test_runner_closes_remote_pairing_control_service_on_stop(
     assert runner.task is None
 
 
+async def test_userspace_runner_connects_rsd_without_kernel_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pymobiledevice3.remote import remote_service_discovery, tunnel_service
+    from pymobiledevice3.remote import userspace_tunnel
+
+    class _FakeTun:
+        name = "userspace-test"
+
+        def set_peer(self, address: str) -> None:
+            self.peer = address
+
+    class _FakeTunnel:
+        address = "fd00::1"
+        port = 1234
+        interface = "userspace-test"
+        protocol = "tcp"
+
+        def __init__(self) -> None:
+            self.client = self
+            self.tun = _FakeTun()
+
+        async def wait_closed(self) -> None:
+            await asyncio.Event().wait()
+
+    class _FakeService:
+        remote_identifier = "fake"
+
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        @asynccontextmanager
+        async def start_tcp_tunnel(self):
+            yield _FakeTunnel()
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    class _FakeDialPlane:
+        def __init__(self, tun, address) -> None:
+            self.tun = tun
+            self.address = address
+            self.close_calls = 0
+
+        async def dial(self, *args, **kwargs):
+            raise AssertionError("the fake RSD should not need a service dial")
+
+        async def __aexit__(self, *_args) -> None:
+            self.close_calls += 1
+
+    class _FakeRsd:
+        peer_info = {"Properties": {"UniqueDeviceID": "fake-udid", "OSVersion": "26.0"}}
+        all_values = {"DeviceName": "Fake iPhone"}
+
+        def __init__(self, *_args, **kwargs) -> None:
+            self.open_connection = kwargs["open_connection"]
+            self.close_calls = 0
+
+        async def connect(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    service = _FakeService()
+    dial_planes: list[_FakeDialPlane] = []
+
+    async def create_service(*_args, **_kwargs):
+        return service
+
+    def make_dial_plane(tun, address):
+        plane = _FakeDialPlane(tun, address)
+        dial_planes.append(plane)
+        return plane
+
+    monkeypatch.setenv("LOCWARP_USE_USERSPACE_TUNNEL", "1")
+    monkeypatch.setattr(
+        tunnel_service,
+        "create_core_device_tunnel_service_using_remotepairing",
+        create_service,
+    )
+    monkeypatch.setattr(userspace_tunnel, "UserspaceDialPlane", make_dial_plane)
+    monkeypatch.setattr(
+        remote_service_discovery,
+        "RemoteServiceDiscoveryService",
+        _FakeRsd,
+    )
+
+    runner = TunnelRunner()
+    info = await runner.start("fake-udid", "192.0.2.10", 49152, timeout=0.5)
+    assert info["transport"] == "userspace"
+    assert runner.rsd is not None
+    await runner.stop()
+
+    assert service.close_calls == 1
+    assert dial_planes[0].close_calls == 1
+    assert runner.rsd is None
+    assert tunnel_service.USE_USERSPACE_TUNNEL is False
+
+
 async def test_runner_bounds_a_hung_remote_pairing_close(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
