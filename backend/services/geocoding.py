@@ -10,14 +10,17 @@ Forward search supports three providers selected per-request:
 * ``google`` — Google Geocoding API. Requires the user's own API key;
   10k free events / month with the Essentials tier.
 
-Reverse geocoding always uses Nominatim because it feeds country flag +
-short-name picking inside the UI; switching that pipeline would touch a
-lot of unrelated code paths.
+Reverse geocoding prefers Nominatim because it feeds country flag +
+short-name picking inside the UI, and falls back to Photon when Nominatim
+is unavailable.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
+import time
 
 import httpx
 from fastapi import HTTPException
@@ -36,12 +39,112 @@ _GOOGLE_GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 # this desktop app, which has no geocoding-specific shutdown hook.
 _client: httpx.AsyncClient | None = None
 
+# The public Nominatim service limits aggregate application traffic to one
+# request per second. Reserve request slots across searches and reverse lookups
+# so concurrent UI actions cannot exceed that rate.
+_NOMINATIM_MIN_INTERVAL = 1.1
+_nominatim_request_lock = asyncio.Lock()
+_nominatim_last_request_at = 0.0
+
+# A 403 is commonly a temporary service-side block. Stop repeating requests
+# during the cooldown and use Photon for both search and reverse lookups.
+_nominatim_cooldown_until = 0.0
+_nominatim_state_lock = threading.Lock()
+_reverse_cache: dict[tuple[float, float], tuple[float, GeocodingResult | None]] = {}
+_reverse_cache_lock = threading.Lock()
+_reverse_inflight: dict[tuple[float, float], tuple[asyncio.Lock, int]] = {}
+_reverse_inflight_lock = threading.Lock()
+_REVERSE_CACHE_TTL = 24 * 60 * 60
+_REVERSE_NEGATIVE_CACHE_TTL = 30
+_REVERSE_CACHE_MAX_ENTRIES = 2048
+_CACHE_MISS = object()
+
 
 def _get_client() -> httpx.AsyncClient:
     global _client
     if _client is None or _client.is_closed:
         _client = httpx.AsyncClient(timeout=_TIMEOUT)
     return _client
+
+
+async def _nominatim_get(
+    url: str,
+    *,
+    params: dict[str, object],
+) -> httpx.Response | None:
+    """Send a policy-compliant Nominatim request, rate-limited per process."""
+    global _nominatim_last_request_at
+
+    async with _nominatim_request_lock:
+        with _nominatim_state_lock:
+            if time.monotonic() < _nominatim_cooldown_until:
+                return None
+
+        delay = _nominatim_last_request_at + _NOMINATIM_MIN_INTERVAL - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        with _nominatim_state_lock:
+            if time.monotonic() < _nominatim_cooldown_until:
+                return None
+
+        _nominatim_last_request_at = time.monotonic()
+        try:
+            return await _get_client().get(
+                url,
+                params=params,
+                headers={
+                    "User-Agent": NOMINATIM_USER_AGENT,
+                    "Accept": "application/json",
+                },
+            )
+        except httpx.RequestError:
+            _suspend_nominatim(60)
+            raise
+
+
+def _suspend_nominatim(seconds: float) -> None:
+    global _nominatim_cooldown_until
+    with _nominatim_state_lock:
+        _nominatim_cooldown_until = max(
+            _nominatim_cooldown_until,
+            time.monotonic() + seconds,
+        )
+
+
+def _nominatim_cooldown_for_error(exc: Exception) -> int:
+    if isinstance(exc, (httpx.RequestError, ValueError)):
+        return 60
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return 0
+    status = exc.response.status_code
+    if status == 403:
+        return 15 * 60
+    if status == 429 or status >= 500:
+        return 60
+    return 0
+
+
+def _reverse_cache_get(key: tuple[float, float]):
+    now = time.monotonic()
+    with _reverse_cache_lock:
+        entry = _reverse_cache.get(key)
+        if entry is None:
+            return _CACHE_MISS
+        expires_at, result = entry
+        if expires_at <= now:
+            _reverse_cache.pop(key, None)
+            return _CACHE_MISS
+        return result
+
+
+def _reverse_cache_put(key: tuple[float, float], result: GeocodingResult | None) -> None:
+    ttl = _REVERSE_CACHE_TTL if result is not None else _REVERSE_NEGATIVE_CACHE_TTL
+    with _reverse_cache_lock:
+        _reverse_cache[key] = (time.monotonic() + ttl, result)
+        while len(_reverse_cache) > _REVERSE_CACHE_MAX_ENTRIES:
+            oldest = next(iter(_reverse_cache))
+            _reverse_cache.pop(oldest, None)
 
 
 class GeocodingService:
@@ -83,13 +186,32 @@ class GeocodingService:
             "limit": min(limit, 40),
         }
         logger.debug("Nominatim search: %s", query)
-        resp = await _get_client().get(
-            f"{NOMINATIM_BASE_URL}/search",
-            params=params,
-            headers=self._headers(),
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        try:
+            resp = await _nominatim_get(
+                f"{NOMINATIM_BASE_URL}/search",
+                params=params,
+            )
+            if resp is None:
+                logger.info("Nominatim search cooling down; using Photon")
+                return await self._search_photon(query, limit)
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, list):
+                raise ValueError("Nominatim search response must be a JSON list")
+        except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as exc:
+            cooldown = _nominatim_cooldown_for_error(exc)
+            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            reason = f"HTTP {status}" if status else (
+                "invalid response" if isinstance(exc, ValueError) else "network error"
+            )
+            if cooldown:
+                _suspend_nominatim(cooldown)
+            logger.warning(
+                "Nominatim search unavailable (status=%s); falling back to Photon%s",
+                reason,
+                f" for {cooldown}s" if cooldown else "",
+            )
+            return await self._search_photon(query, limit)
 
         results: list[GeocodingResult] = []
         for item in data:
@@ -103,7 +225,7 @@ class GeocodingService:
                         importance=float(item.get("importance", 0)),
                     )
                 )
-            except (KeyError, ValueError) as exc:
+            except (AttributeError, KeyError, TypeError, ValueError) as exc:
                 logger.warning("Skipping malformed search result: %s", exc)
         return results
 
@@ -223,6 +345,41 @@ class GeocodingService:
 
         Returns ``None`` when no result is found.
         """
+        cache_key = (round(lat, 6), round(lng, 6))
+        cached = _reverse_cache_get(cache_key)
+        if cached is not _CACHE_MISS:
+            return cached
+
+        # Coalesce concurrent lookups for the same coordinates without
+        # serializing Photon fallbacks for unrelated locations.
+        with _reverse_inflight_lock:
+            entry = _reverse_inflight.get(cache_key)
+            if entry is None:
+                lookup_lock = asyncio.Lock()
+                waiter_count = 1
+            else:
+                lookup_lock, waiter_count = entry
+                waiter_count += 1
+            _reverse_inflight[cache_key] = (lookup_lock, waiter_count)
+
+        try:
+            async with lookup_lock:
+                cached = _reverse_cache_get(cache_key)
+                if cached is not _CACHE_MISS:
+                    return cached
+                result = await self._reverse_uncached(lat, lng)
+                _reverse_cache_put(cache_key, result)
+                return result
+        finally:
+            with _reverse_inflight_lock:
+                entry = _reverse_inflight.get(cache_key)
+                if entry is not None and entry[0] is lookup_lock:
+                    if entry[1] == 1:
+                        _reverse_inflight.pop(cache_key)
+                    else:
+                        _reverse_inflight[cache_key] = (lookup_lock, entry[1] - 1)
+
+    async def _reverse_uncached(self, lat: float, lng: float) -> GeocodingResult | None:
         params = {
             "lat": lat,
             "lon": lng,
@@ -232,13 +389,31 @@ class GeocodingService:
 
         logger.debug("Nominatim reverse: %.6f, %.6f", lat, lng)
 
-        resp = await _get_client().get(
-            f"{NOMINATIM_BASE_URL}/reverse",
-            params=params,
-            headers=self._headers(),
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        try:
+            resp = await _nominatim_get(
+                f"{NOMINATIM_BASE_URL}/reverse",
+                params=params,
+            )
+            if resp is None:
+                return await self._reverse_photon(lat, lng)
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, dict):
+                raise ValueError("Nominatim reverse response must be a JSON object")
+        except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as exc:
+            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            cooldown = _nominatim_cooldown_for_error(exc)
+            reason = f"HTTP {status}" if status else (
+                "invalid response" if isinstance(exc, ValueError) else "network error"
+            )
+            if cooldown:
+                _suspend_nominatim(cooldown)
+            logger.warning(
+                "Nominatim reverse unavailable (status=%s); falling back to Photon%s",
+                reason,
+                f" for {cooldown}s" if cooldown else "",
+            )
+            return await self._reverse_photon(lat, lng)
 
         if "error" in data:
             logger.info("Nominatim reverse returned error: %s", data["error"])
@@ -248,7 +423,7 @@ class GeocodingService:
             addr = data.get("address") or {}
             display_name = data.get("display_name", "")
             short = _pick_short_name(addr, data.get("name") or "", display_name)
-            return GeocodingResult(
+            result = GeocodingResult(
                 display_name=display_name,
                 lat=float(data["lat"]),
                 lng=float(data["lon"]),
@@ -257,9 +432,55 @@ class GeocodingService:
                 country_code=(addr.get("country_code") or "").lower(),
                 short_name=short,
             )
-        except (KeyError, ValueError) as exc:
-            logger.warning("Failed to parse reverse result: %s", exc)
-            return None
+            return result
+        except (AttributeError, KeyError, ValueError, TypeError) as exc:
+            logger.warning("Failed to parse Nominatim reverse result; trying Photon: %s", exc)
+            return await self._reverse_photon(lat, lng)
+
+    async def _reverse_photon(self, lat: float, lng: float) -> GeocodingResult | None:
+        """Use Photon when Nominatim is unavailable or has rate-limited us."""
+        try:
+            resp = await _get_client().get(
+                f"{PHOTON_BASE_URL}/reverse",
+                params={"lat": lat, "lon": lng},
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            features = resp.json().get("features") or []
+            for feature in features:
+                geometry = feature.get("geometry") or {}
+                coordinates = geometry.get("coordinates") or []
+                if len(coordinates) < 2:
+                    continue
+                props = feature.get("properties") or {}
+                name = str(props.get("name") or "").strip()
+                house = props.get("housenumber")
+                street = props.get("street")
+                parts = [name] if name else []
+                if house and street:
+                    parts.append(f"{street} {house}")
+                elif street:
+                    parts.append(str(street))
+                for key in ("district", "city", "county", "state", "country"):
+                    value = str(props.get(key) or "").strip()
+                    if value and value not in parts:
+                        parts.append(value)
+                short_name = name or next(
+                    (str(props[key]).strip() for key in ("district", "city", "county", "state", "country") if props.get(key)),
+                    "",
+                )
+                return GeocodingResult(
+                    display_name=", ".join(parts) or short_name,
+                    lat=float(coordinates[1]),
+                    lng=float(coordinates[0]),
+                    type=props.get("type") or props.get("osm_value") or "",
+                    importance=0.0,
+                    country_code=(props.get("countrycode") or "").lower(),
+                    short_name=short_name,
+                )
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            logger.warning("Photon reverse fallback failed: %s", exc)
+        return None
 
 
 def _pick_short_name(addr: dict, name: str, display_name: str) -> str:
