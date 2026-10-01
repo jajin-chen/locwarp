@@ -229,7 +229,7 @@ Operate LocWarp from your phone without walking back to the computer. The "**Pho
 - **Update check**: at startup, compares against the latest GitHub Release. When a newer version exists, a colourful animated `NEW` pill appears next to the version number in the bottom status bar (no popup interrupting your workflow); clicking the version takes you to the download page
 - **Timezone chip** (status bar, v0.2.128+): displays local-vs-here offset after crossing a timezone; tap to open a popup with full timezone / city / GMT-offset details. Bottom-right clock ticks live.
 - **Route completion sound** (v0.2.131+): plays a short cue when a route finishes; new "Settings" button next to it can mute
-- **Hardware acceleration toggle** (v0.2.132+, settings panel): on some GPU drivers, turning it off fixes ghosting / black-screen issues ([Issue #24](https://github.com/keezxc1223/locwarp/issues/24))
+- **Hardware acceleration toggle** (v0.2.132+, settings panel): on some GPU drivers, turning it off fixes ghosting / black-screen issues; Windows automatically switches to software rendering after a startup GPU crash ([Issue #24](https://github.com/keezxc1223/locwarp/issues/24))
 - **IP field history** (v0.2.152+): tunnel IP field has a "Recent" picker next to it, click to re-fill instead of retyping
 - **Open Log Folder** button (status bar): opens `~/.locwarp/logs/` so you can attach `backend.log` to bug reports
 - Current app version shown in the bottom-right corner (with a flowing-gradient `NEW` pill beside it when an update is available)

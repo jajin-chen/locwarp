@@ -32,6 +32,24 @@ function loadMaplibreStack(): Promise<void> {
   return maplibreStackPromise;
 }
 
+function createLazyVectorLayer(style: string, label: string, attribution: string): L.Layer {
+  const layerGroup = L.layerGroup([]);
+  let vectorLayer: L.Layer | null = null;
+  layerGroup.on('add', () => {
+    if (vectorLayer) return;
+    loadMaplibreStack()
+      .then(() => {
+        if (vectorLayer) return;
+        vectorLayer = (L as any).maplibreGL({ style, attribution }) as L.Layer;
+        layerGroup.addLayer(vectorLayer);
+      })
+      .catch((err) => {
+        console.error(`Failed to load MapLibre GL for ${label} layer`, err);
+      });
+  });
+  return layerGroup;
+}
+
 // Build the base tile layers, restore the user's saved choice, and mount
 // the layer-switcher control. Extracted verbatim from the map-init effect.
 export function setupTileLayers(map: L.Map): void {
@@ -84,6 +102,17 @@ export function setupTileLayers(map: L.Map): void {
         'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
     },
   );
+  // ESRI World Street Map — same server and {y}/{x} convention as World
+  // Imagery, no API key.
+  const esriStreetLayer = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    {
+      ...baseOpts,
+      maxZoom: 19,
+      attribution:
+        'Tiles &copy; Esri &mdash; Source: Esri, HERE, Garmin, USGS, NGA, and the GIS User Community',
+    },
+  );
   // OpenFreeMap Liberty — free, no API key, vector tiles styled to look
   // close to Mapbox / Google. Rendered via MapLibre GL through the
   // maplibre-gl-leaflet binding so Leaflet treats it like any other
@@ -95,24 +124,22 @@ export function setupTileLayers(map: L.Map): void {
   // for us — if the user switches away before the import resolves, the
   // GL layer is stored in the (detached) group and only attaches when
   // Liberty is selected again.
-  const libertyLayer = L.layerGroup([]);
-  let libertyGlLayer: L.Layer | null = null;
-  libertyLayer.on('add', () => {
-    if (libertyGlLayer) return;
-    loadMaplibreStack()
-      .then(() => {
-        if (libertyGlLayer) return;
-        libertyGlLayer = (L as any).maplibreGL({
-          style: 'https://tiles.openfreemap.org/styles/liberty',
-          attribution:
-            '&copy; <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
-        }) as L.Layer;
-        libertyLayer.addLayer(libertyGlLayer);
-      })
-      .catch((err) => {
-        console.error('Failed to load MapLibre GL for Liberty layer', err);
-      });
-  });
+  const libertyLayer = createLazyVectorLayer(
+    'https://tiles.openfreemap.org/styles/liberty', 'Liberty',
+    '&copy; <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+  );
+  const brightLayer = createLazyVectorLayer(
+    'https://tiles.openfreemap.org/styles/bright', 'Bright',
+    '&copy; <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+  );
+  const positronLayer = createLazyVectorLayer(
+    'https://tiles.openfreemap.org/styles/positron', 'Positron',
+    '&copy; <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+  );
+  const versaLayer = createLazyVectorLayer(
+    'https://tiles.versatiles.org/assets/styles/colorful/style.json', 'VersaTiles Colorful',
+    '&copy; <a href="https://versatiles.org/" target="_blank" rel="noopener">VersaTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+  );
 
   // NLSC 通用版電子地圖 — Taiwan government basemap (內政部國土測繪中心).
   // No API key, no quota, completely free. Coverage is Taiwan-only:
@@ -150,15 +177,23 @@ export function setupTileLayers(map: L.Map): void {
   const layers: Record<string, L.Layer> = {
     'OSM': osmLayer,
     'CartoDB Voyager': cartoLayer,
+    'ESRI 街道 / Street Map': esriStreetLayer,
     'ESRI 衛星 / Satellite': esriSatLayer,
     'OpenFreeMap Liberty': libertyLayer,
+    'OpenFreeMap Bright': brightLayer,
+    'OpenFreeMap Positron': positronLayer,
+    'VersaTiles Colorful': versaLayer,
     'NLSC 台灣電子地圖': nlscLayer,
     'GSI 日本地理院地圖': gsiLayer,
   };
   const initialKey =
     savedLayer === 'carto' ? 'CartoDB Voyager' :
+    savedLayer === 'esri_street' ? 'ESRI 街道 / Street Map' :
     savedLayer === 'esri' ? 'ESRI 衛星 / Satellite' :
     savedLayer === 'liberty' ? 'OpenFreeMap Liberty' :
+    savedLayer === 'bright' ? 'OpenFreeMap Bright' :
+    savedLayer === 'positron' ? 'OpenFreeMap Positron' :
+    savedLayer === 'versa' ? 'VersaTiles Colorful' :
     savedLayer === 'nlsc' ? 'NLSC 台灣電子地圖' :
     savedLayer === 'gsi' ? 'GSI 日本地理院地圖' :
     'OSM';
@@ -168,8 +203,12 @@ export function setupTileLayers(map: L.Map): void {
     try {
       const key: string =
         e?.name === 'CartoDB Voyager' ? 'carto' :
+        e?.name === 'ESRI 街道 / Street Map' ? 'esri_street' :
         e?.name === 'ESRI 衛星 / Satellite' ? 'esri' :
         e?.name === 'OpenFreeMap Liberty' ? 'liberty' :
+        e?.name === 'OpenFreeMap Bright' ? 'bright' :
+        e?.name === 'OpenFreeMap Positron' ? 'positron' :
+        e?.name === 'VersaTiles Colorful' ? 'versa' :
         e?.name === 'NLSC 台灣電子地圖' ? 'nlsc' :
         e?.name === 'GSI 日本地理院地圖' ? 'gsi' : 'osm';
       localStorage.setItem('locwarp.tile_layer', key);
