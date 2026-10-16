@@ -14,7 +14,7 @@ interface AddressSearchProps {
   onSelect: (lat: number, lng: number, name: string) => void;
 }
 
-type Provider = 'nominatim' | 'photon' | 'google';
+type Provider = 'arcgis' | 'nominatim' | 'photon' | 'google';
 
 const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
   const t = useT();
@@ -23,7 +23,7 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchRequestRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Provider state — persisted in localStorage so it survives launches.
@@ -33,7 +33,9 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
     try {
       const saved = localStorage.getItem('locwarp.geocode_provider');
       const key = localStorage.getItem('locwarp.google_geocode_key') || '';
+      const arcgis = localStorage.getItem('locwarp.arcgis_geocode_key') || '';
       if (saved === 'google' && key) return 'google';
+      if (saved === 'arcgis' && arcgis) return 'arcgis';
       if (saved === 'photon') return 'photon';
     } catch { /* ignore */ }
     return 'nominatim';
@@ -42,14 +44,19 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
     try { return localStorage.getItem('locwarp.google_geocode_key') || ''; }
     catch { return ''; }
   });
+  const [arcgisKey, setArcgisKey] = useState<string>(() => {
+    try { return localStorage.getItem('locwarp.arcgis_geocode_key') || ''; }
+    catch { return ''; }
+  });
   const [showSettings, setShowSettings] = useState(false);
   const [keyInput, setKeyInput] = useState<string>(googleKey);
+  const [arcgisKeyInput, setArcgisKeyInput] = useState<string>(arcgisKey);
 
   // Mirror to backend so /api/phone/geocode can honour the same choice.
   // Fire-and-forget: the desktop's localStorage is still the source of
   // truth for its own search calls, this only matters for the phone.
-  const syncToBackend = useCallback((p: Provider, key: string) => {
-    setGeocodeProviderPref(p, p === 'google' ? key : '').catch(() => {
+  const syncToBackend = useCallback((p: Provider, google: string, arcgis: string) => {
+    setGeocodeProviderPref(p, google, arcgis).catch(() => {
       /* backend offline / older build — desktop search keeps working */
     });
   }, []);
@@ -58,8 +65,8 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
     setProvider(p);
     try { localStorage.setItem('locwarp.geocode_provider', p); }
     catch { /* ignore */ }
-    syncToBackend(p, googleKey);
-  }, [googleKey, syncToBackend]);
+    syncToBackend(p, googleKey, arcgisKey);
+  }, [arcgisKey, googleKey, syncToBackend]);
 
   const saveGoogleKey = useCallback(() => {
     const trimmed = keyInput.trim();
@@ -70,27 +77,55 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
     setProvider('google');
     try { localStorage.setItem('locwarp.geocode_provider', 'google'); }
     catch { /* ignore */ }
-    syncToBackend('google', trimmed);
+    syncToBackend('google', trimmed, arcgisKey);
     setShowSettings(false);
-  }, [keyInput, syncToBackend]);
+  }, [arcgisKey, keyInput, syncToBackend]);
 
   const clearGoogleKey = useCallback(() => {
     setGoogleKey('');
     setKeyInput('');
     try { localStorage.removeItem('locwarp.google_geocode_key'); }
     catch { /* ignore */ }
-    persistProvider('nominatim');
-  }, [persistProvider]);
+    setProvider('nominatim');
+    try { localStorage.setItem('locwarp.geocode_provider', 'nominatim'); }
+    catch { /* ignore */ }
+    syncToBackend('nominatim', '', arcgisKey);
+  }, [arcgisKey, syncToBackend]);
+
+  const saveArcgisKey = useCallback(() => {
+    const trimmed = arcgisKeyInput.trim();
+    if (!trimmed) return;
+    setArcgisKey(trimmed);
+    try { localStorage.setItem('locwarp.arcgis_geocode_key', trimmed); }
+    catch { /* ignore */ }
+    setProvider('arcgis');
+    try { localStorage.setItem('locwarp.geocode_provider', 'arcgis'); }
+    catch { /* ignore */ }
+    syncToBackend('arcgis', googleKey, trimmed);
+    setShowSettings(false);
+  }, [arcgisKeyInput, googleKey, syncToBackend]);
+
+  const clearArcgisKey = useCallback(() => {
+    setArcgisKey('');
+    setArcgisKeyInput('');
+    try { localStorage.removeItem('locwarp.arcgis_geocode_key'); }
+    catch { /* ignore */ }
+    setProvider('nominatim');
+    try { localStorage.setItem('locwarp.geocode_provider', 'nominatim'); }
+    catch { /* ignore */ }
+    syncToBackend('nominatim', googleKey, '');
+  }, [googleKey, syncToBackend]);
 
   // On mount, push the currently-saved choice to the backend in case the
   // user previously picked Google/Photon before this sync existed (or the
   // backend's settings.json got reset).
   useEffect(() => {
-    syncToBackend(provider, googleKey);
+    syncToBackend(provider, googleKey, arcgisKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const doSearch = useCallback(async (q: string) => {
+    const requestId = ++searchRequestRef.current;
     if (q.trim().length < 2) {
       setResults([]);
       setShowResults(false);
@@ -102,6 +137,7 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
     setSearchError(null);
     try {
       const raw = await searchAddress(q);
+      if (requestId !== searchRequestRef.current) return;
       const mapped = (Array.isArray(raw) ? raw : []).map((r: any) => ({
         name: r.display_name || r.name || '',
         lat: r.lat,
@@ -111,24 +147,28 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
       setResults(mapped);
       setShowResults(true);
     } catch (err: any) {
+      if (requestId !== searchRequestRef.current) return;
       console.error('Search failed:', err);
       setResults([]);
       const msg = err?.message || String(err);
       setSearchError(msg.length > 200 ? msg.slice(0, 200) + '…' : msg);
       setShowResults(true);
     } finally {
-      setIsLoading(false);
+      if (requestId === searchRequestRef.current) setIsLoading(false);
     }
   }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setQuery(value);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => doSearch(value), 300);
+    searchRequestRef.current += 1;
+    setIsLoading(false);
+    setShowResults(false);
+    setSearchError(null);
+    setQuery(e.target.value);
   };
 
   const handleSelect = (result: SearchResult) => {
+    searchRequestRef.current += 1;
+    setIsLoading(false);
     setQuery(result.name);
     setShowResults(false);
     onSelect(result.lat, result.lng, result.name);
@@ -140,6 +180,8 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
       if (containerRef.current && !containerRef.current.contains(target)) {
+        searchRequestRef.current += 1;
+        setIsLoading(false);
         setShowResults(false);
       }
     };
@@ -147,25 +189,24 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
+  useEffect(() => () => { searchRequestRef.current += 1; }, []);
 
   const isGoogleActive = provider === 'google' && !!googleKey;
+  const isArcgisActive = provider === 'arcgis' && !!arcgisKey;
   const isPhotonActive = provider === 'photon';
-  // Pill style + label for the three active providers. Free-tier ones
-  // (Nominatim, Photon) share a muted look; Google uses its brand blue
-  // to make the "paid key in use" state visible at a glance.
+  // Show keyed providers with a distinct pill so their active state is clear.
   const pillLabel = isGoogleActive
     ? 'Google'
-    : isPhotonActive
+    : isArcgisActive
+      ? 'ArcGIS'
+      : isPhotonActive
       ? 'Photon'
       : 'Nominatim';
   const pillTitleKey = isGoogleActive
     ? 'search.settings_btn_google'
-    : isPhotonActive
+    : isArcgisActive
+      ? 'search.settings_btn_arcgis'
+      : isPhotonActive
       ? 'search.settings_btn_photon'
       : 'search.settings_btn_free';
 
@@ -179,6 +220,12 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
             placeholder={t('search.placeholder')}
             value={query}
             onChange={handleInputChange}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void doSearch(query);
+              }
+            }}
             onFocus={() => { if (results.length > 0) setShowResults(true); }}
             style={{ width: '100%', paddingRight: 30 }}
           />
@@ -195,15 +242,26 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
           </svg>
         </div>
         <button
-          onClick={() => { setKeyInput(googleKey); setShowSettings(true); }}
+          type="button"
+          className="action-btn"
+          onClick={() => { void doSearch(query); }}
+          disabled={isLoading || query.trim().length < 2}
+          title={t('search.submit')}
+          style={{ height: 28, padding: '0 9px', whiteSpace: 'nowrap', fontSize: 11 }}
+        >
+          {t('search.submit')}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setKeyInput(googleKey); setArcgisKeyInput(arcgisKey); setShowSettings(true); }}
           title={t(pillTitleKey)}
           style={{
             display: 'flex', alignItems: 'center', gap: 4,
             padding: '0 10px',
-            background: isGoogleActive ? 'rgba(66, 133, 244, 0.18)' : 'rgba(255, 255, 255, 0.06)',
-            border: `1px solid ${isGoogleActive ? 'rgba(66, 133, 244, 0.55)' : 'rgba(255, 255, 255, 0.16)'}`,
+            background: isGoogleActive || isArcgisActive ? 'rgba(66, 133, 244, 0.18)' : 'rgba(255, 255, 255, 0.06)',
+            border: `1px solid ${isGoogleActive || isArcgisActive ? 'rgba(66, 133, 244, 0.55)' : 'rgba(255, 255, 255, 0.16)'}`,
             borderRadius: 4,
-            color: isGoogleActive ? '#9ac0ff' : '#c8cad2',
+            color: isGoogleActive || isArcgisActive ? '#9ac0ff' : '#c8cad2',
             fontSize: 11,
             fontWeight: 600,
             cursor: 'pointer',
@@ -214,8 +272,8 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
           <span
             style={{
               width: 6, height: 6, borderRadius: '50%',
-              background: isGoogleActive ? '#4285f4' : '#9499ac',
-              boxShadow: isGoogleActive ? '0 0 6px rgba(66, 133, 244, 0.8)' : 'none',
+              background: isGoogleActive || isArcgisActive ? '#4285f4' : '#9499ac',
+              boxShadow: isGoogleActive || isArcgisActive ? '0 0 6px rgba(66, 133, 244, 0.8)' : 'none',
             }}
           />
           {pillLabel}
@@ -345,6 +403,104 @@ const AddressSearch: React.FC<AddressSearchProps> = ({ onSelect }) => {
                 </div>
               </div>
             </label>
+
+            {/* ArcGIS is opt-in and requires the user's API key. */}
+            <div
+              style={{
+                padding: '12px 14px',
+                borderRadius: 8,
+                background: provider === 'arcgis' ? 'rgba(108, 140, 255, 0.10)' : 'rgba(255, 255, 255, 0.02)',
+                border: `1px solid ${provider === 'arcgis' ? 'rgba(108, 140, 255, 0.32)' : 'rgba(255, 255, 255, 0.06)'}`,
+                marginBottom: 10,
+              }}
+            >
+              <label
+                style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: arcgisKey ? 'pointer' : 'default' }}
+                onClick={() => { if (arcgisKey) persistProvider('arcgis'); }}
+              >
+                <input
+                  type="radio"
+                  name="geocode-provider-modal"
+                  checked={provider === 'arcgis'}
+                  onChange={() => { if (arcgisKey) persistProvider('arcgis'); }}
+                  disabled={!arcgisKey}
+                  style={{ marginTop: 3, accentColor: '#6c8cff' }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13.5 }}>
+                    {t('search.provider_arcgis_label')}
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.72, marginTop: 4, lineHeight: 1.55 }}>
+                    {t('search.provider_arcgis_desc')}
+                  </div>
+                  {arcgisKey && (
+                    <div style={{ fontSize: 11, color: 'var(--accent-green)', marginTop: 6 }}>
+                      {t('search.key_saved_hint', { tail: arcgisKey.slice(-4) })}
+                    </div>
+                  )}
+                </div>
+              </label>
+              <div style={{ margin: '10px 0 0 27px', display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12 }}>
+                <a
+                  href="https://location.arcgis.com/sign-up/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#9ac0ff', textDecoration: 'underline' }}
+                >{t('search.arcgis_signup')}</a>
+                <a
+                  href="https://developers.arcgis.com/documentation/security-and-authentication/api-key-authentication/tutorials/create-an-api-key/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#9ac0ff', textDecoration: 'underline' }}
+                >{t('search.arcgis_key_help')}</a>
+              </div>
+              <div style={{ fontSize: 12, color: '#ffba6b', margin: '10px 0 0 27px', lineHeight: 1.55 }}>
+                {t('search.arcgis_usage_hint')}
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.72, margin: '8px 0 0 27px', lineHeight: 1.55 }}>
+                {t('search.privacy_hint')}
+              </div>
+              <div style={{ margin: '12px 0 0 27px' }}>
+                <div style={{ fontSize: 11, color: '#9499ac', marginBottom: 6, fontWeight: 600 }}>
+                  {t('search.api_key_label')}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="password"
+                    value={arcgisKeyInput}
+                    onChange={(e) => setArcgisKeyInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveArcgisKey(); } }}
+                    placeholder="AAPT..."
+                    spellCheck={false}
+                    autoComplete="off"
+                    style={{
+                      flex: 1, padding: '8px 10px', fontSize: 13, fontFamily: 'monospace',
+                      background: 'rgba(12, 15, 26, 0.85)', color: '#e8eaf0',
+                      border: '1px solid rgba(108, 140, 255, 0.35)', borderRadius: 6, outline: 'none',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={saveArcgisKey}
+                    disabled={!arcgisKeyInput.trim()}
+                    className="action-btn primary"
+                    style={{ fontSize: 12, padding: '0 16px' }}
+                  >{t('search.save_key')}</button>
+                </div>
+                {arcgisKey && (
+                  <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, opacity: 0.55 }}>
+                      {t('search.key_saved_hint', { tail: arcgisKey.slice(-4) })}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={clearArcgisKey}
+                      style={{ background: 'transparent', border: 'none', color: '#ff8a8a', cursor: 'pointer', fontSize: 11, padding: 0, textDecoration: 'underline' }}
+                    >{t('search.clear_key')}</button>
+                  </div>
+                )}
+              </div>
+            </div>
 
             {/* Google option */}
             <div

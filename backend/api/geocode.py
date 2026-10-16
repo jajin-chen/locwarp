@@ -1,7 +1,7 @@
 import logging
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from models.schemas import (
@@ -33,7 +33,8 @@ async def search_address(
     q: str,
     limit: int = 5,
     provider: str = "nominatim",
-    google_key: str | None = None,
+    google_key: str | None = Header(default=None, alias="X-LocWarp-Google-Key"),
+    arcgis_key: str | None = Header(default=None, alias="X-LocWarp-ArcGIS-Key"),
 ):
     """Forward geocode.
 
@@ -42,7 +43,7 @@ async def search_address(
     komoot.io), or ``google`` (requires `google_key`, 10k events/month
     free tier on Google's Essentials plan).
     """
-    return await geocoding_service.search(q, limit, provider, google_key)
+    return await geocoding_service.search(q, limit, provider, google_key, arcgis_key)
 
 
 @router.get("/reverse", response_model=GeocodingResult | None)
@@ -51,8 +52,10 @@ async def reverse_geocode(lat: float, lng: float):
 
 
 class ProviderPref(BaseModel):
-    provider: str = Field(pattern="^(nominatim|photon|google)$")
-    google_key: str = ""
+    provider: str = Field(pattern="^(arcgis|nominatim|photon|google)$")
+    # None leaves a stored key alone; an empty string clears it.
+    google_key: str | None = None
+    arcgis_key: str | None = None
 
 
 @router.get("/provider-pref")
@@ -64,6 +67,7 @@ async def get_provider_pref():
     return {
         "provider": app_state._geocode_provider,
         "has_google_key": bool(app_state._google_geocode_key),
+        "has_arcgis_key": bool(app_state._arcgis_geocode_key),
     }
 
 
@@ -74,13 +78,11 @@ async def set_provider_pref(pref: ProviderPref):
     phone/geocode."""
     from main import app_state
     app_state._geocode_provider = pref.provider
-    # Only overwrite the stored key when one is supplied so the user can
-    # toggle Google off / on without re-entering it.
-    if pref.google_key:
+    # None keeps a stored key; an explicit empty string clears it.
+    if pref.google_key is not None:
         app_state._google_geocode_key = pref.google_key.strip()
-    elif pref.provider != "google":
-        # Allow explicit clear when switching away from google.
-        pass
+    if pref.arcgis_key is not None:
+        app_state._arcgis_geocode_key = pref.arcgis_key.strip()
     app_state.save_settings()
     return {"ok": True}
 

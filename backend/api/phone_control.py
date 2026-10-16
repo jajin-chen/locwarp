@@ -627,11 +627,22 @@ async def phone_geocode(
     from main import app_state
     provider = app_state._geocode_provider or "nominatim"
     google_key = app_state._google_geocode_key or None
+    arcgis_key = app_state._arcgis_geocode_key or None
     if provider == "google" and not google_key:
         provider = "nominatim"  # safety fallback if key got cleared
+    if provider == "arcgis" and not arcgis_key:
+        provider = "nominatim"  # ArcGIS requires an API key
     svc = GeocodingService()
     try:
-        results = await svc.search(q, limit=8, provider=provider, google_key=google_key)
+        results = await svc.search(
+            q,
+            limit=8,
+            provider=provider,
+            google_key=google_key,
+            arcgis_key=arcgis_key,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("phone geocode failed (provider=%s): %s", provider, e)
         raise HTTPException(status_code=500, detail=str(e))

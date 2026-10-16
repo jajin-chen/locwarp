@@ -66,6 +66,7 @@ class AppState:
         # the backend, not the renderer) can honour the same choice.
         self._geocode_provider: str = "nominatim"
         self._google_geocode_key: str = ""
+        self._arcgis_geocode_key: str = ""
         # WiFi tunnel keep-alive: re-push the current simulated location to
         # idle Network tunnels so iOS doesn't drop the RSD socket when the
         # phone screen turns off. Default ON; user can toggle in the panel.
@@ -92,11 +93,14 @@ class AppState:
             if isinstance(bmExp, list):
                 self._bookmark_expanded_categories = [str(x) for x in bmExp]
             gp = data.get("geocode_provider")
-            if isinstance(gp, str) and gp in ("nominatim", "photon", "google"):
+            if isinstance(gp, str) and gp in ("arcgis", "nominatim", "photon", "google"):
                 self._geocode_provider = gp
             gk = data.get("google_geocode_key")
             if isinstance(gk, str):
                 self._google_geocode_key = gk
+            ak = data.get("arcgis_geocode_key")
+            if isinstance(ak, str):
+                self._arcgis_geocode_key = ak
             ka = data.get("wifi_keepalive_enabled")
             if isinstance(ka, bool):
                 self._wifi_keepalive_enabled = ka
@@ -112,6 +116,7 @@ class AppState:
             "bookmark_expanded_categories": self._bookmark_expanded_categories,
             "geocode_provider": self._geocode_provider,
             "google_geocode_key": self._google_geocode_key,
+            "arcgis_geocode_key": self._arcgis_geocode_key,
             "wifi_keepalive_enabled": self._wifi_keepalive_enabled,
         }
         safe_write_json(SETTINGS_FILE, data)

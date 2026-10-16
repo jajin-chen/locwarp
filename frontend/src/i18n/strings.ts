@@ -688,12 +688,25 @@ export const STRINGS = {
 
   // ── Address search ───────────────────────────
   'search.placeholder': { zh: '搜尋地址...', en: 'Search address...' },
+  'search.submit': { zh: '搜尋', en: 'Search' },
   'search.searching': { zh: '搜尋中...', en: 'Searching...' },
   'search.no_results': { zh: '無搜尋結果', en: 'No results' },
   'search.settings_title': { zh: '地址搜尋來源', en: 'Search provider' },
+  'search.settings_btn_arcgis': { zh: '搜尋來源:ArcGIS (點擊設定)', en: 'Provider: ArcGIS (click to configure)' },
   'search.settings_btn_free': { zh: '搜尋來源:免費版 Nominatim (點擊設定)', en: 'Provider: Free Nominatim (click to configure)' },
   'search.settings_btn_photon': { zh: '搜尋來源:免費版 Photon (點擊設定)', en: 'Provider: Free Photon (click to configure)' },
   'search.settings_btn_google': { zh: '搜尋來源:Google (點擊設定)', en: 'Provider: Google (click to configure)' },
+  'search.provider_arcgis_label': { zh: 'ArcGIS World Geocoding', en: 'ArcGIS World Geocoding' },
+  'search.provider_arcgis_desc': {
+    zh: '需自備 ArcGIS API Key 並啟用 Geocoding 權限。服務無法使用時會改用 Photon。',
+    en: 'Requires your ArcGIS API key with the Geocoding privilege. Falls back to Photon if unavailable.',
+  },
+  'search.arcgis_signup': { zh: '申請 ArcGIS 帳號', en: 'Create an ArcGIS account' },
+  'search.arcgis_key_help': { zh: 'API Key 建立說明', en: 'API key setup guide' },
+  'search.arcgis_usage_hint': {
+    zh: 'ArcGIS API 使用量依你的帳戶方案計算;超出免費額度可能產生費用。請在 ArcGIS 帳戶設定用量限制。',
+    en: 'ArcGIS usage follows your account plan; requests beyond its free allowance may incur charges. Set usage limits in your ArcGIS account.',
+  },
   'search.provider_free_label': { zh: '免費版 (Nominatim)', en: 'Free (Nominatim)' },
   'search.provider_free_desc': {
     zh: '全球 OSM 開放資料,不用 API Key,精準度普通 (台灣巷弄、新建社區命中率較低)',
@@ -710,8 +723,8 @@ export const STRINGS = {
     en: 'Global street-level accuracy. Requires your own Google Cloud API Key.',
   },
   'search.privacy_hint': {
-    zh: 'Key 只保存在本機 localStorage,不會上傳到任何伺服器',
-    en: 'Key is stored only in local localStorage and never uploaded to any server',
+    zh: 'Key 會保存在本機並同步至 LocWarp 後端設定供手機搜尋使用;搜尋時會傳送至所選服務商。請勿輸入不信任的 Key。',
+    en: 'Keys are stored locally and synced to LocWarp backend settings for phone search; searches send them to the selected provider. Enter only keys you trust.',
   },
   'search.signup_label': { zh: '申請 Geocoding API', en: 'Get Geocoding API key' },
   'search.provider_google_quota_hint': {
