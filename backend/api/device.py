@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from models.schemas import DeviceInfo
 from core.windows_tunnel import HostTunnelError
 from services.tunnel_discovery import (
+    _get_primary_local_ip,
     _scan_ports_for_ip,
     discover_tunnel_candidates,
     filter_remotepairing_ports,
@@ -1652,6 +1653,20 @@ async def wifi_tunnel_keepalive_set(req: WifiKeepaliveRequest):
     except Exception:
         pass  # best-effort persist; never fail the toggle
     return {"enabled": app_state._wifi_keepalive_enabled}
+
+
+@router.get("/wifi/host-network")
+async def wifi_host_network():
+    """Return the host IPv4 and the /24 prefix used by tunnel discovery.
+
+    This prefix is a coarse network hint, not an interface/netmask lookup.
+    The frontend uses it as a best-effort filter for saved addresses. When it
+    cannot determine the prefix, all saved candidates remain eligible.
+    """
+    ip = _get_primary_local_ip()
+    parts = ip.split(".") if ip else []
+    prefix = ".".join(parts[:3]) if len(parts) == 4 else None
+    return {"ip": ip, "prefix": prefix}
 
 
 # ── Generic UDID routes (MUST be defined after all specific /wifi/* routes

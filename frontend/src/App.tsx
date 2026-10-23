@@ -14,7 +14,8 @@ import * as api from './services/api'
 import { parseCoord } from './utils/coords'
 import { useWaypointEditing, clampLat, normalizeLng } from './hooks/useWaypointEditing'
 import { buildAutoConnectCandidates, pinnedUdidsNeedingRetry } from './utils/autoConnect'
-import { readSavedIps, removeSavedIpByUdid, writeSavedIps } from './utils/savedIps'
+import { prefixOfIp, readSavedIps, removeSavedIpByUdid, savedIpsForPrefix, writeSavedIps } from './utils/savedIps'
+import { getHostNetworkPrefix } from './utils/hostNetwork'
 
 import MapView from './components/MapView'
 import ControlPanel from './components/ControlPanel'
@@ -246,28 +247,25 @@ const App: React.FC = () => {
     if (!ws.connected) return
     if (wifiAutoConnectAttemptedRef.current) return
     let enabled: boolean
-    let savedList: Array<{ ip: string; port: number; udid?: string }> = []
+    let savedList: Array<{ ip: string; port: number; udid?: string; prefix?: string }> = []
     try {
       enabled = localStorage.getItem('locwarp.tunnel.autoconnect') !== '0'
-      const raw = localStorage.getItem('locwarp.tunnel.savedips') || '[]'
       try {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) {
-          savedList = parsed
-            .filter((e) => e && typeof e.ip === 'string' && e.ip.trim())
-            .map((e) => ({
-              ip: String(e.ip).trim(),
-              port: Number(e.port) || 49152,
-              udid: typeof e.udid === 'string' && e.udid ? e.udid : undefined,
-            }))
-        }
+        savedList = readSavedIps()
+          .filter((e) => typeof e.ip === 'string' && e.ip.trim())
+          .map((e) => ({
+            ip: String(e.ip).trim(),
+            port: Number(e.port) || 49152,
+            udid: typeof e.udid === 'string' && e.udid ? e.udid : undefined,
+            prefix: e.prefix,
+          }))
       } catch { /* ignore — fall back to legacy below */ }
       // Legacy single-IP fallback for upgraders.
       if (savedList.length === 0) {
         const legacyIp = (localStorage.getItem('locwarp.tunnel.ip') || '').trim()
         if (legacyIp) {
           const portStr = localStorage.getItem('locwarp.tunnel.port') || '49152'
-          savedList = [{ ip: legacyIp, port: parseInt(portStr, 10) || 49152 }]
+          savedList = [{ ip: legacyIp, port: parseInt(portStr, 10) || 49152, prefix: prefixOfIp(legacyIp) }]
         }
       }
     } catch {
@@ -320,6 +318,12 @@ const App: React.FC = () => {
           // pinned phone isn't mistaken for an unpinned stranger and kicked.
           const pinnedUdidsLc = pinnedUdids.map((u) => u.toLowerCase())
 
+          // Filter only saved endpoints. Discovery still runs on every
+          // launch and identity verification below remains authoritative.
+          // The host prefix is a coarse /24 hint; null means keep all entries.
+          const hostPrefix = await getHostNetworkPrefix()
+          const savedForCurrentNetwork = savedIpsForPrefix(savedList, hostPrefix)
+
           let discovered: Array<{ ip: string; port: number; ports?: number[] }> = []
           try {
             const dres = await api.wifiTunnelDiscover()
@@ -333,7 +337,7 @@ const App: React.FC = () => {
           } catch { /* discover failed — saved entries still try */ }
 
           const candidates = buildAutoConnectCandidates({
-            saved: savedList,
+            saved: savedForCurrentNetwork,
             discovered,
             pinnedUdids,
             alreadyTunneled,

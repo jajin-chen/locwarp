@@ -161,6 +161,8 @@ export const wifiRepair = () => request<{ status: string; udid: string; name: st
 export const wifiKeepaliveGet = () => request<{ enabled: boolean }>('GET', '/api/device/wifi/tunnel/keepalive')
 export const wifiKeepaliveSet = (enabled: boolean) =>
   request<{ enabled: boolean }>('POST', '/api/device/wifi/tunnel/keepalive', { enabled })
+export const wifiHostNetwork = () =>
+  request<{ ip: string | null; prefix: string | null }>('GET', '/api/device/wifi/host-network')
 export const amfiRevealDeveloperMode = (udid: string) =>
   request<{ status: string }>('POST', `/api/device/${encodeURIComponent(udid)}/amfi/reveal-developer-mode`)
 

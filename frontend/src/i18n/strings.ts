@@ -299,6 +299,7 @@ export const STRINGS = {
   'wifi.ip_required_for_scan': { zh: '請先手動填入 IP', en: 'Please enter the iPhone IP first' },
   'wifi.tunnel_stop': { zh: 'Stop Tunnel', en: 'Stop Tunnel' },
   'wifi.recent_ips_button': { zh: '最近 {n}', en: 'Recent {n}' },
+  'wifi.recent_ips_other_network': { zh: '其他網路 ({n})', en: 'Other networks ({n})' },
   'wifi.recent_ips_tooltip': {
     zh: '從最近連線過的 IP 直接挑一個帶回欄位,免重打',
     en: 'Pick a recently used IP — fills the field without retyping',

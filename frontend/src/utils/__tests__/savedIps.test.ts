@@ -20,13 +20,13 @@ describe('upsertSavedIp', () => {
     expect(next[0].udid).toBe('U2')
   })
 
-  test('caps the ring buffer at 5 entries', () => {
+  test('caps the saved address list at 10 entries', () => {
     let list: SavedIpEntry[] = []
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 11; i++) {
       list = upsertSavedIp(list, entry({ ip: `192.168.1.${10 + i}`, udid: `U${i}`, lastUsed: i }))
     }
-    expect(list).toHaveLength(5)
-    expect(list[0].udid).toBe('U5')
+    expect(list).toHaveLength(10)
+    expect(list[0].udid).toBe('U10')
   })
 
   test('does not mutate the input list', () => {

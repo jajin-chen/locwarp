@@ -5,8 +5,17 @@ import {
   type TunnelInfo,
 } from '../services/api'
 import type { WsMessage } from './useWebSocket'
-import { readSavedIps, removeSavedIpByUdid, upsertSavedIp, writeSavedIps } from '../utils/savedIps'
+import {
+  prefixOfIp,
+  readSavedIps,
+  removeSavedIpForNetwork,
+  removeSavedIpByUdid,
+  savedIpsForPrefix,
+  upsertSavedIp,
+  writeSavedIps,
+} from '../utils/savedIps'
 import { classifyPinAttempt } from '../utils/autoConnect'
+import { getHostNetworkPrefix } from '../utils/hostNetwork'
 
 export interface DeviceInfo {
   udid: string
@@ -218,26 +227,24 @@ export function useDevice(subscribe?: WsSubscribe) {
     delete pinRetryRounds.current[key]
   }, [])
 
-  const readSavedEntryFor = (udid: string): { ip: string; port: number; ports?: number[] } | null => {
-    try {
-      const arr = JSON.parse(localStorage.getItem('locwarp.tunnel.savedips') || '[]')
-      if (!Array.isArray(arr)) return null
-      // Case-insensitive: savedips entries can be written under a
-      // different-case udid than the one the retry loop is chasing (see
-      // schedulePinReconnect). A strict match here silently skipped the
-      // direct-reconnect attempt on every round and fell straight through
-      // to the heavy discover fallback, turning the ~45s full-network-scan
-      // cadence into every ~15s.
-      const udidLc = udid.toLowerCase()
-      const hit = arr.find((e: any) => e && typeof e.udid === 'string' && e.udid.toLowerCase() === udidLc && typeof e.ip === 'string')
-      if (hit) {
-        const ports = Array.isArray(hit.ports)
-          ? hit.ports.map(Number).filter((p: number) => Number.isInteger(p) && p > 0 && p <= 65535)
-          : undefined
-        return { ip: hit.ip, port: Number(hit.port) || 49152, ...(ports?.length ? { ports } : {}) }
-      }
-    } catch { /* ignore */ }
-    return null
+  const readSavedEntryFor = (udid: string, prefix: string | null): { ip: string; port: number; ports?: number[]; prefix?: string } | null => {
+    // Keep the case-insensitive identity match and only try an address from
+    // this network when Windows can provide a prefix. Unknown network state
+    // deliberately falls back to the saved list, followed by the existing
+    // verified discovery path if that address is stale.
+    const udidLc = udid.toLowerCase()
+    const hit = savedIpsForPrefix(readSavedIps(), prefix)
+      .find((entry) => typeof entry.udid === 'string' && entry.udid.toLowerCase() === udidLc)
+    if (!hit) return null
+    const ports = Array.isArray(hit.ports)
+      ? hit.ports.map(Number).filter((p) => Number.isInteger(p) && p > 0 && p <= 65535)
+      : undefined
+    return {
+      ip: hit.ip,
+      port: Number(hit.port) || 49152,
+      ...(ports?.length ? { ports } : {}),
+      prefix: hit.prefix,
+    }
   }
 
   const schedulePinReconnect = useCallback((udid: string, delayMs = 5000) => {
@@ -283,9 +290,12 @@ export function useDevice(subscribe?: WsSubscribe) {
           [...liveTunnels, ...tunnelsRef.current].some((tn) =>
             tn.udid.toLowerCase() !== udidLc && tn.ip === ip,
           )
-        let entry = readSavedEntryFor(udid)
+        const isStillPinned = () =>
+          pinnedRef.current.some((u) => u.toLowerCase() === udidLc)
+        const hostPrefix = await getHostNetworkPrefix()
+        let entry = readSavedEntryFor(udid, hostPrefix)
         if (entry && ownedByAnotherDevice(entry.ip)) {
-          writeSavedIps(removeSavedIpByUdid(readSavedIps(), udid))
+          writeSavedIps(removeSavedIpForNetwork(readSavedIps(), udid, entry.prefix))
           entry = null
         }
         const failures = pinRetryFailures.current[udidLc] ?? 0
@@ -303,6 +313,7 @@ export function useDevice(subscribe?: WsSubscribe) {
           // 'failed' rather than being mistaken for success.
           let info: { udid: string } | null | undefined
           try {
+            if (!isStillPinned()) return
             info = entry.ports?.length
               ? await startWifiTunnelRef.current?.(entry.ip, entry.port, udid, entry.ports)
               : await startWifiTunnelRef.current?.(entry.ip, entry.port, udid)
@@ -340,7 +351,7 @@ export function useDevice(subscribe?: WsSubscribe) {
             // makes the next round's readSavedEntryFor return null and
             // fall straight to the discover branch below, which re-finds
             // udid's real, current endpoint instead of repeating this.
-            writeSavedIps(removeSavedIpByUdid(readSavedIps(), udid))
+            writeSavedIps(removeSavedIpForNetwork(readSavedIps(), udid, entry.prefix))
           }
           // 'other-pinned' reached a keeper for its own owner — leave its
           // tunnel up (no stopTunnel call: it's the user's own device and
@@ -355,7 +366,7 @@ export function useDevice(subscribe?: WsSubscribe) {
           // verified after connect (drop anything not pinned).
           try {
             if (hostTunnelErrorRef.current) return
-            const dres = await wifiTunnelDiscover()
+            const dres = await wifiTunnelDiscover().catch(() => ({ devices: [] }))
             // Discovery can take tens of seconds; another device may have
             // recovered while it was running. Revalidate ownership before
             // using the returned endpoints.
@@ -367,6 +378,7 @@ export function useDevice(subscribe?: WsSubscribe) {
               return
             }
             for (const d of dres?.devices || []) {
+              if (!isStillPinned()) return
               if (hostTunnelErrorRef.current) return
               if (ownedByAnotherDevice(String(d.ip))) continue
               if (tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)) break
@@ -417,6 +429,68 @@ export function useDevice(subscribe?: WsSubscribe) {
               // A different pinned device ('other-pinned') is a keeper;
               // keep looking for ours among the remaining candidates.
             }
+
+            // The host prefix is only a /24 default-route hint. If that
+            // heuristic is wrong (for example, a VPN owns the default
+            // route), discovery can miss a still-valid address saved from
+            // another network. After the current-network discovery pass,
+            // try at most one other saved address for this pinned UDID.
+            // Keep the same endpoint-ownership and post-handshake identity
+            // checks used for every other automatic reconnect attempt.
+            if (
+              !hostTunnelErrorRef.current
+              && !tunnelsRef.current.some((tn) => tn.udid.toLowerCase() === udidLc)
+            ) {
+              const fallbackStatus = await wifiTunnelStatus().catch(() => null)
+              if (!fallbackStatus) return
+              liveTunnels = Array.isArray(fallbackStatus.tunnels) ? fallbackStatus.tunnels : []
+              if (liveTunnels.some((tn) => tn.udid.toLowerCase() === udidLc)) {
+                reconnected = true
+                return
+              }
+              if (!isStillPinned()) return
+              const fallbackEntry = readSavedIps().find((saved) =>
+                typeof saved.udid === 'string'
+                && saved.udid.toLowerCase() === udidLc
+                && (!entry || saved.ip !== entry.ip || saved.port !== entry.port)
+                && (hostPrefix
+                  ? Boolean(saved.prefix) && saved.prefix !== hostPrefix
+                  : true),
+              )
+              if (fallbackEntry && !ownedByAnotherDevice(fallbackEntry.ip)) {
+                let info: { udid: string } | null | undefined
+                const ports = Array.isArray(fallbackEntry.ports)
+                  ? fallbackEntry.ports.map(Number).filter((p) => Number.isInteger(p) && p > 0 && p <= 65535)
+                  : []
+                try {
+                  info = ports.length > 0
+                    ? await startWifiTunnelRef.current?.(
+                      fallbackEntry.ip, Number(fallbackEntry.port) || 49152, udid, ports,
+                    )
+                    : await startWifiTunnelRef.current?.(
+                      fallbackEntry.ip, Number(fallbackEntry.port) || 49152, udid,
+                    )
+                } catch {
+                  info = null
+                }
+                const outcome = classifyPinAttempt({
+                  targetUdid: udid,
+                  resultUdid: info?.udid,
+                  pinnedUdids: pinnedRef.current,
+                })
+                if (outcome === 'reconnected') {
+                  reconnected = true
+                  return
+                }
+                if (outcome === 'stranger' && info?.udid) {
+                  await stopTunnelRef.current?.(info.udid)
+                  writeSavedIps(removeSavedIpByUdid(readSavedIps(), info.udid))
+                }
+                if (outcome === 'stranger' || outcome === 'other-pinned') {
+                  writeSavedIps(removeSavedIpForNetwork(readSavedIps(), udid, fallbackEntry.prefix))
+                }
+              }
+            }
           } catch { /* discover failed — retry cycle continues below */ }
           pinRetryFailures.current[udidLc] = 0 // next cycle starts with the saved entry again
         }
@@ -464,7 +538,7 @@ export function useDevice(subscribe?: WsSubscribe) {
       } else {
         // Save last known IP when pinning so startup auto-connect can
         // filter to pinned devices only (issue #35).
-        const entry = readSavedEntryFor(udid)
+        const entry = readSavedEntryFor(udid, null)
         if (entry) {
           try {
             const map = JSON.parse(localStorage.getItem(PIN_IP_MAP_KEY) || '{}')
@@ -501,6 +575,7 @@ export function useDevice(subscribe?: WsSubscribe) {
             ip: String(msg.data.ip),
             port: Number(msg.data.port) || 49152,
             udid,
+            prefix: prefixOfIp(String(msg.data.ip)),
             lastUsed: Date.now(),
           }))
         }
@@ -594,24 +669,16 @@ export function useDevice(subscribe?: WsSubscribe) {
         // manually clicked through. v0.2.110 bug surfaced when a user
         // with two iPhones only had one of them in savedips.
         try {
-          const raw = localStorage.getItem('locwarp.tunnel.savedips') || '[]'
-          const list = (() => {
-            try { return JSON.parse(raw) as Array<{ ip: string; port: number; udid?: string; name?: string; lastUsed: number }> }
-            catch { return [] }
-          })()
-          const baseList = Array.isArray(list) ? list : []
-          // Dedup by both (ip, port) AND by udid — covers the case where
-          // an iPhone reconnects on a NEW DHCP-assigned IP. Without the
-          // udid dedup we'd accumulate stale IPs for the same device.
-          const filtered = baseList.filter((e) =>
-            e && !(e.ip === ip && (e.port === port || e.port === usedPort))
-            && !(res.udid && e.udid === res.udid)
-          )
-          // Persist the device name too so the panel can keep showing the
-          // real phone name after a WiFi drop instead of a raw UDID
-          // (issue #33).
-          const next = [{ ip, port: usedPort, udid: res.udid, name: res.name, lastUsed: Date.now() }, ...filtered].slice(0, 5)
-          localStorage.setItem('locwarp.tunnel.savedips', JSON.stringify(next))
+          // Retain one successful endpoint per device and /24 network, so
+          // moving between Wi-Fi networks does not erase the old address.
+          writeSavedIps(upsertSavedIp(readSavedIps(), {
+            ip,
+            port: usedPort,
+            udid: res.udid,
+            name: res.name,
+            prefix: prefixOfIp(ip),
+            lastUsed: Date.now(),
+          }))
         } catch { /* storage disabled */ }
         // A successful connect clears any pending pin-retry for this device.
         clearPinRetry(res.udid)
