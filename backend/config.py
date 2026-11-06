@@ -39,7 +39,7 @@ BROUTER_BASE_URL = "https://brouter.de"
 
 # App version — single source of truth for backend User-Agent strings.
 # Keep in sync with frontend/package.json "version".
-APP_VERSION = "0.2.203"
+APP_VERSION = "0.2.204"
 
 # Nominatim
 NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org"
