@@ -23,6 +23,7 @@ const api = vi.hoisted(() => ({
   wifiTunnelStatus: vi.fn(async () => ({ tunnels: [], running: false })),
   wifiTunnelStop: vi.fn(async () => ({ status: 'stopped' })),
   wifiTunnelDiscover: vi.fn(async (): Promise<{ devices: Array<{ ip: string; port: number }> }> => ({ devices: [] })),
+  wifiHostNetwork: vi.fn(async () => ({ ip: '192.168.1.1', prefix: '192.168.1' })),
 }))
 
 vi.mock('../../services/api', () => api)
@@ -281,7 +282,7 @@ test('protects phones recovering while discovery is pending, including websocket
   await act(async () => {
     finishDiscovery({ devices: [{ ip: '192.168.1.20', port: 52001 }, { ip: '192.168.1.30', port: 53001 }] })
   })
-  expect(api.wifiTunnelStatus).toHaveBeenCalledTimes(2)
+  expect(api.wifiTunnelStatus).toHaveBeenCalledTimes(3)
   expect(api.wifiTunnelStartAndConnect).not.toHaveBeenCalled()
   expect(api.wifiTunnelStop).not.toHaveBeenCalled()
 })
