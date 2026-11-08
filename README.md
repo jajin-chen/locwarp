@@ -514,6 +514,7 @@ locwarp/
 | 症狀 | 可能原因 / 解法 |
 | --- | --- |
 | Tunnel 啟動後 backend 連不上 | 確認以系統管理員身份啟動 |
+| port 掃描提示「每個 port 都有回應」 | VPN 或代理軟體正在攔截連線,關閉後再試。開著 VPN 時「自動偵測」也可能找不到裝置 |
 | `No such service: com.apple.instruments.dtservicehub` (iOS 17+/26) / LocWarp 跳「iPhone 上未偵測到 DDI」 | v0.2.58 起 LocWarp 不再自動掛 DDI,請用下列任一工具幫 iPhone 掛一次 DDI 後再回來使用:Xcode、愛思助手、3uTools、pymobiledevice3 CLI。也可先「設定 → 隱私權與安全性 → **開發者模式** 關閉,重開機,再次開啟」,然後用上述工具重新掛一次。 |
 | **開發者模式未顯示**(iOS 16+) | v0.2.61 起,LocWarp 連線後在狀態列會出現「**顯示開發者模式選項**」按鈕,點下去 iPhone 設定裡就會出現開發者模式(不用側載 IPA)。若按鈕失敗或想手動處理,可參考下方 [附錄:iPhone 開啟開發者模式(Windows 流程)](#附錄iphone-開啟開發者模式windows-流程) 的側載方式作為備援。 |
 
