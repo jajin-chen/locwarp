@@ -326,7 +326,7 @@ const App: React.FC = () => {
 
           let discovered: Array<{ ip: string; port: number; ports?: number[] }> = []
           try {
-            const dres = await api.wifiTunnelDiscover()
+            const dres = await api.wifiTunnelDiscover({ scan: false })
             discovered = (dres?.devices || []).map((d: any) => ({
               ip: String(d.ip),
               port: Number(d.port) || 49152,

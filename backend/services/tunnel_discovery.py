@@ -27,6 +27,16 @@ _SCAN_CONCURRENCY = 96
 # scans, and watchdog fallback.  The supplemental-discovery path below applies
 # its own overall deadline instead of weakening this shared connection probe.
 _PORT_SCAN_TIMEOUT = 0.35
+_MAX_OPEN_PORTS_PER_HOST = 32
+_MAX_SCAN_HOSTS = 8
+_MAX_UNVERIFIED_HOSTS = 4
+_LOCKDOWN_PORT = 62078
+
+
+class _TooManyOpenPorts(RuntimeError):
+    """Raised when a host accepts enough ports to indicate a proxy."""
+
+
 _probe_budgets: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop, asyncio.Semaphore
 ] = weakref.WeakKeyDictionary()
@@ -124,6 +134,44 @@ async def _scan_subnet_for_port(port: int = 49152) -> list[str]:
     return hits
 
 
+async def _probe_lockdownd(ip: str, timeout: float = 1.5) -> str:
+    """Verify a crowded scan candidate using lockdownd's QueryType reply."""
+    import plistlib
+    import struct
+
+    async with _probe_budget():
+        writer = None
+        try:
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(ip, _LOCKDOWN_PORT), timeout=timeout,
+                )
+            except (OSError, ConnectionError, asyncio.TimeoutError):
+                return "closed"
+            try:
+                payload = plistlib.dumps({"Label": "LocWarp", "Request": "QueryType"})
+                writer.write(struct.pack(">I", len(payload)) + payload)
+                await asyncio.wait_for(writer.drain(), timeout=timeout)
+                header = await asyncio.wait_for(reader.readexactly(4), timeout=timeout)
+                (size,) = struct.unpack(">I", header)
+                if size <= 0 or size > 64 * 1024:
+                    return "open"
+                body = await asyncio.wait_for(reader.readexactly(size), timeout=timeout)
+                reply = plistlib.loads(body)
+            except Exception:
+                return "open"
+            if isinstance(reply, dict) and reply.get("Type") == "com.apple.mobile.lockdown":
+                return "lockdown"
+            return "open"
+        finally:
+            if writer is not None:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except (OSError, ConnectionError):
+                    pass
+
+
 async def _scan_ports_for_ip(
     ip: str,
     start: int = 49152,
@@ -171,6 +219,10 @@ async def _scan_ports_for_ip(
                     result = None
                 if result is not None:
                     hits.append(result)
+                    if len(hits) > _MAX_OPEN_PORTS_PER_HOST:
+                        raise _TooManyOpenPorts(
+                            f"{ip} accepted more than {_MAX_OPEN_PORTS_PER_HOST} ports"
+                        )
             finally:
                 queue.task_done()
 
@@ -286,17 +338,19 @@ async def _browse_mdns() -> list[dict]:
 
 async def discover_tunnel_candidates(
     *,
+    scan: bool = True,
     browse=None,
     subnet_scan=None,
     port_scan=None,
 ) -> list[dict]:
     """Find iPhones on the local network.
 
-    mDNS is preferred, but a partial mDNS result must be supplemented by the
-    smart /24 scan (probe 49152 + 62078, then full-range port scan per *new*
-    live host).  Some Windows multi-NIC setups receive only one
-    ``_remotepairing`` advertisement even though the other phones are
-    reachable by TCP.  Deduped on (ip, port).
+    mDNS is preferred. When ``scan`` is true, a partial mDNS result is
+    supplemented by the smart /24 scan (probe 49152 + 62078, then full-range
+    port scan per *new* live host). Some Windows multi-NIC setups receive only
+    one ``_remotepairing`` advertisement even though the other phones are
+    reachable by TCP. Background callers can pass ``scan=False`` to use mDNS
+    only. Results are deduped on (ip, port).
 
     The browse / subnet_scan / port_scan hooks exist for tests only.
     """
@@ -321,7 +375,7 @@ async def discover_tunnel_candidates(
         if identity
     }
     partial_mdns = bool(results)
-    if len(mdns_devices) < _DISCOVERY_HOST_TARGET:
+    if scan and len(mdns_devices) < _DISCOVERY_HOST_TARGET:
         if results:
             logger.info(
                 "mDNS found %d host(s); supplementing with smart /24 scan",
@@ -341,6 +395,30 @@ async def discover_tunnel_candidates(
             # hosts.  Scan only newly discovered IPs so supplementation does
             # not make a healthy mDNS result pay a second full-range scan.
             candidates.difference_update(mdns_ips)
+            if len(candidates) > _MAX_SCAN_HOSTS:
+                ordered_candidates = sorted(candidates)
+                states = await asyncio.gather(*(
+                    _probe_lockdownd(ip) for ip in ordered_candidates
+                ))
+                verified = [
+                    ip for ip, state in zip(ordered_candidates, states)
+                    if state == "lockdown"
+                ]
+                unverified = [
+                    ip for ip, state in zip(ordered_candidates, states)
+                    if state == "open"
+                ]
+                logger.info(
+                    "Crowded subnet scan candidate set: %d lockdownd host(s), "
+                    "%d unverified host(s)", len(verified), len(unverified),
+                )
+                if len(unverified) > _MAX_UNVERIFIED_HOSTS:
+                    logger.warning(
+                        "Ignoring %d unverified scan candidates; subnet may be "
+                        "intercepted by a VPN or proxy", len(unverified),
+                    )
+                    unverified = []
+                candidates = set((verified + unverified)[:_MAX_SCAN_HOSTS])
             if candidates:
                 logger.info(
                     "Smart scan found %d new live host(s); full-range scanning each",
@@ -413,7 +491,7 @@ async def find_fallback_endpoints(
     Deduped on (ip, port); each phase tolerates failure independently.
     """
     port_scan = port_scan or _scan_ports_for_ip
-    discover = discover or discover_tunnel_candidates
+    discover = discover or (lambda: discover_tunnel_candidates(scan=False))
     out: list[tuple[str, int]] = []
     seen: set[tuple[str, int]] = set()
 

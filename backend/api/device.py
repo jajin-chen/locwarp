@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from models.schemas import DeviceInfo
 from core.windows_tunnel import HostTunnelError
 from services.tunnel_discovery import (
+    _TooManyOpenPorts,
     _get_primary_local_ip,
     _scan_ports_for_ip,
     discover_tunnel_candidates,
@@ -501,30 +502,33 @@ class WifiTunnelFindPortRequest(BaseModel):
 
 @router.post("/wifi/tunnel/find_port")
 async def wifi_tunnel_find_port(req: WifiTunnelFindPortRequest):
-    """Scan an iPhone IP across the IANA dynamic range (49152-65535) and return
-    every open TCP port. Used as the manual fallback when mDNS / Bonjour fails
-    because the user's router blocks multicast or the PC has VPN / virtual NICs
-    that hijack the broadcast path."""
+    """Scan an iPhone IP's dynamic ports for manual tunnel setup.
+
+    If a host accepts more than the scanner safety limit, report a likely VPN
+    or proxy instead of returning an unbounded set of false port candidates.
+    """
     ip = (req.ip or "").strip()
     if not ip:
         raise HTTPException(status_code=400, detail="ip required")
     try:
         ports = filter_remotepairing_ports(await _scan_ports_for_ip(ip))
+    except _TooManyOpenPorts:
+        return {"ip": ip, "ports": [], "proxy_suspected": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"ip": ip, "ports": ports}
 
 
 @router.get("/wifi/tunnel/discover")
-async def wifi_tunnel_discover():
+async def wifi_tunnel_discover(scan: bool = True):
     """Find iPhones on the local network.
 
-    mDNS (Bonjour RemotePairing broadcast) is preferred.  When it reports
-    fewer than the group-device target, the discovery service supplements it
-    with a smart /24 subnet scan so a partial multicast result cannot hide a
-    reachable phone.
+    mDNS (Bonjour RemotePairing broadcast) is preferred. When ``scan`` is
+    enabled and mDNS reports fewer than the group-device target, the discovery
+    service supplements it with a smart /24 subnet scan. Background callers
+    pass ``scan=false`` to keep discovery on mDNS only.
     """
-    devices = await discover_tunnel_candidates()
+    devices = await discover_tunnel_candidates(scan=scan)
     # A TCP scan reports one entry per open port. Collapse those entries by
     # IP so the frontend's device cap counts phones, not listeners, and pass
     # the remaining ports as backend handshake hints.

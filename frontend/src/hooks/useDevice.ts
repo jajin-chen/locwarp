@@ -366,7 +366,7 @@ export function useDevice(subscribe?: WsSubscribe) {
           // verified after connect (drop anything not pinned).
           try {
             if (hostTunnelErrorRef.current) return
-            const dres = await wifiTunnelDiscover().catch(() => ({ devices: [] }))
+            const dres = await wifiTunnelDiscover({ scan: false }).catch(() => ({ devices: [] }))
             // Discovery can take tens of seconds; another device may have
             // recovered while it was running. Revalidate ownership before
             // using the returned endpoints.
